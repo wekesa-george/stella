@@ -132,13 +132,13 @@
           </div>
 
           <%!-- Mobile Menu Button - Only visible on mobile --%>
-          <div class="lg:hidden relative group">
-            <button class="p-2 rounded hover:bg-base-300 transition-colors">
+          <div class="lg:hidden relative">
+            <button data-mobile-menu-toggle class="p-2 rounded hover:bg-base-300 transition-colors">
               <.icon name="hero-bars-3" class="size-5 text-base-content/70" />
             </button>
 
             <%!-- Mobile Dropdown Menu --%>
-            <div class="absolute top-full right-0 mt-1 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+            <div data-mobile-menu class="fixed top-16 left-1/2 -translate-x-1/2 mt-1 w-[calc(100vw-2rem)] max-w-sm opacity-0 invisible transition-all duration-200 z-50">
               <div class="bg-base-200 rounded border border-base-300 py-2 shadow-lg">
                 <a
                   href={~p"/"}

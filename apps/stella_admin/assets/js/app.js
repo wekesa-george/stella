@@ -62,6 +62,25 @@ liveSocket.connect()
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
 
+// Mobile menu toggle
+document.addEventListener('click', (e) => {
+  const mobileMenuButton = e.target.closest('[data-mobile-menu-toggle]')
+  if (mobileMenuButton) {
+    const menuDropdown = mobileMenuButton.nextElementSibling
+    if (menuDropdown) {
+      menuDropdown.classList.toggle('!opacity-100')
+      menuDropdown.classList.toggle('!visible')
+    }
+  } else {
+    // Close mobile menu when clicking outside
+    const openMenus = document.querySelectorAll('[data-mobile-menu].\\!opacity-100')
+    openMenus.forEach(menu => {
+      menu.classList.remove('!opacity-100')
+      menu.classList.remove('!visible')
+    })
+  }
+})
+
 // The lines below enable quality of life phoenix_live_reload
 // development features:
 //

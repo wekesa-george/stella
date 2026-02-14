@@ -297,21 +297,21 @@ defmodule StellaAdminWeb.TradingLive do
     ~H"""
     <div class="space-y-4">
       <%!-- Page Header --%>
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 class="text-2xl font-bold text-base-content">Trading Overview</h1>
+          <h1 class="text-xl sm:text-2xl font-bold text-base-content">Trading Overview</h1>
           <p class="text-sm text-base-content/60 mt-1">
             Monitor all active and recent trades across the platform
           </p>
         </div>
-        <button class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-content rounded text-sm font-medium transition-colors">
+        <button class="w-full sm:w-auto px-4 py-2 bg-primary hover:bg-primary/90 text-primary-content rounded text-sm font-medium transition-colors">
           <.icon name="hero-arrow-down-tray" class="inline size-4 mr-1" />
           Export Data
         </button>
       </div>
 
       <%!-- Stats Cards --%>
-      <div class="grid grid-cols-6 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Active Trades</p>
           <p class="text-2xl font-bold text-base-content mb-1">1,234</p>
@@ -350,7 +350,7 @@ defmodule StellaAdminWeb.TradingLive do
       </div>
 
       <%!-- Live Price Ticker & Chart --%>
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <%!-- Live Price Ticker --%>
         <div class="bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
@@ -398,7 +398,7 @@ defmodule StellaAdminWeb.TradingLive do
         </div>
 
         <%!-- Candlestick Chart --%>
-        <div class="col-span-2 bg-base-200 rounded border border-base-300">
+        <div class="lg:col-span-2 bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
             <div class="flex items-center justify-between">
               <h2 class="text-base font-semibold text-base-content">
@@ -430,7 +430,7 @@ defmodule StellaAdminWeb.TradingLive do
           <h2 class="text-base font-semibold text-base-content">Top Trading Pairs (24h)</h2>
         </div>
         <div class="p-4">
-          <div class="grid grid-cols-5 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <%= for pair <- @top_pairs do %>
               <div class="bg-base-300/30 rounded p-3 border border-base-300/50">
                 <div class="flex items-center justify-between mb-2">
@@ -469,9 +469,9 @@ defmodule StellaAdminWeb.TradingLive do
 
       <%!-- Active Trades --%>
       <div class="bg-base-200 rounded border border-base-300">
-        <div class="p-4 border-b border-base-300 flex items-center justify-between">
+        <div class="p-4 border-b border-base-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <h2 class="text-base font-semibold text-base-content">Active Trades</h2>
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center space-x-2 overflow-x-auto w-full sm:w-auto">
             <button
               phx-click="filter"
               phx-value-type="all"
@@ -509,7 +509,7 @@ defmodule StellaAdminWeb.TradingLive do
         </div>
 
         <div class="overflow-x-auto">
-          <table class="w-full">
+          <table class="w-full min-w-[900px]">
             <thead class="bg-base-300/50 border-b border-base-300">
               <tr>
                 <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Trader</th>
@@ -617,7 +617,7 @@ defmodule StellaAdminWeb.TradingLive do
         </div>
 
         <div class="overflow-x-auto">
-          <table class="w-full">
+          <table class="w-full min-w-[800px]">
             <thead class="bg-base-300/50 border-b border-base-300">
               <tr>
                 <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Trader</th>
