@@ -1,0 +1,340 @@
+<div class="min-h-screen bg-base-100">
+  <%!-- Top Navigation --%>
+  <header class="bg-base-200 border-b border-base-300">
+    <div class="px-6">
+      <div class="flex items-center justify-between h-16">
+        <%!-- Logo and Navigation --%>
+        <div class="flex items-center space-x-8">
+          <%!-- Logo --%>
+          <a href={~p"/"} class="flex items-center space-x-2">
+            <img src="/logo.png" alt="Stella" class="h-8 w-auto" />
+            <span class="text-lg font-bold text-base-content">Stella</span>
+          </a>
+
+          <%!-- Main Menu Items --%>
+          <nav class="flex items-center space-x-1 ml-8">
+            <%!-- Dashboard --%>
+            <a
+              href={~p"/"}
+              class={[
+                "flex items-center space-x-2 px-3 py-2 rounded text-sm font-medium transition-colors",
+                @current_page == :dashboard && "bg-primary text-base-100",
+                @current_page != :dashboard && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+              ]}
+            >
+              <.icon name="hero-home" class="size-4" />
+              <span>Dashboard</span>
+            </a>
+
+            <%!-- Users --%>
+            <a
+              href={~p"/users"}
+              class={[
+                "flex items-center space-x-2 px-3 py-2 rounded text-sm font-medium transition-colors",
+                @current_page == :users && "bg-primary text-base-100",
+                @current_page != :users && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+              ]}
+            >
+              <.icon name="hero-users" class="size-4" />
+              <span>Users</span>
+            </a>
+
+            <%!-- Trading --%>
+            <a
+              href={~p"/trading"}
+              class={[
+                "flex items-center space-x-2 px-3 py-2 rounded text-sm font-medium transition-colors",
+                @current_page == :trading && "bg-primary text-base-100",
+                @current_page != :trading && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+              ]}
+            >
+              <.icon name="hero-chart-bar" class="size-4" />
+              <span>Trading</span>
+            </a>
+
+            <%!-- Finance --%>
+            <a
+              href={~p"/finance"}
+              class={[
+                "flex items-center space-x-2 px-3 py-2 rounded text-sm font-medium transition-colors",
+                @current_page == :finance && "bg-primary text-base-100",
+                @current_page != :finance && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+              ]}
+            >
+              <.icon name="hero-currency-dollar" class="size-4" />
+              <span>Finance</span>
+            </a>
+
+            <%!-- More Dropdown --%>
+            <div class="relative group">
+              <button class="flex items-center space-x-2 px-3 py-2 rounded text-sm font-medium transition-colors text-base-content/70 hover:text-base-content hover:bg-base-300">
+                <.icon name="hero-ellipsis-horizontal" class="size-4" />
+                <span>More</span>
+                <.icon name="hero-chevron-down" class="size-3" />
+              </button>
+
+              <%!-- Dropdown Menu --%>
+              <div class="absolute top-full left-0 mt-1 w-56 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                <div class="bg-base-200 rounded border border-base-300 py-2 shadow-lg">
+                  <a
+                    href={~p"/content"}
+                    class="block px-4 py-2 text-sm text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  >
+                    <div class="flex items-center space-x-2">
+                      <.icon name="hero-document-text" class="size-4" />
+                      <span>Content</span>
+                    </div>
+                  </a>
+                  <a
+                    href={~p"/analytics"}
+                    class="block px-4 py-2 text-sm text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  >
+                    <div class="flex items-center space-x-2">
+                      <.icon name="hero-chart-pie" class="size-4" />
+                      <span>Analytics</span>
+                    </div>
+                  </a>
+                  <a
+                    href={~p"/support"}
+                    class="block px-4 py-2 text-sm text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  >
+                    <div class="flex items-center space-x-2">
+                      <.icon name="hero-chat-bubble-left-right" class="size-4" />
+                      <span>Support</span>
+                    </div>
+                  </a>
+                  <div class="border-t border-base-300 my-2"></div>
+                  <a
+                    href={~p"/settings"}
+                    class="block px-4 py-2 text-sm text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  >
+                    <div class="flex items-center space-x-2">
+                      <.icon name="hero-cog-6-tooth" class="size-4" />
+                      <span>Settings</span>
+                    </div>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </nav>
+        </div>
+
+        <%!-- Right Side: Search, Notifications, Profile --%>
+        <div class="flex items-center space-x-3">
+          <%!-- Search --%>
+          <div class="relative hidden md:block">
+            <.icon name="hero-magnifying-glass" class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-base-content/40 pointer-events-none z-10" />
+            <input
+              type="text"
+              placeholder="Search..."
+              class="bg-base-300 border-0 rounded pl-9 pr-3 py-2 text-sm text-base-content placeholder:text-base-content/40 focus:outline-none focus:ring-2 focus:ring-primary w-64"
+            />
+          </div>
+
+          <%!-- Notifications --%>
+          <button class="relative p-2 rounded hover:bg-base-300 transition-colors">
+            <.icon name="hero-bell" class="size-5 text-base-content/70" />
+            <span class="absolute top-1 right-1 w-2 h-2 bg-error rounded-full"></span>
+          </button>
+
+          <%!-- Theme Toggle --%>
+          <.theme_toggle />
+
+          <%!-- Profile Dropdown --%>
+          <div class="relative group">
+            <button class="flex items-center space-x-2 p-2 rounded hover:bg-base-300 transition-colors">
+              <div class="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
+                <span class="text-primary text-sm font-bold">AD</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <%!-- Main Content --%>
+  <main class="p-6">
+    <%= @inner_content %>
+  </main>
+
+  <%!-- Footer --%>
+  <footer class="bg-base-200 border-t border-base-300 mt-8">
+    <div class="px-6 py-8">
+      <div class="grid grid-cols-5 gap-8 mb-8">
+        <%!-- Company Info --%>
+        <div class="col-span-1">
+          <div class="flex items-center space-x-2 mb-4">
+            <img src="/logo.png" alt="Stella" class="h-6 w-auto" />
+            <span class="text-base font-bold text-base-content">Stella</span>
+          </div>
+          <p class="text-xs text-base-content/60 mb-4">
+            Social crypto trading platform. Follow expert traders and copy their strategies.
+          </p>
+          <div class="flex items-center space-x-3">
+            <a href="#" class="text-base-content/60 hover:text-primary transition-colors">
+              <.icon name="hero-globe-alt" class="size-4" />
+            </a>
+            <a href="#" class="text-base-content/60 hover:text-primary transition-colors">
+              <.icon name="hero-chat-bubble-left-right" class="size-4" />
+            </a>
+            <a href="#" class="text-base-content/60 hover:text-primary transition-colors">
+              <.icon name="hero-envelope" class="size-4" />
+            </a>
+          </div>
+        </div>
+
+        <%!-- Platform --%>
+        <div>
+          <h3 class="text-sm font-semibold text-base-content mb-3">Platform</h3>
+          <ul class="space-y-2">
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Dashboard
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Users
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Trading
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Finance
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Analytics
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <%!-- Resources --%>
+        <div>
+          <h3 class="text-sm font-semibold text-base-content mb-3">Resources</h3>
+          <ul class="space-y-2">
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Documentation
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                API Reference
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Support Center
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Status Page
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Changelog
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <%!-- Company --%>
+        <div>
+          <h3 class="text-sm font-semibold text-base-content mb-3">Company</h3>
+          <ul class="space-y-2">
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                About Us
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Careers
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Blog
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Press Kit
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Contact
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <%!-- Legal --%>
+        <div>
+          <h3 class="text-sm font-semibold text-base-content mb-3">Legal</h3>
+          <ul class="space-y-2">
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Privacy Policy
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Terms of Service
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Cookie Policy
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Compliance
+              </a>
+            </li>
+            <li>
+              <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+                Licenses
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <%!-- Bottom Bar --%>
+      <div class="pt-6 border-t border-base-300">
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-base-content/60">
+            © 2026 Stella. All rights reserved.
+          </p>
+          <div class="flex items-center space-x-6">
+            <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+              Security
+            </a>
+            <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
+              Sitemap
+            </a>
+            <div class="flex items-center space-x-2">
+              <span class="text-xs text-base-content/60">Built with</span>
+              <span class="text-xs text-primary font-medium">Phoenix & LiveView</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<.flash_group flash={@flash} />

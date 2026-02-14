@@ -1,0 +1,316 @@
+/* See the Tailwind configuration guide for advanced usage
+   https://tailwindcss.com/docs/configuration */
+
+@import "tailwindcss" source(none);
+@source "../css";
+@source "../js";
+@source "../../lib/stella_admin_web";
+
+/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
+   The heroicons installation itself is managed by your mix.exs */
+@plugin "../vendor/heroicons";
+
+/* daisyUI Tailwind Plugin. You can update this file by fetching the latest version with:
+   curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js
+   Make sure to look at the daisyUI changelog: https://daisyui.com/docs/changelog/ */
+@plugin "../vendor/daisyui" {
+  themes: false;
+}
+
+/* daisyUI theme plugin. You can update this file by fetching the latest version with:
+  curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js
+  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
+  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
+@plugin "../vendor/daisyui-theme" {
+  name: "dark";
+  default: true;
+  prefersdark: true;
+  color-scheme: "dark";
+  /* Surfaces - Very dark background like reference */
+  --color-base-100: oklch(15% 0.01 250);
+  --color-base-200: oklch(18% 0.012 250);
+  --color-base-300: oklch(25% 0.015 250);
+  --color-base-content: oklch(95% 0.005 250);
+  /* Primary - Lime green accent (like reference) */
+  --color-primary: oklch(85% 0.20 130);
+  --color-primary-content: oklch(15% 0.01 130);
+  /* Secondary - Darker lime */
+  --color-secondary: oklch(65% 0.18 135);
+  --color-secondary-content: oklch(98% 0.005 135);
+  /* Accent - Bright lime */
+  --color-accent: oklch(88% 0.22 128);
+  --color-accent-content: oklch(15% 0.01 128);
+  /* Neutral - Dark gray */
+  --color-neutral: oklch(20% 0.01 250);
+  --color-neutral-content: oklch(90% 0.005 250);
+  /* Info - Soft blue */
+  --color-info: oklch(65% 0.12 240);
+  --color-info-content: oklch(98% 0.005 240);
+  /* Success - Lime green */
+  --color-success: oklch(85% 0.20 130);
+  --color-success-content: oklch(15% 0.01 130);
+  /* Warning - Orange */
+  --color-warning: oklch(75% 0.15 60);
+  --color-warning-content: oklch(15% 0.01 60);
+  /* Error - Red */
+  --color-error: oklch(60% 0.20 25);
+  --color-error-content: oklch(98% 0.005 25);
+  /* Rounded corners - minimal */
+  --radius-selector: 2px;
+  --radius-field: 2px;
+  --radius-box: 2px;
+  --size-selector: 2px;
+  --size-field: 2px;
+  --border: 1px;
+  --depth: 2;
+  --noise: 0;
+}
+
+@plugin "../vendor/daisyui-theme" {
+  name: "light";
+  default: false;
+  prefersdark: false;
+  color-scheme: "light";
+  /* Surfaces - Soft gray/blue background with subtle gradient feel */
+  --color-base-100: oklch(99% 0.002 250);
+  --color-base-200: oklch(96% 0.004 250);
+  --color-base-300: oklch(92% 0.006 250);
+  --color-base-content: oklch(25% 0.012 250);
+  /* Primary - Lime green accent (like dark theme) */
+  --color-primary: oklch(65% 0.18 130);
+  --color-primary-content: oklch(98% 0.004 130);
+  /* Secondary - Darker lime */
+  --color-secondary: oklch(60% 0.16 135);
+  --color-secondary-content: oklch(98% 0.004 135);
+  /* Accent - Bright lime */
+  --color-accent: oklch(70% 0.20 128);
+  --color-accent-content: oklch(15% 0.01 128);
+  /* Neutral - Soft gray */
+  --color-neutral: oklch(55% 0.008 250);
+  --color-neutral-content: oklch(98% 0.002 250);
+  /* Info - Soft cyan */
+  --color-info: oklch(70% 0.11 200);
+  --color-info-content: oklch(25% 0.012 200);
+  /* Success - Lime green */
+  --color-success: oklch(65% 0.18 130);
+  --color-success-content: oklch(98% 0.004 130);
+  /* Warning - Soft amber/peach */
+  --color-warning: oklch(78% 0.12 75);
+  --color-warning-content: oklch(25% 0.012 75);
+  /* Error - Soft coral/pink (like in reference) */
+  --color-error: oklch(72% 0.14 15);
+  --color-error-content: oklch(98% 0.004 15);
+  /* Rounded corners - minimal */
+  --radius-selector: 2px;
+  --radius-field: 2px;
+  --radius-box: 2px;
+  --size-selector: 2px;
+  --size-field: 2px;
+  --border: 1px;
+  --depth: 2;
+  --noise: 0;
+}
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* Use the data attribute for dark mode  */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* Stella Admin Custom Styles */
+
+/* Soft shadow system matching the reference design */
+.shadow-soft {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.shadow-soft-lg {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.shadow-soft-xl {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Dark mode shadows */
+[data-theme="dark"] .shadow-soft {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .shadow-soft-lg {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .shadow-soft-xl {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
+/* Subtle gradient backgrounds (like the reference) */
+.bg-gradient-subtle {
+  background: linear-gradient(135deg, var(--color-base-100) 0%, var(--color-base-200) 100%);
+}
+
+/* Card component with soft aesthetics */
+.card-soft {
+  border-radius: 2px;
+  background-color: var(--color-base-100);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 1.5rem;
+}
+
+[data-theme="dark"] .card-soft {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Badge/pill components with soft colors */
+.badge-soft {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.badge-soft-coral {
+  background-color: rgba(var(--color-error), 0.1);
+  color: var(--color-error);
+}
+
+.badge-soft-peach {
+  background-color: rgba(var(--color-warning), 0.1);
+  color: var(--color-warning);
+}
+
+.badge-soft-blue {
+  background-color: rgba(var(--color-primary), 0.1);
+  color: var(--color-primary);
+}
+
+.badge-soft-green {
+  background-color: rgba(var(--color-success), 0.1);
+  color: var(--color-success);
+}
+
+/* Top navigation styles */
+.top-nav {
+  background-color: var(--color-base-100);
+  border-bottom-width: 1px;
+  border-color: var(--color-base-300);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Breadcrumb styles */
+.breadcrumb-item {
+  color: rgba(var(--color-base-content), 0.6);
+  transition: color 200ms;
+}
+
+.breadcrumb-item:hover {
+  color: var(--color-base-content);
+}
+
+.breadcrumb-item-active {
+  color: var(--color-base-content);
+  font-weight: 500;
+}
+
+/* Metric card number styling */
+.metric-value {
+  font-size: 1.875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-label {
+  font-size: 0.875rem;
+  color: rgba(var(--color-base-content), 0.6);
+}
+
+/* Trend indicators */
+.trend-up {
+  color: var(--color-success);
+}
+
+.trend-down {
+  color: var(--color-error);
+}
+
+/* Status indicators with pulse animation */
+.status-pulse {
+  position: relative;
+}
+
+.status-pulse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+  opacity: 0.75;
+}
+
+/* Button hover states */
+.btn-hover-lift {
+  transition: all 200ms;
+}
+
+.btn-hover-lift:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.08);
+  transform: translateY(-0.125rem);
+}
+
+/* Input styles to match reference */
+.input-soft {
+  border-radius: 2px;
+  border-width: 1px;
+  border-color: var(--color-base-300);
+  background-color: var(--color-base-100);
+  padding: 0.5rem 1rem;
+  transition: all 200ms;
+}
+
+.input-soft:focus {
+  outline: none;
+  ring-width: 2px;
+  ring-color: rgba(var(--color-primary), 0.5);
+  border-color: var(--color-primary);
+}
+
+/* Search input with icon */
+.input-soft.has-icon-left {
+  padding-left: 2.5rem;
+}
+
+/* Table styles */
+.table-soft {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-soft thead {
+  font-size: 0.875rem;
+  color: rgba(var(--color-base-content), 0.6);
+  font-weight: 500;
+}
+
+.table-soft tbody tr {
+  transition: background-color 200ms;
+}
+
+.table-soft tbody tr:hover {
+  background-color: rgba(var(--color-base-200), 0.5);
+}
+
+.table-soft td,
+.table-soft th {
+  padding: 0.75rem 1rem;
+}
+
+/* This file is for your main application CSS */
