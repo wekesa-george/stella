@@ -264,8 +264,8 @@ defmodule StellaAdminWeb.DashboardLive do
     ~H"""
     <div class="space-y-4">
       <%!-- Page Header --%>
-      <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-base-content">Dashboard Overview</h1>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <h1 class="text-xl sm:text-2xl font-bold text-base-content">Dashboard Overview</h1>
         <button class="px-4 py-2 bg-base-200 hover:bg-base-300 rounded text-sm font-medium text-base-content border border-base-300">
           Last 24 Hours
           <.icon name="hero-chevron-down" class="inline size-4 ml-1" />
@@ -273,7 +273,7 @@ defmodule StellaAdminWeb.DashboardLive do
       </div>
 
       <%!-- Key Metric Cards --%>
-      <div class="grid grid-cols-6 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <.stat_card
           title="Total Users"
           value="12,543"
@@ -315,7 +315,7 @@ defmodule StellaAdminWeb.DashboardLive do
       </div>
 
       <%!-- Main Grid - Revenue and Trading Volume --%>
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <%!-- Platform Revenue Trend --%>
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <div class="mb-3">
@@ -341,7 +341,7 @@ defmodule StellaAdminWeb.DashboardLive do
             </button>
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <%!-- Trading Pairs Donut Chart --%>
             <div class="flex items-center justify-center">
               <div
@@ -419,9 +419,9 @@ defmodule StellaAdminWeb.DashboardLive do
       </div>
 
       <%!-- Top Traders and Quick Stats --%>
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <%!-- Top Traders Table --%>
-        <div class="col-span-2 bg-base-200 rounded p-4 border border-base-300">
+        <div class="lg:col-span-2 bg-base-200 rounded p-4 border border-base-300 overflow-x-auto">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-base font-semibold text-base-content">Top Performing Traders</h2>
             <button class="p-1 hover:bg-base-300 rounded">
@@ -471,7 +471,7 @@ defmodule StellaAdminWeb.DashboardLive do
         </div>
 
         <%!-- Quick Stats Column --%>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-3">
           <%!-- Average Copy Success Rate --%>
           <div class="bg-base-200 rounded p-3 border border-base-300">
             <p class="text-xs text-base-content/60 mb-1">Copy Success Rate</p>
@@ -517,10 +517,10 @@ defmodule StellaAdminWeb.DashboardLive do
       </div>
 
       <%!-- Charts Row --%>
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <%!-- Trading Volume Trend --%>
-        <div class="bg-base-200 rounded p-6 border border-base-300">
-          <h3 class="text-lg font-semibold text-base-content mb-4">Trading Volume Trend</h3>
+        <div class="bg-base-200 rounded p-4 sm:p-6 border border-base-300">
+          <h3 class="text-base sm:text-lg font-semibold text-base-content mb-4">Trading Volume Trend</h3>
           <div
             id="volume-chart"
             phx-hook="ApexChart"
@@ -531,8 +531,8 @@ defmodule StellaAdminWeb.DashboardLive do
         </div>
 
         <%!-- User Growth --%>
-        <div class="bg-base-200 rounded p-6 border border-base-300">
-          <h3 class="text-lg font-semibold text-base-content mb-4">User Growth</h3>
+        <div class="bg-base-200 rounded p-4 sm:p-6 border border-base-300">
+          <h3 class="text-base sm:text-lg font-semibold text-base-content mb-4">User Growth</h3>
           <div
             id="user-growth-chart"
             phx-hook="ApexChart"
