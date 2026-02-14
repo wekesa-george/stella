@@ -1,23 +1,16 @@
 # Find eligible builder and runner images on Docker Hub. We use Ubuntu/Debian
 # instead of Alpine to avoid DNS resolution issues in production.
 #
-# https://hub.docker.com/r/hexpm/elixir/tags?page=1&name=ubuntu
-# https://hub.docker.com/_/ubuntu?tab=tags
+# https://hub.docker.com/r/hexpm/elixir/tags
+# https://hub.docker.com/_/debian
 #
 # This file is based on these images:
 #
 #   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian?tab=tags&page=1&name=bookworm-slim - for the release image
-#   - https://pkgs.org/ - resource for finding needed packages
+#   - https://hub.docker.com/_/debian - for the release image
 #
-ARG ELIXIR_VERSION=1.17.3
-ARG OTP_VERSION=27.2
-ARG DEBIAN_VERSION=bookworm-20240926-slim
 
-ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
-
-FROM ${BUILDER_IMAGE} AS builder
+FROM hexpm/elixir:1.17.3-erlang-27.2-debian-bookworm-20240812-slim AS builder
 
 # Install build dependencies
 RUN apt-get update -y && apt-get install -y build-essential git curl \
@@ -69,7 +62,7 @@ RUN mix release
 
 # Start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
-FROM ${RUNNER_IMAGE}
+FROM debian:bookworm-20240812-slim
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
