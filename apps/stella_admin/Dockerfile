@@ -1,4 +1,5 @@
-FROM elixir:latest AS builder
+# Use Debian-based Elixir image
+FROM elixir:1.17-slim AS builder
 
 # Install build dependencies
 RUN apt-get update -y && apt-get install -y build-essential git curl \
@@ -52,7 +53,8 @@ RUN mix release
 
 # Start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
-FROM debian:bookworm-slim
+# Use same Debian version as builder to ensure GLIBC compatibility
+FROM elixir:1.17-slim
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
