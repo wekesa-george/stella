@@ -14,7 +14,9 @@ defmodule StellaAdminWeb.ObservabilityLive do
      |> assign(:current_page, :observability)
      |> assign(:system_health, system_health_metrics())
      |> assign(:services_status, services_status())
-     |> assign(:recent_logs, recent_logs())
+     |> assign(:all_logs, all_logs())
+     |> assign(:selected_service, "All")
+     |> assign(:recent_logs, filter_logs(all_logs(), "All"))
      |> assign(:performance_metrics, performance_metrics())
      |> assign(:error_rates, error_rates())
      |> assign(:cpu_chart, cpu_usage_chart())
@@ -33,6 +35,14 @@ defmodule StellaAdminWeb.ObservabilityLive do
      socket
      |> assign(:system_health, system_health_metrics())
      |> assign(:performance_metrics, performance_metrics())}
+  end
+
+  @impl true
+  def handle_event("filter_logs", %{"service" => service}, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_service, service)
+     |> assign(:recent_logs, filter_logs(socket.assigns.all_logs, service))}
   end
 
   defp system_health_metrics do
@@ -63,14 +73,38 @@ defmodule StellaAdminWeb.ObservabilityLive do
     ]
   end
 
-  defp recent_logs do
+  defp all_logs do
     [
       %{level: "info", message: "User authentication successful", timestamp: "2 minutes ago", service: "Auth"},
       %{level: "error", message: "Failed to connect to external API", timestamp: "5 minutes ago", service: "Integration"},
       %{level: "warn", message: "High memory usage detected", timestamp: "8 minutes ago", service: "System"},
       %{level: "info", message: "Trade executed successfully", timestamp: "10 minutes ago", service: "Trading"},
-      %{level: "info", message: "Cache cleared for user sessions", timestamp: "15 minutes ago", service: "Cache"}
+      %{level: "info", message: "Cache cleared for user sessions", timestamp: "15 minutes ago", service: "Cache"},
+      %{level: "info", message: "Database query completed", timestamp: "3 minutes ago", service: "Database"},
+      %{level: "error", message: "Payment gateway timeout", timestamp: "12 minutes ago", service: "Payment"},
+      %{level: "warn", message: "Email queue size growing", timestamp: "7 minutes ago", service: "Email"},
+      %{level: "info", message: "New user registered", timestamp: "1 minute ago", service: "Auth"},
+      %{level: "error", message: "Rate limit exceeded", timestamp: "4 minutes ago", service: "API"},
+      %{level: "info", message: "Background job completed", timestamp: "9 minutes ago", service: "Jobs"},
+      %{level: "warn", message: "Slow database query detected", timestamp: "11 minutes ago", service: "Database"},
+      %{level: "info", message: "Price data updated", timestamp: "6 minutes ago", service: "Market"},
+      %{level: "info", message: "Session expired", timestamp: "14 minutes ago", service: "Auth"},
+      %{level: "error", message: "CDN connection failed", timestamp: "16 minutes ago", service: "CDN"}
     ]
+  end
+
+  defp filter_logs(logs, "All"), do: Enum.take(logs, 10)
+  defp filter_logs(logs, service) do
+    logs
+    |> Enum.filter(fn log -> log.service == service end)
+    |> Enum.take(10)
+  end
+
+  defp get_unique_services(logs) do
+    logs
+    |> Enum.map(& &1.service)
+    |> Enum.uniq()
+    |> Enum.sort()
   end
 
   defp performance_metrics do
@@ -94,83 +128,71 @@ defmodule StellaAdminWeb.ObservabilityLive do
   end
 
   defp cpu_usage_chart do
-    %{
+    Jason.encode!(%{
       series: [
         %{
           name: "CPU Usage",
           data: Enum.map(1..20, fn _ -> :rand.uniform(100) end)
         }
       ],
-      options: %{
-        chart: %{type: "area", height: 300, toolbar: %{show: false}},
-        dataLabels: %{enabled: false},
-        stroke: %{curve: "smooth", width: 2},
-        colors: ["#a3e635"],
-        fill: %{
-          type: "gradient",
-          gradient: %{
-            shadeIntensity: 1,
-            opacityFrom: 0.7,
-            opacityTo: 0.3
-          }
-        },
-        xaxis: %{
-          categories: Enum.map(1..20, fn i -> "#{i}m" end),
-          labels: %{style: %{colors: "#9ca3af"}}
-        },
-        yaxis: %{
-          labels: %{
-            style: %{colors: "#9ca3af"},
-            formatter: "function(value) { return value + '%' }"
-          },
-          max: 100
-        },
-        grid: %{borderColor: "#374151"}
-      }
-    }
-    |> Jason.encode!()
+      chart: %{type: "area", height: 300, toolbar: %{show: false}},
+      dataLabels: %{enabled: false},
+      stroke: %{curve: "smooth", width: 2},
+      colors: ["#a3e635"],
+      fill: %{
+        type: "gradient",
+        gradient: %{
+          shadeIntensity: 1,
+          opacityFrom: 0.7,
+          opacityTo: 0.3
+        }
+      },
+      xaxis: %{
+        categories: Enum.map(1..20, fn i -> "#{i}m" end),
+        labels: %{style: %{colors: "#9ca3af"}}
+      },
+      yaxis: %{
+        labels: %{style: %{colors: "#9ca3af"}},
+        max: 100
+      },
+      grid: %{borderColor: "#374151"}
+    })
   end
 
   defp memory_usage_chart do
-    %{
+    Jason.encode!(%{
       series: [
         %{
           name: "Memory Usage",
           data: Enum.map(1..20, fn _ -> :rand.uniform(100) end)
         }
       ],
-      options: %{
-        chart: %{type: "area", height: 300, toolbar: %{show: false}},
-        dataLabels: %{enabled: false},
-        stroke: %{curve: "smooth", width: 2},
-        colors: ["#3b82f6"],
-        fill: %{
-          type: "gradient",
-          gradient: %{
-            shadeIntensity: 1,
-            opacityFrom: 0.7,
-            opacityTo: 0.3
-          }
-        },
-        xaxis: %{
-          categories: Enum.map(1..20, fn i -> "#{i}m" end),
-          labels: %{style: %{colors: "#9ca3af"}}
-        },
-        yaxis: %{
-          labels: %{
-            style: %{colors: "#9ca3af"},
-            formatter: "function(value) { return value + '%' }"
-          },
-          max: 100
-        },
-        grid: %{borderColor: "#374151"}
-      }
-    }
-    |> Jason.encode!()
+      chart: %{type: "area", height: 300, toolbar: %{show: false}},
+      dataLabels: %{enabled: false},
+      stroke: %{curve: "smooth", width: 2},
+      colors: ["#3b82f6"],
+      fill: %{
+        type: "gradient",
+        gradient: %{
+          shadeIntensity: 1,
+          opacityFrom: 0.7,
+          opacityTo: 0.3
+        }
+      },
+      xaxis: %{
+        categories: Enum.map(1..20, fn i -> "#{i}m" end),
+        labels: %{style: %{colors: "#9ca3af"}}
+      },
+      yaxis: %{
+        labels: %{style: %{colors: "#9ca3af"}},
+        max: 100
+      },
+      grid: %{borderColor: "#374151"}
+    })
   end
 
   defp response_time_chart do
-    %{
+    Jason.encode!(%{
       series: [
         %{
           name: "Avg Response Time",
@@ -181,28 +203,22 @@ defmodule StellaAdminWeb.ObservabilityLive do
           data: Enum.map(1..20, fn _ -> 50 + :rand.uniform(100) end)
         }
       ],
-      options: %{
-        chart: %{type: "line", height: 300, toolbar: %{show: false}},
-        dataLabels: %{enabled: false},
-        stroke: %{curve: "smooth", width: 2},
-        colors: ["#a3e635", "#fb923c"],
-        xaxis: %{
-          categories: Enum.map(1..20, fn i -> "#{i}m" end),
-          labels: %{style: %{colors: "#9ca3af"}}
-        },
-        yaxis: %{
-          labels: %{
-            style: %{colors: "#9ca3af"},
-            formatter: "function(value) { return value + 'ms' }"
-          }
-        },
-        grid: %{borderColor: "#374151"},
-        legend: %{
-          labels: %{colors: "#9ca3af"}
-        }
+      chart: %{type: "line", height: 300, toolbar: %{show: false}},
+      dataLabels: %{enabled: false},
+      stroke: %{curve: "smooth", width: 2},
+      colors: ["#a3e635", "#fb923c"],
+      xaxis: %{
+        categories: Enum.map(1..20, fn i -> "#{i}m" end),
+        labels: %{style: %{colors: "#9ca3af"}}
+      },
+      yaxis: %{
+        labels: %{style: %{colors: "#9ca3af"}}
+      },
+      grid: %{borderColor: "#374151"},
+      legend: %{
+        labels: %{colors: "#9ca3af"}
       }
-    }
-    |> Jason.encode!()
+    })
   end
 
   defp database_metrics do
@@ -422,78 +438,6 @@ defmodule StellaAdminWeb.ObservabilityLive do
         </div>
       </div>
 
-      <%!-- Services Status & Recent Logs --%>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <%!-- Services Status --%>
-        <div class="bg-base-200 rounded border border-base-300">
-          <div class="p-4 border-b border-base-300">
-            <h2 class="text-base font-semibold text-base-content">Services Status</h2>
-          </div>
-          <div class="p-4">
-            <div class="space-y-3">
-              <%= for service <- @services_status do %>
-                <div class="flex items-center justify-between p-3 bg-base-300/30 rounded border border-base-300/50">
-                  <div class="flex items-center space-x-3">
-                    <div class={[
-                      "w-2 h-2 rounded-full",
-                      service.status == "healthy" && "bg-success",
-                      service.status == "warning" && "bg-warning",
-                      service.status == "error" && "bg-error"
-                    ]}>
-                    </div>
-                    <div>
-                      <p class="text-sm font-medium text-base-content"><%= service.name %></p>
-                      <p class="text-xs text-base-content/60">
-                        <%= service.response_time %> · <%= service.uptime %> uptime
-                      </p>
-                    </div>
-                  </div>
-                  <span class={[
-                    "px-2 py-1 rounded text-xs font-medium",
-                    service.status == "healthy" && "bg-success/10 text-success",
-                    service.status == "warning" && "bg-warning/10 text-warning",
-                    service.status == "error" && "bg-error/10 text-error"
-                  ]}>
-                    <%= String.capitalize(service.status) %>
-                  </span>
-                </div>
-              <% end %>
-            </div>
-          </div>
-        </div>
-
-        <%!-- Recent Logs --%>
-        <div class="bg-base-200 rounded border border-base-300">
-          <div class="p-4 border-b border-base-300">
-            <h2 class="text-base font-semibold text-base-content">Recent Logs</h2>
-          </div>
-          <div class="p-4">
-            <div class="space-y-3">
-              <%= for log <- @recent_logs do %>
-                <div class="flex items-start space-x-3 p-3 bg-base-300/30 rounded border border-base-300/50">
-                  <div class={[
-                    "px-2 py-0.5 rounded text-xs font-medium uppercase mt-0.5",
-                    log.level == "error" && "bg-error/10 text-error",
-                    log.level == "warn" && "bg-warning/10 text-warning",
-                    log.level == "info" && "bg-info/10 text-info"
-                  ]}>
-                    <%= log.level %>
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm text-base-content"><%= log.message %></p>
-                    <div class="flex items-center space-x-2 mt-1">
-                      <span class="text-xs text-base-content/60"><%= log.service %></span>
-                      <span class="text-xs text-base-content/40">·</span>
-                      <span class="text-xs text-base-content/60"><%= log.timestamp %></span>
-                    </div>
-                  </div>
-                </div>
-              <% end %>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <%!-- System Charts --%>
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <%!-- CPU Usage Chart --%>
@@ -541,6 +485,114 @@ defmodule StellaAdminWeb.ObservabilityLive do
               class="w-full"
             >
             </div>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Services Status --%>
+      <div class="bg-base-200 rounded border border-base-300">
+        <div class="p-4 border-b border-base-300">
+          <h2 class="text-base font-semibold text-base-content">Services Status</h2>
+        </div>
+        <div class="p-4">
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+            <%= for service <- @services_status do %>
+              <div class="bg-base-300/30 rounded p-4 border border-base-300/50">
+                <div class="flex items-center justify-between mb-2">
+                  <div class={[
+                    "w-2 h-2 rounded-full",
+                    service.status == "healthy" && "bg-success",
+                    service.status == "warning" && "bg-warning",
+                    service.status == "error" && "bg-error"
+                  ]}>
+                  </div>
+                  <span class={[
+                    "px-2 py-0.5 rounded text-[10px] font-medium",
+                    service.status == "healthy" && "bg-success/10 text-success",
+                    service.status == "warning" && "bg-warning/10 text-warning",
+                    service.status == "error" && "bg-error/10 text-error"
+                  ]}>
+                    <%= String.capitalize(service.status) %>
+                  </span>
+                </div>
+                <p class="text-sm font-medium text-base-content mb-2"><%= service.name %></p>
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-base-content/60">Response:</span>
+                    <span class="text-base-content font-medium"><%= service.response_time %></span>
+                  </div>
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-base-content/60">Uptime:</span>
+                    <span class="text-base-content font-medium"><%= service.uptime %></span>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Recent Logs --%>
+      <div class="bg-base-200 rounded border border-base-300">
+        <div class="p-4 border-b border-base-300">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <h2 class="text-base font-semibold text-base-content">Recent Logs</h2>
+            <div class="flex items-center space-x-2 overflow-x-auto w-full sm:w-auto">
+              <button
+                phx-click="filter_logs"
+                phx-value-service="All"
+                class={[
+                  "px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors",
+                  @selected_service == "All" && "bg-primary text-primary-content",
+                  @selected_service != "All" && "bg-base-300 text-base-content hover:bg-base-content/10"
+                ]}
+              >
+                All
+              </button>
+              <%= for service <- get_unique_services(@all_logs) do %>
+                <button
+                  phx-click="filter_logs"
+                  phx-value-service={service}
+                  class={[
+                    "px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors",
+                    @selected_service == service && "bg-primary text-primary-content",
+                    @selected_service != service && "bg-base-300 text-base-content hover:bg-base-content/10"
+                  ]}
+                >
+                  <%= service %>
+                </button>
+              <% end %>
+            </div>
+          </div>
+        </div>
+        <div class="p-4">
+          <div class="space-y-3">
+            <%= if Enum.empty?(@recent_logs) do %>
+              <div class="text-center py-8">
+                <p class="text-sm text-base-content/60">No logs found for <%= @selected_service %></p>
+              </div>
+            <% else %>
+              <%= for log <- @recent_logs do %>
+                <div class="flex items-start space-x-3 p-3 bg-base-300/30 rounded border border-base-300/50">
+                  <div class={[
+                    "px-2 py-0.5 rounded text-xs font-medium uppercase mt-0.5",
+                    log.level == "error" && "bg-error/10 text-error",
+                    log.level == "warn" && "bg-warning/10 text-warning",
+                    log.level == "info" && "bg-info/10 text-info"
+                  ]}>
+                    <%= log.level %>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-base-content"><%= log.message %></p>
+                    <div class="flex items-center space-x-2 mt-1">
+                      <span class="text-xs text-base-content/60"><%= log.service %></span>
+                      <span class="text-xs text-base-content/40">·</span>
+                      <span class="text-xs text-base-content/60"><%= log.timestamp %></span>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            <% end %>
           </div>
         </div>
       </div>
@@ -663,112 +715,115 @@ defmodule StellaAdminWeb.ObservabilityLive do
         </div>
       </div>
 
-      <%!-- API Endpoints Monitoring --%>
-      <div class="bg-base-200 rounded border border-base-300">
-        <div class="p-4 border-b border-base-300">
-          <h2 class="text-base font-semibold text-base-content">API Endpoints Health</h2>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full min-w-[900px]">
-            <thead class="bg-base-300/50 border-b border-base-300">
-              <tr>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                  Endpoint
-                </th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Method</th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Status</th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                  Avg Response
-                </th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                  Requests/min
-                </th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                  Error Rate
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <%= for endpoint <- @api_endpoints do %>
-                <tr class="border-b border-base-300 hover:bg-base-300/30 transition-colors">
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm font-mono text-base-content"><%= endpoint.endpoint %></span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class={[
-                      "badge badge-xs",
-                      endpoint.method == "GET" && "badge-info",
-                      endpoint.method == "POST" && "badge-success",
-                      endpoint.method == "PUT" && "badge-warning",
-                      endpoint.method == "DELETE" && "badge-error"
-                    ]}>
-                      <%= endpoint.method %>
-                    </span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class={[
-                      "px-2 py-1 rounded text-xs font-medium",
-                      endpoint.status == "healthy" && "bg-success/10 text-success",
-                      endpoint.status == "warning" && "bg-warning/10 text-warning",
-                      endpoint.status == "error" && "bg-error/10 text-error"
-                    ]}>
-                      <%= String.capitalize(endpoint.status) %>
-                    </span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm text-base-content"><%= endpoint.avg_response %></span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm text-base-content"><%= endpoint.requests_min %></span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm text-base-content"><%= endpoint.error_rate %></span>
-                  </td>
+      <%!-- API Endpoints & Error Rates --%>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <%!-- API Endpoints Monitoring --%>
+        <div class="bg-base-200 rounded border border-base-300">
+          <div class="p-4 border-b border-base-300">
+            <h2 class="text-base font-semibold text-base-content">API Endpoints Health</h2>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[600px]">
+              <thead class="bg-base-300/50 border-b border-base-300">
+                <tr>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                    Endpoint
+                  </th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Method</th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Status</th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                    Avg Response
+                  </th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                    Requests/min
+                  </th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                    Error Rate
+                  </th>
                 </tr>
-              <% end %>
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                <%= for endpoint <- @api_endpoints do %>
+                  <tr class="border-b border-base-300 hover:bg-base-300/30 transition-colors">
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm font-mono text-base-content"><%= endpoint.endpoint %></span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class={[
+                        "badge badge-xs",
+                        endpoint.method == "GET" && "badge-info",
+                        endpoint.method == "POST" && "badge-success",
+                        endpoint.method == "PUT" && "badge-warning",
+                        endpoint.method == "DELETE" && "badge-error"
+                      ]}>
+                        <%= endpoint.method %>
+                      </span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class={[
+                        "px-2 py-1 rounded text-xs font-medium",
+                        endpoint.status == "healthy" && "bg-success/10 text-success",
+                        endpoint.status == "warning" && "bg-warning/10 text-warning",
+                        endpoint.status == "error" && "bg-error/10 text-error"
+                      ]}>
+                        <%= String.capitalize(endpoint.status) %>
+                      </span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm text-base-content"><%= endpoint.avg_response %></span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm text-base-content"><%= endpoint.requests_min %></span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm text-base-content"><%= endpoint.error_rate %></span>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
 
-      <%!-- Error Rates --%>
-      <div class="bg-base-200 rounded border border-base-300">
-        <div class="p-4 border-b border-base-300">
-          <h2 class="text-base font-semibold text-base-content">HTTP Error Rates (Last Hour)</h2>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full">
-            <thead class="bg-base-300/50 border-b border-base-300">
-              <tr>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                  Status Code
-                </th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Count</th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                  Percentage
-                </th>
-                <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Trend</th>
-              </tr>
-            </thead>
-            <tbody>
-              <%= for error <- @error_rates do %>
-                <tr class="border-b border-base-300 hover:bg-base-300/30 transition-colors">
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm font-medium text-base-content"><%= error.code %></span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm text-base-content"><%= error.count %></span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm text-base-content"><%= error.percentage %></span>
-                  </td>
-                  <td class="py-2.5 px-4">
-                    <span class="text-sm text-success">↓ -12%</span>
-                  </td>
+        <%!-- Error Rates --%>
+        <div class="bg-base-200 rounded border border-base-300">
+          <div class="p-4 border-b border-base-300">
+            <h2 class="text-base font-semibold text-base-content">HTTP Error Rates (Last Hour)</h2>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-base-300/50 border-b border-base-300">
+                <tr>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                    Status Code
+                  </th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Count</th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                    Percentage
+                  </th>
+                  <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Trend</th>
                 </tr>
-              <% end %>
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                <%= for error <- @error_rates do %>
+                  <tr class="border-b border-base-300 hover:bg-base-300/30 transition-colors">
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm font-medium text-base-content"><%= error.code %></span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm text-base-content"><%= error.count %></span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm text-base-content"><%= error.percentage %></span>
+                    </td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-sm text-success">↓ -12%</span>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
