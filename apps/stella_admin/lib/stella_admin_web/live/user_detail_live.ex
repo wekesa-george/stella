@@ -7,7 +7,7 @@ defmodule StellaAdminWeb.UserDetailLive do
 
     {:ok,
      socket
-     |> assign(:page_title, user.name)
+     |> assign(:page_title, "#{user.name} - User Details")
      |> assign(:current_page, :users)
      |> assign(:user, user)
      |> assign(:recent_trades, get_recent_trades(user.id))
