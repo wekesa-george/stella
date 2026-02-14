@@ -1,16 +1,4 @@
-# Find eligible builder and runner images on Docker Hub. We use Ubuntu/Debian
-# instead of Alpine to avoid DNS resolution issues in production.
-#
-# https://hub.docker.com/r/hexpm/elixir/tags
-# https://hub.docker.com/_/debian
-#
-# This file is based on these images:
-#
-#   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian - for the release image
-#
-
-FROM hexpm/elixir:1.17.3-erlang-27.2-debian-bookworm-20240812-slim AS builder
+FROM elixir:latest AS builder
 
 # Install build dependencies
 RUN apt-get update -y && apt-get install -y build-essential git curl \
@@ -62,7 +50,7 @@ RUN mix release
 
 # Start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
-FROM debian:bookworm-20240812-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
