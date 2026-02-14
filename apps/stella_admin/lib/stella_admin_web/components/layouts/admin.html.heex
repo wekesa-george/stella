@@ -1,18 +1,18 @@
 <div class="min-h-screen bg-base-100">
   <%!-- Top Navigation --%>
   <header class="bg-base-200 border-b border-base-300">
-    <div class="px-6">
+    <div class="px-4 sm:px-6">
       <div class="flex items-center justify-between h-16">
         <%!-- Logo and Navigation --%>
-        <div class="flex items-center space-x-8">
+        <div class="flex items-center space-x-4 lg:space-x-8">
           <%!-- Logo --%>
           <a href={~p"/"} class="flex items-center space-x-2">
-            <img src="/logo.png" alt="Stella" class="h-8 w-auto" />
-            <span class="text-lg font-bold text-base-content">Stella</span>
+            <img src="/logo.png" alt="Stella" class="h-7 sm:h-8 w-auto" />
+            <span class="text-base sm:text-lg font-bold text-base-content">Stella</span>
           </a>
 
-          <%!-- Main Menu Items --%>
-          <nav class="flex items-center space-x-1 ml-8">
+          <%!-- Main Menu Items - Hidden on mobile --%>
+          <nav class="hidden lg:flex items-center space-x-1 ml-8">
             <%!-- Dashboard --%>
             <a
               href={~p"/"}
@@ -120,9 +120,9 @@
         </div>
 
         <%!-- Right Side: Search, Notifications, Profile --%>
-        <div class="flex items-center space-x-3">
-          <%!-- Search --%>
-          <div class="relative hidden md:block">
+        <div class="flex items-center space-x-2 sm:space-x-3">
+          <%!-- Search - Hidden on mobile and small tablets --%>
+          <div class="relative hidden lg:block">
             <.icon name="hero-magnifying-glass" class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-base-content/40 pointer-events-none z-10" />
             <input
               type="text"
@@ -131,8 +131,13 @@
             />
           </div>
 
-          <%!-- Notifications --%>
-          <button class="relative p-2 rounded hover:bg-base-300 transition-colors">
+          <%!-- Mobile Menu Button - Only visible on mobile --%>
+          <button class="lg:hidden p-2 rounded hover:bg-base-300 transition-colors">
+            <.icon name="hero-bars-3" class="size-5 text-base-content/70" />
+          </button>
+
+          <%!-- Notifications - Hidden on very small screens --%>
+          <button class="hidden sm:block relative p-2 rounded hover:bg-base-300 transition-colors">
             <.icon name="hero-bell" class="size-5 text-base-content/70" />
             <span class="absolute top-1 right-1 w-2 h-2 bg-error rounded-full"></span>
           </button>
@@ -154,16 +159,16 @@
   </header>
 
   <%!-- Main Content --%>
-  <main class="p-6">
+  <main class="p-4 sm:p-6">
     <%= @inner_content %>
   </main>
 
   <%!-- Footer --%>
   <footer class="bg-base-200 border-t border-base-300 mt-8">
-    <div class="px-6 py-8">
-      <div class="grid grid-cols-5 gap-8 mb-8">
+    <div class="px-4 sm:px-6 py-6 sm:py-8">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 sm:gap-8 mb-6 sm:mb-8">
         <%!-- Company Info --%>
-        <div class="col-span-1">
+        <div class="sm:col-span-2 lg:col-span-1">
           <div class="flex items-center space-x-2 mb-4">
             <img src="/logo.png" alt="Stella" class="h-6 w-auto" />
             <span class="text-base font-bold text-base-content">Stella</span>
@@ -315,11 +320,11 @@
 
       <%!-- Bottom Bar --%>
       <div class="pt-6 border-t border-base-300">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0">
           <p class="text-xs text-base-content/60">
             © 2026 Stella. All rights reserved.
           </p>
-          <div class="flex items-center space-x-6">
+          <div class="flex flex-wrap items-center justify-center gap-3 sm:gap-6">
             <a href="#" class="text-xs text-base-content/60 hover:text-base-content transition-colors">
               Security
             </a>
