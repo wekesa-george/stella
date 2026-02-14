@@ -132,9 +132,106 @@
           </div>
 
           <%!-- Mobile Menu Button - Only visible on mobile --%>
-          <button class="lg:hidden p-2 rounded hover:bg-base-300 transition-colors">
-            <.icon name="hero-bars-3" class="size-5 text-base-content/70" />
-          </button>
+          <div class="lg:hidden relative group">
+            <button class="p-2 rounded hover:bg-base-300 transition-colors">
+              <.icon name="hero-bars-3" class="size-5 text-base-content/70" />
+            </button>
+
+            <%!-- Mobile Dropdown Menu --%>
+            <div class="absolute top-full right-0 mt-1 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+              <div class="bg-base-200 rounded border border-base-300 py-2 shadow-lg">
+                <a
+                  href={~p"/"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :dashboard && "bg-primary/10 text-primary",
+                    @current_page != :dashboard && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-home" class="size-4" />
+                  <span>Dashboard</span>
+                </a>
+                <a
+                  href={~p"/users"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :users && "bg-primary/10 text-primary",
+                    @current_page != :users && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-users" class="size-4" />
+                  <span>Users</span>
+                </a>
+                <a
+                  href={~p"/trading"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :trading && "bg-primary/10 text-primary",
+                    @current_page != :trading && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-chart-bar" class="size-4" />
+                  <span>Trading</span>
+                </a>
+                <a
+                  href={~p"/finance"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :finance && "bg-primary/10 text-primary",
+                    @current_page != :finance && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-currency-dollar" class="size-4" />
+                  <span>Finance</span>
+                </a>
+                <div class="border-t border-base-300 my-2"></div>
+                <a
+                  href={~p"/content"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :content && "bg-primary/10 text-primary",
+                    @current_page != :content && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-document-text" class="size-4" />
+                  <span>Content</span>
+                </a>
+                <a
+                  href={~p"/analytics"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :analytics && "bg-primary/10 text-primary",
+                    @current_page != :analytics && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-chart-pie" class="size-4" />
+                  <span>Analytics</span>
+                </a>
+                <a
+                  href={~p"/support"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :support && "bg-primary/10 text-primary",
+                    @current_page != :support && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-chat-bubble-left-right" class="size-4" />
+                  <span>Support</span>
+                </a>
+                <a
+                  href={~p"/settings"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :settings && "bg-primary/10 text-primary",
+                    @current_page != :settings && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-cog-6-tooth" class="size-4" />
+                  <span>Settings</span>
+                </a>
+              </div>
+            </div>
+          </div>
 
           <%!-- Notifications - Hidden on very small screens --%>
           <button class="hidden sm:block relative p-2 rounded hover:bg-base-300 transition-colors">
