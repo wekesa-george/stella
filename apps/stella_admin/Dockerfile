@@ -45,6 +45,9 @@ RUN mix compile
 # Changes to config/runtime.exs don't require recompiling the code
 COPY config/runtime.exs config/
 
+# Copy release configuration
+COPY rel rel
+
 RUN mix release
 
 # Start a new build stage so that the final image will only contain
