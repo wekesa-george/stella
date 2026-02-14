@@ -103,6 +103,15 @@
                       <span>Support</span>
                     </div>
                   </a>
+                  <a
+                    href={~p"/observability"}
+                    class="block px-4 py-2 text-sm text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  >
+                    <div class="flex items-center space-x-2">
+                      <.icon name="hero-cpu-chip" class="size-4" />
+                      <span>Observability</span>
+                    </div>
+                  </a>
                   <div class="border-t border-base-300 my-2"></div>
                   <a
                     href={~p"/settings"}
@@ -218,6 +227,18 @@
                   <.icon name="hero-chat-bubble-left-right" class="size-4" />
                   <span>Support</span>
                 </a>
+                <a
+                  href={~p"/observability"}
+                  class={[
+                    "flex items-center space-x-2 px-4 py-2 text-sm transition-colors",
+                    @current_page == :observability && "bg-primary/10 text-primary",
+                    @current_page != :observability && "text-base-content/70 hover:text-base-content hover:bg-base-300"
+                  ]}
+                >
+                  <.icon name="hero-cpu-chip" class="size-4" />
+                  <span>Observability</span>
+                </a>
+                <div class="border-t border-base-300 my-2"></div>
                 <a
                   href={~p"/settings"}
                   class={[

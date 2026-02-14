@@ -21,9 +21,9 @@ defmodule StellaAdminWeb.SettingsLive do
     ~H"""
     <div class="space-y-4">
       <!-- Page Header -->
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 class="text-2xl font-bold text-base-content">Platform Settings</h1>
+          <h1 class="text-xl sm:text-2xl font-bold text-base-content">Platform Settings</h1>
           <p class="text-sm text-base-content/60 mt-1">Manage system configuration and preferences</p>
         </div>
       </div>
@@ -38,8 +38,8 @@ defmodule StellaAdminWeb.SettingsLive do
 
       <!-- Tabs -->
       <div class="bg-base-200 rounded border border-base-300">
-        <div class="border-b border-base-300">
-          <div class="flex items-center space-x-1 p-2">
+        <div class="border-b border-base-300 overflow-x-auto">
+          <div class="flex items-center space-x-1 p-2 min-w-max">
             <button
               phx-click="change_tab"
               phx-value-tab="general"

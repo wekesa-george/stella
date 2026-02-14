@@ -270,21 +270,71 @@
   border-radius: 2px;
   border-width: 1px;
   border-color: var(--color-base-300);
-  background-color: var(--color-base-100);
+  background-color: var(--color-base-300);
   padding: 0.5rem 1rem;
   transition: all 200ms;
+  color: var(--color-base-content);
+  font-size: 0.875rem;
 }
 
 .input-soft:focus {
   outline: none;
   ring-width: 2px;
-  ring-color: rgba(var(--color-primary), 0.5);
+  ring-color: var(--color-primary);
   border-color: var(--color-primary);
+  background-color: var(--color-base-200);
+}
+
+.input-soft::placeholder {
+  color: rgba(var(--color-base-content), 0.4);
 }
 
 /* Search input with icon */
 .input-soft.has-icon-left {
   padding-left: 2.5rem;
+}
+
+/* Enhanced input fields - apply globally */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+textarea,
+select {
+  border-radius: 2px;
+  border-width: 0;
+  background-color: var(--color-base-300);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-base-content);
+  transition: all 150ms ease-in-out;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="search"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary);
+  background-color: var(--color-base-200);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(var(--color-base-content), 0.4);
+}
+
+/* Better styling for disabled inputs */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--color-base-200);
 }
 
 /* Table styles */

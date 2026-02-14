@@ -21,19 +21,19 @@ defmodule StellaAdminWeb.SupportLive do
     ~H"""
     <div class="space-y-4">
       <!-- Page Header -->
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 class="text-2xl font-bold text-base-content">Support Management</h1>
+          <h1 class="text-xl sm:text-2xl font-bold text-base-content">Support Management</h1>
           <p class="text-sm text-base-content/60 mt-1">Manage customer inquiries and support tickets</p>
         </div>
-        <button class="btn btn-primary btn-sm">
+        <button class="btn btn-primary btn-sm w-full sm:w-auto">
           <.icon name="hero-plus" class="size-4" />
           Create Ticket
         </button>
       </div>
 
       <!-- Stats Cards -->
-      <div class="grid grid-cols-6 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs text-base-content/60">Open Tickets</span>
@@ -92,9 +92,9 @@ defmodule StellaAdminWeb.SupportLive do
       <!-- Active Tickets -->
       <div class="bg-base-200 rounded border border-base-300">
         <div class="p-4 border-b border-base-300">
-          <div class="flex items-center justify-between">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <h2 class="text-base font-semibold text-base-content">Active Tickets</h2>
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-2 overflow-x-auto w-full sm:w-auto">
               <button
                 phx-click="filter"
                 phx-value-type="all"
@@ -224,7 +224,7 @@ defmodule StellaAdminWeb.SupportLive do
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Live Chat Monitoring -->
         <div class="bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">

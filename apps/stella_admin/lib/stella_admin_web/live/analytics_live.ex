@@ -318,14 +318,14 @@ defmodule StellaAdminWeb.AnalyticsLive do
     ~H"""
     <div class="space-y-4">
       <%!-- Page Header --%>
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 class="text-2xl font-bold text-base-content">Analytics Dashboard</h1>
+          <h1 class="text-xl sm:text-2xl font-bold text-base-content">Analytics Dashboard</h1>
           <p class="text-sm text-base-content/60 mt-1">
             Comprehensive insights and performance metrics
           </p>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center space-y-2 sm:space-y-0 sm:space-x-2 w-full sm:w-auto">
           <button class="px-4 py-2 bg-base-200 hover:bg-base-300 border border-base-300 rounded text-sm font-medium text-base-content transition-colors">
             <.icon name="hero-calendar" class="inline size-4 mr-1" />
             Last 9 Months
@@ -338,7 +338,7 @@ defmodule StellaAdminWeb.AnalyticsLive do
       </div>
 
       <%!-- Key Performance Indicators --%>
-      <div class="grid grid-cols-6 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Total Revenue</p>
           <p class="text-2xl font-bold text-base-content mb-1">$187.2K</p>
@@ -377,7 +377,7 @@ defmodule StellaAdminWeb.AnalyticsLive do
       </div>
 
       <%!-- Revenue Trend & User Growth --%>
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <%!-- Revenue Trend --%>
         <div class="bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
@@ -416,9 +416,9 @@ defmodule StellaAdminWeb.AnalyticsLive do
       </div>
 
       <%!-- Trading Volume & Revenue Sources --%>
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <%!-- Trading Volume --%>
-        <div class="col-span-2 bg-base-200 rounded border border-base-300">
+        <div class="lg:col-span-2 bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
             <h2 class="text-base font-semibold text-base-content">Trading Volume Trends</h2>
             <p class="text-xs text-base-content/60 mt-1">Monthly trading volume in millions</p>
@@ -475,14 +475,14 @@ defmodule StellaAdminWeb.AnalyticsLive do
       </div>
 
       <%!-- Top Pairs & Geographic Data --%>
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <%!-- Top Trading Pairs Performance --%>
         <div class="bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
             <h2 class="text-base font-semibold text-base-content">Top Trading Pairs Performance</h2>
           </div>
           <div class="overflow-x-auto">
-            <table class="w-full">
+            <table class="w-full min-w-[400px]">
               <thead class="bg-base-300/50 border-b border-base-300">
                 <tr>
                   <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">Pair</th>

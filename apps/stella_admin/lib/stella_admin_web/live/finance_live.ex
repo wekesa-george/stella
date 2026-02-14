@@ -136,14 +136,14 @@ defmodule StellaAdminWeb.FinanceLive do
     ~H"""
     <div class="space-y-4">
       <%!-- Page Header --%>
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 class="text-2xl font-bold text-base-content">Finance Overview</h1>
+          <h1 class="text-xl sm:text-2xl font-bold text-base-content">Finance Overview</h1>
           <p class="text-sm text-base-content/60 mt-1">
             Track revenue, transactions, and financial metrics
           </p>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center space-y-2 sm:space-y-0 sm:space-x-2 w-full sm:w-auto">
           <button class="px-4 py-2 bg-base-200 hover:bg-base-300 border border-base-300 rounded text-sm font-medium text-base-content transition-colors">
             <.icon name="hero-calendar" class="inline size-4 mr-1" />
             Last 30 Days
@@ -156,7 +156,7 @@ defmodule StellaAdminWeb.FinanceLive do
       </div>
 
       <%!-- Financial Stats --%>
-      <div class="grid grid-cols-6 gap-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Total Revenue</p>
           <p class="text-2xl font-bold text-base-content mb-1">$187.2K</p>
@@ -195,7 +195,7 @@ defmodule StellaAdminWeb.FinanceLive do
       </div>
 
       <%!-- Revenue Breakdown & Pending Withdrawals --%>
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <%!-- Revenue Breakdown --%>
         <div class="bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
@@ -280,9 +280,9 @@ defmodule StellaAdminWeb.FinanceLive do
 
       <%!-- Recent Transactions --%>
       <div class="bg-base-200 rounded border border-base-300">
-        <div class="p-4 border-b border-base-300 flex items-center justify-between">
+        <div class="p-4 border-b border-base-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <h2 class="text-base font-semibold text-base-content">Recent Transactions</h2>
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center space-x-2 overflow-x-auto w-full sm:w-auto">
             <button
               phx-click="filter"
               phx-value-type="all"
@@ -331,7 +331,7 @@ defmodule StellaAdminWeb.FinanceLive do
         </div>
 
         <div class="overflow-x-auto">
-          <table class="w-full">
+          <table class="w-full min-w-[900px]">
             <thead class="bg-base-300/50 border-b border-base-300">
               <tr>
                 <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">

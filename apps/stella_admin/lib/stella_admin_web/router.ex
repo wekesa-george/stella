@@ -26,6 +26,7 @@ defmodule StellaAdminWeb.Router do
       live "/content", ContentLive
       live "/analytics", AnalyticsLive
       live "/support", SupportLive
+      live "/observability", ObservabilityLive
       live "/settings", SettingsLive
     end
   end
