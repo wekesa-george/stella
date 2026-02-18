@@ -27,6 +27,10 @@ const gilanMedium = localFont({
 export const metadata: Metadata = {
   title: "Stella - Crypto Trading Platform",
   description: "Trade, swap, and manage your crypto assets with Stella",
+  icons: {
+    icon: '/icon.png',
+    apple: '/apple-icon.png',
+  },
 };
 
 export default function RootLayout({
