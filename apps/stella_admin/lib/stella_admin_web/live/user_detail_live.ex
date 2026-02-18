@@ -1,131 +1,131 @@
 defmodule StellaAdminWeb.UserDetailLive do
   use StellaAdminWeb, :live_view
+  alias StellaAdmin.Users
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    user = get_user_by_id(String.to_integer(id))
+    user = Users.get_user_detail(id)
 
-    {:ok,
+    if user do
+      {:ok, equity} = Users.calculate_user_equity(id)
+      {:ok, pnl} = Users.calculate_user_pnl(id)
+
+      {:ok,
+       socket
+       |> assign(:page_title, "User Details")
+       |> assign(:current_page, :users)
+       |> assign(:user, user)
+       |> assign(:equity, equity)
+       |> assign(:pnl, pnl)
+       |> assign(:show_suspend_modal, false)
+       |> assign(:show_export_modal, false)
+       |> assign(:suspend_reason, "")}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "User not found")
+       |> redirect(to: ~p"/users")}
+    end
+  end
+
+  @impl true
+  def handle_event("show_suspend_modal", _params, socket) do
+    {:noreply,
      socket
-     |> assign(:page_title, "#{user.name} - User Details")
-     |> assign(:current_page, :users)
-     |> assign(:user, user)
-     |> assign(:recent_trades, get_recent_trades(user.id))
-     |> assign(:activity_log, get_activity_log(user.id))}
+     |> assign(:show_suspend_modal, true)
+     |> assign(:suspend_reason, "")}
   end
 
-  defp get_user_by_id(id) do
-    # This would normally fetch from database
-    users = [
-      %{
-        id: 1,
-        name: "Sarah Chen",
-        email: "sarah.chen@example.com",
-        username: "@crypto_queen",
-        status: "active",
-        verified: true,
-        joined: "2025-12-15",
-        last_login: "2026-02-14 10:23 AM",
-        total_trades: 1247,
-        portfolio_value: "$45,230",
-        followers: 2341,
-        following: 89,
-        win_rate: "68.3%",
-        avatar_color: "bg-purple-500",
-        total_profit: "$12,450",
-        avg_trade_duration: "4.2h",
-        risk_score: "6.5/10",
-        kyc_status: "verified",
-        phone: "+1 (555) 123-4567",
-        country: "United States",
-        bio: "Experienced crypto trader specializing in BTC and ETH. 5+ years in the market."
-      },
-      %{
-        id: 2,
-        name: "Michael Torres",
-        email: "michael.torres@example.com",
-        username: "@btc_master",
-        status: "active",
-        verified: true,
-        joined: "2025-11-22",
-        last_login: "2026-02-14 09:15 AM",
-        total_trades: 892,
-        portfolio_value: "$32,450",
-        followers: 1892,
-        following: 124,
-        win_rate: "72.1%",
-        avatar_color: "bg-blue-500",
-        total_profit: "$8,920",
-        avg_trade_duration: "3.8h",
-        risk_score: "5.2/10",
-        kyc_status: "verified",
-        phone: "+1 (555) 234-5678",
-        country: "Canada",
-        bio: "Bitcoin maximalist and day trader. Conservative risk management."
-      }
-    ]
-
-    Enum.find(users, fn u -> u.id == id end) || List.first(users)
+  @impl true
+  def handle_event("close_suspend_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_suspend_modal, false)
+     |> assign(:suspend_reason, "")}
   end
 
-  defp get_recent_trades(user_id) do
-    [
-      %{
-        id: 1,
-        pair: "BTC/USDT",
-        type: "Long",
-        entry_price: "$42,350",
-        exit_price: "$43,120",
-        profit: "+$770",
-        profit_percent: "+1.82%",
-        status: "closed",
-        time: "2 hours ago"
-      },
-      %{
-        id: 2,
-        pair: "ETH/USDT",
-        type: "Long",
-        entry_price: "$2,245",
-        exit_price: "$2,198",
-        profit: "-$47",
-        profit_percent: "-2.09%",
-        status: "closed",
-        time: "5 hours ago"
-      },
-      %{
-        id: 3,
-        pair: "SOL/USDT",
-        type: "Short",
-        entry_price: "$98.50",
-        exit_price: "$95.20",
-        profit: "+$330",
-        profit_percent: "+3.35%",
-        status: "closed",
-        time: "1 day ago"
-      },
-      %{
-        id: 4,
-        pair: "BTC/USDT",
-        type: "Long",
-        entry_price: "$43,200",
-        exit_price: "-",
-        profit: "+$1,200",
-        profit_percent: "+2.78%",
-        status: "open",
-        time: "Started 3h ago"
-      }
-    ]
+  @impl true
+  def handle_event("update_suspend_reason", %{"reason" => reason}, socket) do
+    {:noreply, assign(socket, :suspend_reason, reason)}
   end
 
-  defp get_activity_log(_user_id) do
-    [
-      %{event: "Trade Closed", details: "BTC/USDT Long +$770", time: "2 hours ago"},
-      %{event: "Trade Opened", details: "BTC/USDT Long @ $43,200", time: "3 hours ago"},
-      %{event: "Trade Closed", details: "ETH/USDT Long -$47", time: "5 hours ago"},
-      %{event: "Followed User", details: "@eth_trader", time: "6 hours ago"},
-      %{event: "Login", details: "IP: 192.168.1.1", time: "8 hours ago"}
-    ]
+  @impl true
+  def handle_event("suspend_user", _params, socket) do
+    user = socket.assigns.user
+    current_admin = socket.assigns.current_admin
+    reason = socket.assigns.suspend_reason
+
+    case Users.suspend_user(user, current_admin.id, reason) do
+      {:ok, _updated_user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "User suspended successfully.")
+         |> redirect(to: ~p"/users")}
+
+      {:error, _changeset} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to suspend user.")}
+    end
   end
+
+  @impl true
+  def handle_event("export_user_data", _params, socket) do
+    user = socket.assigns.user
+
+    case Users.export_user_data(user.id) do
+      {:ok, _data} ->
+        # TODO: Trigger download of JSON file
+        # For now, just show success message
+        {:noreply,
+         socket
+         |> put_flash(:info, "User data exported successfully.")}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to export user data.")}
+    end
+  end
+
+  defp get_user_initials(user) do
+    cond do
+      user.username && user.username != "" ->
+        user.username |> String.first() |> String.upcase()
+
+      user.email ->
+        user.email |> String.first() |> String.upcase()
+
+      true ->
+        "U"
+    end
+  end
+
+  defp format_tier(tier) do
+    case tier do
+      :stella_one -> "Stella One"
+      :stella_unum -> "Stella Unum"
+      :stella_eon -> "Stella Eon"
+      :stella_plenum -> "Stella Plenum"
+      _ -> "Unknown"
+    end
+  end
+
+  defp format_date(nil), do: "-"
+
+  defp format_date(datetime) do
+    Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
+  end
+
+  defp format_money(amount) when is_float(amount) do
+    "$#{:erlang.float_to_binary(amount, decimals: 2)}"
+  end
+
+  defp format_money(amount) when is_integer(amount) do
+    "$#{amount}.00"
+  end
+
+  defp format_money(_), do: "$0.00"
 
   @impl true
   def render(assigns) do
@@ -144,65 +144,102 @@ defmodule StellaAdminWeb.UserDetailLive do
           <div>
             <h1 class="text-2xl font-bold text-base-content">User Details</h1>
             <p class="text-sm text-base-content/60 mt-1">
-              Viewing profile for <%= @user.username %>
+              <%= if @user.username do %>
+                Viewing profile for @<%= @user.username %>
+              <% else %>
+                Viewing profile for <%= @user.email %>
+              <% end %>
             </p>
           </div>
         </div>
         <div class="flex items-center space-x-2">
-          <button class="px-4 py-2 bg-base-200 hover:bg-base-300 border border-base-300 rounded text-sm font-medium text-base-content transition-colors">
-            <.icon name="hero-envelope" class="inline size-4 mr-1" />
-            Send Email
+          <button
+            phx-click="export_user_data"
+            class="px-4 py-2 bg-base-200 hover:bg-base-300 border border-base-300 rounded text-sm font-medium text-base-content transition-colors"
+          >
+            <.icon name="hero-arrow-down-tray" class="inline size-4 mr-1" />
+            Export Data
           </button>
-          <button class="px-4 py-2 bg-error hover:bg-error/90 text-white rounded text-sm font-medium transition-colors">
-            <.icon name="hero-no-symbol" class="inline size-4 mr-1" />
-            Suspend
-          </button>
+          <%= if @user.status != :suspended do %>
+            <button
+              phx-click="show_suspend_modal"
+              class="px-4 py-2 bg-error hover:bg-error/90 text-white rounded text-sm font-medium transition-colors"
+            >
+              <.icon name="hero-no-symbol" class="inline size-4 mr-1" />
+              Suspend
+            </button>
+          <% end %>
         </div>
       </div>
 
       <%!-- User Profile Card --%>
       <div class="bg-base-200 rounded border border-base-300 p-6">
         <div class="flex items-start space-x-6">
-          <div class={"w-24 h-24 #{@user.avatar_color} rounded-full flex items-center justify-center"}>
-            <span class="text-white text-3xl font-bold"><%= String.first(@user.name) %></span>
+          <div class="w-24 h-24 bg-purple-500 rounded-full flex items-center justify-center">
+            <span class="text-white text-3xl font-bold"><%= get_user_initials(@user) %></span>
           </div>
 
           <div class="flex-1">
             <div class="flex items-center space-x-3 mb-2">
-              <h2 class="text-2xl font-bold text-base-content"><%= @user.name %></h2>
-              <%= if @user.verified do %>
-                <.icon name="hero-check-badge" class="size-6 text-primary" />
+              <h2 class="text-2xl font-bold text-base-content"><%= @user.email %></h2>
+              <%= if @user.email_verified do %>
+                <.icon name="hero-check-badge" class="size-6 text-success" />
               <% end %>
               <span class={[
                 "px-3 py-1 rounded-full text-xs font-medium",
-                @user.status == "active" && "bg-success/20 text-success",
-                @user.status == "suspended" && "bg-error/20 text-error"
+                @user.status == :active && "bg-success/20 text-success",
+                @user.status == :suspended && "bg-error/20 text-error",
+                @user.status == :banned && "bg-error/20 text-error",
+                @user.status == :pending_verification && "bg-warning/20 text-warning",
+                @user.status == :deactivated && "bg-base-content/20 text-base-content/60"
               ]}>
-                <%= String.capitalize(@user.status) %>
+                <%= @user.status |> to_string() |> String.replace("_", " ") |> String.capitalize() %>
+              </span>
+              <span class="px-3 py-1 rounded text-xs font-medium bg-primary/20 text-primary">
+                <%= format_tier(@user.tier) %>
               </span>
             </div>
-            <p class="text-base text-base-content/70 mb-1"><%= @user.username %></p>
-            <p class="text-sm text-base-content/60 mb-4"><%= @user.email %></p>
-            <p class="text-sm text-base-content/80 max-w-2xl"><%= @user.bio %></p>
+            <%= if @user.username do %>
+              <p class="text-base text-base-content/70 mb-1">@<%= @user.username %></p>
+            <% end %>
+            <%= if @user.phone do %>
+              <p class="text-sm text-base-content/60 mb-2">
+                <%= @user.phone %>
+                <%= if @user.phone_verified do %>
+                  <.icon name="hero-check-badge" class="inline size-4 text-success ml-1" />
+                <% end %>
+              </p>
+            <% end %>
+            <%= if @user.referral_code do %>
+              <p class="text-sm text-base-content/60">Referral Code: <%= @user.referral_code %></p>
+            <% end %>
           </div>
         </div>
 
         <div class="grid grid-cols-4 gap-4 mt-6 pt-6 border-t border-base-300">
           <div>
             <p class="text-xs text-base-content/60 mb-1">Joined</p>
-            <p class="text-sm font-medium text-base-content"><%= @user.joined %></p>
+            <p class="text-sm font-medium text-base-content"><%= format_date(@user.created_at) %></p>
           </div>
           <div>
             <p class="text-xs text-base-content/60 mb-1">Last Login</p>
-            <p class="text-sm font-medium text-base-content"><%= @user.last_login %></p>
+            <p class="text-sm font-medium text-base-content">
+              <%= format_date(@user.last_login_at) %>
+            </p>
           </div>
           <div>
-            <p class="text-xs text-base-content/60 mb-1">Country</p>
-            <p class="text-sm font-medium text-base-content"><%= @user.country %></p>
+            <p class="text-xs text-base-content/60 mb-1">Last Login IP</p>
+            <p class="text-sm font-medium text-base-content">
+              <%= if @user.last_login_ip do %>
+                <%= @user.last_login_ip %>
+              <% else %>
+                -
+              <% end %>
+            </p>
           </div>
           <div>
-            <p class="text-xs text-base-content/60 mb-1">Phone</p>
-            <p class="text-sm font-medium text-base-content"><%= @user.phone %></p>
+            <p class="text-xs text-base-content/60 mb-1">Failed Logins</p>
+            <p class="text-sm font-medium text-base-content"><%= @user.failed_login_count %></p>
           </div>
         </div>
       </div>
@@ -210,137 +247,238 @@ defmodule StellaAdminWeb.UserDetailLive do
       <%!-- Stats Grid --%>
       <div class="grid grid-cols-6 gap-4">
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-xs text-base-content/60 mb-1">Portfolio Value</p>
-          <p class="text-xl font-bold text-base-content"><%= @user.portfolio_value %></p>
+          <p class="text-xs text-base-content/60 mb-1">Total Equity</p>
+          <p class="text-xl font-bold text-base-content">
+            <%= format_money(@equity.total_equity) %>
+          </p>
+          <p class="text-xs text-base-content/50 mt-1">
+            Cash: <%= format_money(@equity.cash) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-xs text-base-content/60 mb-1">Total Profit</p>
-          <p class="text-xl font-bold text-success"><%= @user.total_profit %></p>
+          <p class="text-xs text-base-content/60 mb-1">Total P&L</p>
+          <p class={[
+            "text-xl font-bold",
+            @pnl.total_pnl >= 0 && "text-success" || "text-error"
+          ]}>
+            <%= format_money(@pnl.total_pnl) %>
+          </p>
+          <p class="text-xs text-base-content/50 mt-1">
+            Realized: <%= format_money(@pnl.realized_pnl) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-xs text-base-content/60 mb-1">Total Trades</p>
-          <p class="text-xl font-bold text-base-content"><%= @user.total_trades %></p>
+          <p class="text-xs text-base-content/60 mb-1">Unrealized P&L</p>
+          <p class={[
+            "text-xl font-bold",
+            @pnl.unrealized_pnl >= 0 && "text-success" || "text-error"
+          ]}>
+            <%= format_money(@pnl.unrealized_pnl) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-xs text-base-content/60 mb-1">Win Rate</p>
-          <p class="text-xl font-bold text-success"><%= @user.win_rate %></p>
+          <p class="text-xs text-base-content/60 mb-1">Positions Value</p>
+          <p class="text-xl font-bold text-base-content">
+            <%= format_money(@equity.positions_value) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-xs text-base-content/60 mb-1">Followers</p>
-          <p class="text-xl font-bold text-base-content"><%= @user.followers %></p>
+          <p class="text-xs text-base-content/60 mb-1">Account Locked</p>
+          <p class="text-xl font-bold text-base-content">
+            <%= if @user.locked_until do %>
+              <span class="text-error">Yes</span>
+            <% else %>
+              <span class="text-success">No</span>
+            <% end %>
+          </p>
+          <%= if @user.locked_until do %>
+            <p class="text-xs text-base-content/50 mt-1">
+              Until: <%= format_date(@user.locked_until) %>
+            </p>
+          <% end %>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-xs text-base-content/60 mb-1">Risk Score</p>
-          <p class="text-xl font-bold text-warning"><%= @user.risk_score %></p>
+          <p class="text-xs text-base-content/60 mb-1">Tier</p>
+          <p class="text-xl font-bold text-primary"><%= format_tier(@user.tier) %></p>
         </div>
       </div>
 
-      <%!-- Two Column Layout --%>
+      <%!-- Additional Information Sections --%>
       <div class="grid grid-cols-3 gap-4">
-        <%!-- Recent Trades --%>
-        <div class="col-span-2 bg-base-200 rounded border border-base-300">
-          <div class="p-4 border-b border-base-300">
-            <h3 class="text-base font-semibold text-base-content">Recent Trades</h3>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead class="bg-base-300/50 border-b border-base-300">
-                <tr>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">Pair</th>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">Type</th>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">
-                    Entry Price
-                  </th>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">
-                    Exit Price
-                  </th>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">
-                    Profit/Loss
-                  </th>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">
-                    Status
-                  </th>
-                  <th class="text-left py-2 px-4 text-xs font-medium text-base-content/60">Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                <%= for trade <- @recent_trades do %>
-                  <tr class="border-b border-base-300">
-                    <td class="py-2.5 px-4">
-                      <p class="text-sm font-medium text-base-content"><%= trade.pair %></p>
-                    </td>
-                    <td class="py-2.5 px-4">
-                      <span class={[
-                        "px-2 py-0.5 rounded text-xs font-medium",
-                        trade.type == "Long" && "bg-success/20 text-success",
-                        trade.type == "Short" && "bg-error/20 text-error"
-                      ]}>
-                        <%= trade.type %>
-                      </span>
-                    </td>
-                    <td class="py-2.5 px-4">
-                      <p class="text-xs text-base-content"><%= trade.entry_price %></p>
-                    </td>
-                    <td class="py-2.5 px-4">
-                      <p class="text-xs text-base-content"><%= trade.exit_price %></p>
-                    </td>
-                    <td class="py-2.5 px-4">
-                      <p class={[
-                        "text-xs font-medium",
-                        String.starts_with?(trade.profit, "+") && "text-success",
-                        String.starts_with?(trade.profit, "-") && "text-error"
-                      ]}>
-                        <%= trade.profit %> (<%= trade.profit_percent %>)
-                      </p>
-                    </td>
-                    <td class="py-2.5 px-4">
-                      <span class={[
-                        "px-2 py-0.5 rounded text-xs font-medium",
-                        trade.status == "open" && "bg-primary/20 text-primary",
-                        trade.status == "closed" && "bg-base-content/20 text-base-content/60"
-                      ]}>
-                        <%= String.capitalize(trade.status) %>
-                      </span>
-                    </td>
-                    <td class="py-2.5 px-4">
-                      <p class="text-xs text-base-content/60"><%= trade.time %></p>
-                    </td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <%!-- Activity Log --%>
+        <%!-- KYC Status --%>
         <div class="bg-base-200 rounded border border-base-300">
           <div class="p-4 border-b border-base-300">
-            <h3 class="text-base font-semibold text-base-content">Activity Log</h3>
+            <h3 class="text-base font-semibold text-base-content">KYC Status</h3>
           </div>
           <div class="p-4">
-            <div class="space-y-4">
-              <%= for activity <- @activity_log do %>
-                <div class="flex items-start space-x-3">
-                  <div class="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center flex-shrink-0">
-                    <.icon name="hero-clock" class="size-4 text-primary" />
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-base-content"><%= activity.event %></p>
-                    <p class="text-xs text-base-content/60 truncate"><%= activity.details %></p>
-                    <p class="text-xs text-base-content/40 mt-1"><%= activity.time %></p>
-                  </div>
-                </div>
-              <% end %>
+            <div class="text-center py-8">
+              <.icon name="hero-document-check" class="size-12 text-base-content/40 mx-auto mb-2" />
+              <p class="text-sm text-base-content/60">
+                KYC records will be displayed here
+              </p>
+              <p class="text-xs text-base-content/40 mt-1">
+                Integration with KYC context coming soon
+              </p>
+            </div>
+          </div>
+        </div>
+        <%!-- Connected Exchanges --%>
+        <div class="bg-base-200 rounded border border-base-300">
+          <div class="p-4 border-b border-base-300">
+            <h3 class="text-base font-semibold text-base-content">Connected Exchanges</h3>
+          </div>
+          <div class="p-4">
+            <div class="text-center py-8">
+              <.icon name="hero-building-library" class="size-12 text-base-content/40 mx-auto mb-2" />
+              <p class="text-sm text-base-content/60">
+                Exchange connections will be displayed here
+              </p>
+              <p class="text-xs text-base-content/40 mt-1">
+                Integration with exchange context coming soon
+              </p>
+            </div>
+          </div>
+        </div>
+        <%!-- Active Bots --%>
+        <div class="bg-base-200 rounded border border-base-300">
+          <div class="p-4 border-b border-base-300">
+            <h3 class="text-base font-semibold text-base-content">Active Bots</h3>
+          </div>
+          <div class="p-4">
+            <div class="text-center py-8">
+              <.icon name="hero-cpu-chip" class="size-12 text-base-content/40 mx-auto mb-2" />
+              <p class="text-sm text-base-content/60">
+                Active trading bots will be displayed here
+              </p>
+              <p class="text-xs text-base-content/40 mt-1">
+                Integration with bots context coming soon
+              </p>
             </div>
           </div>
         </div>
       </div>
+      <%!-- Tier History --%>
+      <div class="bg-base-200 rounded border border-base-300">
+        <div class="p-4 border-b border-base-300">
+          <h3 class="text-base font-semibold text-base-content">Tier History</h3>
+        </div>
+        <div class="p-4">
+          <div class="text-center py-8">
+            <.icon name="hero-chart-bar" class="size-12 text-base-content/40 mx-auto mb-2" />
+            <p class="text-sm text-base-content/60">
+              Tier change history will be displayed here
+            </p>
+            <p class="text-xs text-base-content/40 mt-1">
+              Requires tier_history table implementation
+            </p>
+          </div>
+        </div>
+      </div>
+      <%!-- User Metadata --%>
+      <%= if @user.metadata && map_size(@user.metadata) > 0 do %>
+        <div class="bg-base-200 rounded border border-base-300">
+          <div class="p-4 border-b border-base-300">
+            <h3 class="text-base font-semibold text-base-content">Additional Information</h3>
+          </div>
+          <div class="p-4">
+            <pre class="text-xs text-base-content/80 bg-base-300 p-3 rounded overflow-x-auto"><%= Jason.encode!(@user.metadata, pretty: true) %></pre>
+          </div>
+        </div>
+      <% end %>
     </div>
+    <%!-- Suspend User Modal --%>
+    <%= if @show_suspend_modal do %>
+      <div
+        class="fixed inset-0 z-50 overflow-y-auto"
+        aria-labelledby="suspend-modal-title"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+          <div
+            class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/75 transition-opacity"
+            phx-click="close_suspend_modal"
+          >
+          </div>
+          <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
+            &#8203;
+          </span>
+          <div class="relative inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-semibold text-base-content">Suspend User</h3>
+              <button
+                phx-click="close_suspend_modal"
+                class="p-1 hover:bg-base-300 rounded transition-colors"
+              >
+                <.icon name="hero-x-mark" class="size-5 text-base-content/60" />
+              </button>
+            </div>
+
+            <div class="mb-6">
+              <div class="flex items-center space-x-3 mb-4">
+                <div class="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                  <span class="text-white text-lg font-medium">
+                    <%= get_user_initials(@user) %>
+                  </span>
+                </div>
+                <div>
+                  <p class="text-base font-medium text-base-content"><%= @user.email %></p>
+                  <%= if @user.username do %>
+                    <p class="text-sm text-base-content/60">@<%= @user.username %></p>
+                  <% end %>
+                </div>
+              </div>
+
+              <div class="bg-error/10 border border-error/20 rounded p-4 mb-4">
+                <p class="text-sm text-base-content/80">
+                  Are you sure you want to suspend this user? This action will:
+                </p>
+                <ul class="mt-2 space-y-1 text-xs text-base-content/70">
+                  <li>• Disable their trading capabilities</li>
+                  <li>• Stop all active bots</li>
+                  <li>• Prevent login access</li>
+                  <li>• Notify the user via email</li>
+                </ul>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-base-content mb-2">
+                  Reason for suspension (required)
+                </label>
+                <textarea
+                  phx-change="update_suspend_reason"
+                  name="reason"
+                  rows="3"
+                  placeholder="Enter the reason for suspending this user..."
+                  class="w-full px-3 py-2 bg-base-300 border border-base-content/20 rounded text-sm text-base-content placeholder:text-base-content/40 focus:outline-none focus:ring-2 focus:ring-primary"
+                ><%= @suspend_reason %></textarea>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3">
+              <button
+                phx-click="close_suspend_modal"
+                class="px-4 py-2 bg-base-300 hover:bg-base-content/20 rounded text-sm font-medium text-base-content transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                phx-click="suspend_user"
+                disabled={@suspend_reason == ""}
+                class="px-4 py-2 bg-error hover:bg-error/90 text-white rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Suspend User
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    <% end %>
     """
   end
 end

@@ -7,12 +7,24 @@ defmodule StellaAdmin.Application do
 
   @impl true
   def start(_type, _args) do
+    # Get configured trading pairs from application config
+    trading_pairs =
+      Application.get_env(:stella_admin, :binance_trading_pairs, [
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "AVAX/USDT",
+        "MATIC/USDT"
+      ])
+
     children = [
       StellaAdminWeb.Telemetry,
+      StellaAdmin.Repo,
       {DNSCluster, query: Application.get_env(:stella_admin, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: StellaAdmin.PubSub},
-      # Start a worker by calling: StellaAdmin.Worker.start_link(arg)
-      # {StellaAdmin.Worker, arg},
+      # Binance market data services
+      StellaAdmin.Binance.Cache,
+      {StellaAdmin.Binance.WebSocket, pairs: trading_pairs},
       # Start to serve requests, typically the last entry
       StellaAdminWeb.Endpoint
     ]

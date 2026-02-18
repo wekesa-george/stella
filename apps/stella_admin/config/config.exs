@@ -8,7 +8,15 @@
 import Config
 
 config :stella_admin,
-  generators: [timestamp_type: :utc_datetime]
+  ecto_repos: [StellaAdmin.Repo],
+  generators: [timestamp_type: :utc_datetime],
+  binance_trading_pairs: [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "AVAX/USDT",
+    "MATIC/USDT"
+  ]
 
 # Configure the endpoint
 config :stella_admin, StellaAdminWeb.Endpoint,

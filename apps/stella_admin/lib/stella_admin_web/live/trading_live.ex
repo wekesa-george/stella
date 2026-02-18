@@ -1,12 +1,20 @@
 defmodule StellaAdminWeb.TradingLive do
   use StellaAdminWeb, :live_view
 
+  alias StellaAdmin.Binance.{Cache, Client}
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      # Send update every 2 seconds for real-time effect
-      Process.send_after(self(), :update_prices, 2000)
+      # Subscribe to real-time price updates from Binance
+      Phoenix.PubSub.subscribe(StellaAdmin.PubSub, "binance:prices")
+
+      # Fetch initial candlestick data
+      fetch_candlestick_data("BTC/USDT", "1h")
     end
+
+    # Get initial prices from cache or use defaults
+    live_prices = get_cached_prices()
 
     {:ok,
      socket
@@ -17,9 +25,10 @@ defmodule StellaAdminWeb.TradingLive do
      |> assign(:top_pairs, get_top_pairs())
      |> assign(:filter, "all")
      |> assign(:selected_pair, "BTC/USDT")
-     |> assign(:candlestick_chart, candlestick_chart_config())
-     |> assign(:live_prices, initial_live_prices())
-     |> assign(:price_changes, %{})}
+     |> assign(:candlestick_chart, nil)
+     |> assign(:live_prices, live_prices)
+     |> assign(:price_changes, %{})
+     |> assign(:loading_chart, true)}
   end
 
   @impl true
@@ -29,38 +38,34 @@ defmodule StellaAdminWeb.TradingLive do
 
   @impl true
   def handle_event("select_pair", %{"pair" => pair}, socket) do
+    # Fetch candlestick data for the selected pair
+    if connected?(socket) do
+      fetch_candlestick_data(pair, "1h")
+    end
+
     {:noreply,
      socket
      |> assign(:selected_pair, pair)
-     |> assign(:candlestick_chart, candlestick_chart_config(pair))}
+     |> assign(:loading_chart, true)}
   end
 
   @impl true
-  def handle_info(:update_prices, socket) do
-    # Schedule next update
-    Process.send_after(self(), :update_prices, 2000)
+  def handle_info({:price_update, pair, price_data}, socket) do
+    # Real-time price update from Binance WebSocket
+    old_price = get_in(socket.assigns.live_prices, [pair, :price])
 
-    # Simulate price changes
-    updated_prices =
-      Enum.map(socket.assigns.live_prices, fn {pair, price} ->
-        change = :rand.uniform(200) - 100
-        new_price = price + change
-        {pair, new_price}
-      end)
-      |> Map.new()
+    # Determine direction
+    direction =
+      cond do
+        is_nil(old_price) -> :neutral
+        price_data.price > old_price -> :up
+        price_data.price < old_price -> :down
+        true -> :neutral
+      end
 
-    # Track which prices went up or down
-    price_changes =
-      Enum.map(updated_prices, fn {pair, new_price} ->
-        old_price = socket.assigns.live_prices[pair]
-        direction = cond do
-          new_price > old_price -> :up
-          new_price < old_price -> :down
-          true -> :neutral
-        end
-        {pair, direction}
-      end)
-      |> Map.new()
+    # Update prices and changes
+    updated_prices = Map.put(socket.assigns.live_prices, pair, price_data)
+    price_changes = Map.put(socket.assigns.price_changes, pair, direction)
 
     {:noreply,
      socket
@@ -68,19 +73,124 @@ defmodule StellaAdminWeb.TradingLive do
      |> assign(:price_changes, price_changes)}
   end
 
-  defp initial_live_prices do
-    %{
-      "BTC/USDT" => 44_400,
-      "ETH/USDT" => 2_312,
-      "SOL/USDT" => 96.20,
-      "AVAX/USDT" => 33.80,
-      "MATIC/USDT" => 0.89
-    }
+  @impl true
+  def handle_info({:candlestick_data, pair, candles}, socket) do
+    # Candlestick data fetched successfully
+    require Logger
+    Logger.info("Received candlestick data for #{pair}: #{length(candles)} candles")
+
+    chart_config = build_candlestick_chart(pair, candles)
+
+    {:noreply,
+     socket
+     |> assign(:candlestick_chart, chart_config)
+     |> assign(:loading_chart, false)}
   end
 
-  defp candlestick_chart_config(pair \\ "BTC/USDT") do
-    # Generate sample candlestick data
-    data = generate_candlestick_data()
+  @impl true
+  def handle_info({:candlestick_error, pair, reason}, socket) do
+    # Failed to fetch candlestick data, use fallback
+    require Logger
+    Logger.error("Failed to fetch candlestick data for #{pair}: #{inspect(reason)}")
+
+    {:noreply, assign(socket, :loading_chart, false)}
+  end
+
+  # Helper Functions
+
+  defp format_pair_name(pair) when is_binary(pair) do
+    # Convert BTCUSDT -> BTC/USDT
+    # Common quote currencies
+    cond do
+      String.ends_with?(pair, "USDT") ->
+        base = String.replace_suffix(pair, "USDT", "")
+        "#{base}/USDT"
+
+      String.ends_with?(pair, "USDC") ->
+        base = String.replace_suffix(pair, "USDC", "")
+        "#{base}/USDC"
+
+      String.ends_with?(pair, "BUSD") ->
+        base = String.replace_suffix(pair, "BUSD", "")
+        "#{base}/BUSD"
+
+      String.ends_with?(pair, "BTC") ->
+        base = String.replace_suffix(pair, "BTC", "")
+        "#{base}/BTC"
+
+      String.ends_with?(pair, "ETH") ->
+        base = String.replace_suffix(pair, "ETH", "")
+        "#{base}/ETH"
+
+      true ->
+        # Already formatted or unknown format
+        pair
+    end
+  end
+
+  defp format_price(price) when is_number(price) do
+    cond do
+      price >= 1000 -> :erlang.float_to_binary(price / 1, decimals: 2)
+      price >= 1 -> :erlang.float_to_binary(price / 1, decimals: 2)
+      price >= 0.01 -> :erlang.float_to_binary(price / 1, decimals: 4)
+      true -> :erlang.float_to_binary(price / 1, decimals: 8)
+    end
+  end
+
+  defp format_price(_), do: "0.00"
+
+  defp get_cached_prices do
+    # Try to get prices from cache, fallback to defaults
+    case Cache.get_all_prices() do
+      prices when map_size(prices) > 0 ->
+        prices
+
+      _ ->
+        # Return empty map, will be populated by WebSocket
+        %{}
+    end
+  end
+
+  defp fetch_candlestick_data(pair, interval) do
+    # Spawn async task to fetch candlestick data
+    require Logger
+    Logger.info("Fetching candlestick data for #{pair} #{interval}")
+
+    parent = self()
+
+    Task.start(fn ->
+      # First, try to get from cache
+      case Cache.get_candles(pair, interval) do
+        nil ->
+          Logger.info("No cache, fetching from Binance API for #{pair}")
+          # Not in cache, fetch from Binance API
+          case Client.fetch_and_cache_klines(pair, interval, limit: 100) do
+            {:ok, candles} ->
+              Logger.info("Successfully fetched #{length(candles)} candles from Binance for #{pair}")
+              send(parent, {:candlestick_data, pair, candles})
+
+            {:error, reason} ->
+              Logger.error("Failed to fetch from Binance: #{inspect(reason)}")
+              send(parent, {:candlestick_error, pair, reason})
+          end
+
+        candles ->
+          # Found in cache
+          Logger.info("Found #{length(candles)} candles in cache for #{pair}")
+          send(parent, {:candlestick_data, pair, candles})
+      end
+    end)
+  end
+
+  defp build_candlestick_chart(pair, candles) do
+    # Transform candles for ApexCharts format
+    chart_data =
+      Enum.map(candles, fn candle ->
+        %{
+          x: candle.open_time || candle[:x],
+          y: candle[:y] || [candle.open, candle.high, candle.low, candle.close]
+        }
+      end)
 
     %{
       chart: %{
@@ -92,7 +202,7 @@ defmodule StellaAdminWeb.TradingLive do
       series: [
         %{
           name: pair,
-          data: data
+          data: chart_data
         }
       ],
       xaxis: %{
@@ -130,24 +240,6 @@ defmodule StellaAdminWeb.TradingLive do
       }
     }
     |> Jason.encode!()
-  end
-
-  defp generate_candlestick_data do
-    base_time = System.system_time(:millisecond) - 3_600_000
-    base_price = 44_000
-
-    Enum.map(0..59, fn i ->
-      time = base_time + i * 60_000
-      open = base_price + :rand.uniform(1000) - 500
-      high = open + :rand.uniform(400)
-      low = open - :rand.uniform(400)
-      close = low + :rand.uniform(trunc(high - low))
-
-      %{
-        x: time,
-        y: [open, high, low, close]
-      }
-    end)
   end
 
   defp get_active_trades do
@@ -363,18 +455,29 @@ defmodule StellaAdminWeb.TradingLive do
             </div>
           </div>
           <div class="p-4 space-y-3">
-            <%= for {pair, price} <- @live_prices do %>
+            <%= for {pair, price_data} <- @live_prices do %>
+              <%
+                price = if is_map(price_data), do: price_data.price, else: price_data
+                # Format pair name: BTCUSDT -> BTC/USDT
+                formatted_pair = cond do
+                  String.ends_with?(pair, "USDT") -> String.replace_suffix(pair, "USDT", "") <> "/USDT"
+                  String.ends_with?(pair, "USDC") -> String.replace_suffix(pair, "USDC", "") <> "/USDC"
+                  String.ends_with?(pair, "BTC") -> String.replace_suffix(pair, "BTC", "") <> "/BTC"
+                  String.ends_with?(pair, "ETH") -> String.replace_suffix(pair, "ETH", "") <> "/ETH"
+                  true -> pair
+                end
+              %>
               <button
                 phx-click="select_pair"
-                phx-value-pair={pair}
+                phx-value-pair={formatted_pair}
                 class={[
                   "w-full text-left p-3 rounded border transition-all",
-                  @selected_pair == pair && "bg-primary/10 border-primary",
-                  @selected_pair != pair && "bg-base-300/30 border-base-300/50 hover:bg-base-300/50"
+                  @selected_pair == formatted_pair && "bg-primary/10 border-primary",
+                  @selected_pair != formatted_pair && "bg-base-300/30 border-base-300/50 hover:bg-base-300/50"
                 ]}
               >
                 <div class="flex items-center justify-between mb-1">
-                  <p class="text-sm font-bold text-base-content"><%= pair %></p>
+                  <p class="text-sm font-bold text-base-content"><%= formatted_pair %></p>
                   <%= case Map.get(@price_changes, pair, :neutral) do %>
                     <% :up -> %>
                       <.icon name="hero-arrow-trending-up" class="size-4 text-success animate-pulse" />
@@ -390,8 +493,17 @@ defmodule StellaAdminWeb.TradingLive do
                   Map.get(@price_changes, pair) == :down && "text-error",
                   Map.get(@price_changes, pair) == :neutral && "text-base-content"
                 ]}>
-                  $<%= :erlang.float_to_binary(price / 1, decimals: 2) %>
+                  $<%= format_price(price) %>
                 </p>
+                <%= if is_map(price_data) && price_data.change_24h do %>
+                  <p class={[
+                    "text-xs mt-1",
+                    price_data.change_24h >= 0 && "text-success",
+                    price_data.change_24h < 0 && "text-error"
+                  ]}>
+                    <%= if price_data.change_24h >= 0, do: "+", else: "" %><%= :erlang.float_to_binary(price_data.change_24h, decimals: 2) %>%
+                  </p>
+                <% end %>
               </button>
             <% end %>
           </div>
@@ -412,14 +524,29 @@ defmodule StellaAdminWeb.TradingLive do
             </div>
           </div>
           <div class="p-4">
-            <div
-              id="candlestick-chart"
-              phx-hook="ApexChart"
-              phx-update="ignore"
-              data-chart={@candlestick_chart}
-              class="w-full"
-            >
-            </div>
+            <%= if @loading_chart do %>
+              <div class="flex items-center justify-center h-[350px]">
+                <div class="text-center">
+                  <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                  <p class="text-sm text-base-content/60">Loading chart data...</p>
+                </div>
+              </div>
+            <% else %>
+              <%= if @candlestick_chart do %>
+                <div
+                  id="candlestick-chart"
+                  phx-hook="ApexChart"
+                  phx-update="ignore"
+                  data-chart={@candlestick_chart}
+                  class="w-full"
+                >
+                </div>
+              <% else %>
+                <div class="flex items-center justify-center h-[350px]">
+                  <p class="text-sm text-base-content/60">No chart data available</p>
+                </div>
+              <% end %>
+            <% end %>
           </div>
         </div>
       </div>

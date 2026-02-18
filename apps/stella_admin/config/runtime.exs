@@ -1,27 +1,41 @@
 import Config
 
-# config/runtime.exs is executed for all environments, including
-# during releases. It is executed after compilation and before the
-# system starts, so it is typically used to load production configuration
-# and secrets from environment variables or elsewhere. Do not define
-# any compile-time configuration in here, as it won't be applied.
-# The block below contains prod specific runtime configuration.
+# Load .env file in development FIRST before reading any System.get_env()
+if config_env() == :dev do
+  if File.exists?(".env") do
+    Dotenvy.source!([".env", System.get_env()])
+  end
+end
 
-# ## Using releases
-#
-# If you use `mix release`, you need to explicitly enable the server
-# by passing the PHX_SERVER=true when you start it:
-#
-#     PHX_SERVER=true bin/stella_admin start
-#
-# Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
-# script that automatically sets the env var above.
 if System.get_env("PHX_SERVER") do
   config :stella_admin, StellaAdminWeb.Endpoint, server: true
 end
 
 config :stella_admin, StellaAdminWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+
+# Database configuration
+config :stella_admin, StellaAdmin.Repo,
+  hostname: System.get_env("DB_HOST", "170.168.103.207"),
+  port: String.to_integer(System.get_env("DB_PORT", "3212")),
+  database: System.get_env("DB_NAME", "stella_platform_new"),
+  username: System.get_env("DB_USER", "postgres"),
+  password: System.get_env("DB_PASSWORD", "REDACTED"),
+  pool_size: String.to_integer(System.get_env("POOL_SIZE", "10"))
+
+config :stella_admin, ecto_repos: [StellaAdmin.Repo]
+
+# Logto OAuth2 configuration
+config :stella_admin, :logto,
+  # OAuth App credentials (for user authentication)
+  app_id: System.get_env("LOGTO_APP_ID", "92rd6uz9rn4o0ch68etka"),
+  app_secret: System.get_env("LOGTO_APP_SECRET", "REDACTED"),
+  endpoint: System.get_env("LOGTO_ENDPOINT", "https://auth.stella.praetocloud.com"),
+  redirect_uri: System.get_env("LOGTO_REDIRECT_URI", "http://localhost:4000/auth/callback"),
+  # M2M App credentials (for Management API access)
+  m2m_app_id: System.get_env("LOGTO_M2M_APP_ID", "16ar1meg43kpfwpemiqh0"),
+  m2m_app_secret: System.get_env("LOGTO_M2M_APP_SECRET", "REDACTED"),
+  webhook_signing_key: System.get_env("LOGTO_WEBHOOK_SIGNING_KEY")
 
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.

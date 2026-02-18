@@ -1,14 +1,56 @@
 defmodule StellaAdminWeb.DashboardLive do
   use StellaAdminWeb, :live_view
+  alias StellaAdmin.Dashboard
+
+  @refresh_interval 10_000
 
   @impl true
   def mount(_params, _session, socket) do
+    # Schedule first refresh
+    if connected?(socket) do
+      schedule_refresh()
+    end
+
     {:ok,
      socket
      |> assign(:page_title, "Dashboard")
      |> assign(:current_page, :dashboard)
+     |> load_metrics()
      |> assign_chart_data()}
   end
+
+  @impl true
+  def handle_info(:refresh_metrics, socket) do
+    schedule_refresh()
+    {:noreply, load_metrics(socket)}
+  end
+
+  defp schedule_refresh do
+    Process.send_after(self(), :refresh_metrics, @refresh_interval)
+  end
+
+  defp load_metrics(socket) do
+    metrics = Dashboard.get_platform_metrics()
+
+    socket
+    |> assign(:metrics, metrics)
+    |> assign(:total_users, metrics.users.total || 0)
+    |> assign(:active_users, metrics.users.active || 0)
+    |> assign(:active_bots, metrics.bots.active || 0)
+    |> assign(:total_equity_usd, format_decimal(metrics.trading.total_equity_usd))
+    |> assign(:todays_pnl_usd, format_decimal(metrics.trading.todays_pnl_usd))
+    |> assign(:open_positions, metrics.trading.open_positions || 0)
+    |> assign(:pending_kyc, metrics.operations.pending_kyc || 0)
+    |> assign(:pending_withdrawals, metrics.operations.pending_withdrawals || 0)
+    |> assign(:recent_breakers, metrics.risk.recent_breakers || 0)
+  end
+
+  defp format_decimal(value) when is_struct(value, Decimal) do
+    value
+    |> Decimal.round(2)
+    |> Decimal.to_string()
+  end
+  defp format_decimal(_value), do: "0.00"
 
   defp assign_chart_data(socket) do
     socket
@@ -276,41 +318,37 @@ defmodule StellaAdminWeb.DashboardLive do
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <.stat_card
           title="Total Users"
-          value="12,543"
-          change="+12.5% vs last month"
-          trend="up"
+          value={@total_users |> to_string()}
+          subtitle="Platform users"
         />
         <.stat_card
-          title="Active Traders"
-          value="3,891"
-          change="+8.2% vs last month"
-          trend="up"
+          title="Active Users"
+          value={@active_users |> to_string()}
+          subtitle="Status: active"
         />
         <.stat_card
-          title="24h Trading Volume"
-          value="$2.4M"
-          change="-3.1% vs yesterday"
-          trend="down"
+          title="Active Bots"
+          value={@active_bots |> to_string()}
+          subtitle="Currently running"
         />
         <.stat_card
-          title="Platform Revenue"
-          value="$187.2K"
-          change="+15.3% vs last month"
-          trend="up"
+          title="Platform Equity"
+          value={"$#{@total_equity_usd}"}
+          subtitle="Total P&L (USD)"
         />
 
-        <%!-- Active Copy Trades --%>
+        <%!-- Today's P&L --%>
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-sm text-base-content/60 mb-1">Active Copy Trades</p>
-          <p class="text-2xl font-bold text-base-content mb-1">1,247</p>
-          <p class="text-xs text-success">+18% This Week</p>
+          <p class="text-sm text-base-content/60 mb-1">Today's P&L</p>
+          <p class="text-2xl font-bold text-base-content mb-1">$<%= @todays_pnl_usd %></p>
+          <p class="text-xs text-base-content/50">Realized today</p>
         </div>
 
-        <%!-- Pending Verifications --%>
+        <%!-- Pending KYC --%>
         <div class="bg-base-200 rounded p-4 border border-base-300">
-          <p class="text-sm text-base-content/60 mb-1">Pending Verifications</p>
-          <p class="text-2xl font-bold text-base-content mb-1">23</p>
-          <p class="text-xs text-base-content/50">Requires Action</p>
+          <p class="text-sm text-base-content/60 mb-1">Pending KYC</p>
+          <p class="text-2xl font-bold text-base-content mb-1"><%= @pending_kyc %></p>
+          <p class="text-xs text-base-content/50">Requires review</p>
         </div>
       </div>
 
@@ -472,46 +510,48 @@ defmodule StellaAdminWeb.DashboardLive do
 
         <%!-- Quick Stats Column --%>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-3">
-          <%!-- Average Copy Success Rate --%>
-          <div class="bg-base-200 rounded p-3 border border-base-300">
-            <p class="text-xs text-base-content/60 mb-1">Copy Success Rate</p>
-            <p class="text-xl font-bold text-base-content mb-0.5">87.3%</p>
-            <p class="text-xs text-success">+2.1% Month</p>
-          </div>
-
-          <%!-- Average Trade Duration --%>
-          <div class="bg-base-200 rounded p-3 border border-base-300">
-            <p class="text-xs text-base-content/60 mb-1">Avg Trade Duration</p>
-            <p class="text-xl font-bold text-base-content mb-0.5">4.2h</p>
-            <p class="text-xs text-base-content/50">Median: 2.8h</p>
-          </div>
-
-          <%!-- Platform Fee Revenue --%>
-          <div class="bg-base-200 rounded p-3 border border-base-300">
-            <p class="text-xs text-base-content/60 mb-1">Platform Fees (24h)</p>
-            <p class="text-xl font-bold text-base-content mb-0.5">$12.4K</p>
-            <p class="text-xs text-success">+8.5% vs Yesterday</p>
-          </div>
-
-          <%!-- Win Rate --%>
-          <div class="bg-base-200 rounded p-3 border border-base-300">
-            <p class="text-xs text-base-content/60 mb-1">Avg Win Rate</p>
-            <p class="text-xl font-bold text-base-content mb-0.5">64.8%</p>
-            <p class="text-xs text-success">+1.3% Week</p>
-          </div>
-
           <%!-- Total Positions Open --%>
           <div class="bg-base-200 rounded p-3 border border-base-300">
             <p class="text-xs text-base-content/60 mb-1">Open Positions</p>
-            <p class="text-xl font-bold text-base-content mb-0.5">2,847</p>
-            <p class="text-xs text-base-content/50">Across 1,234 users</p>
+            <p class="text-xl font-bold text-base-content mb-0.5"><%= @open_positions %></p>
+            <p class="text-xs text-base-content/50">Currently open</p>
           </div>
 
-          <%!-- Risk Score --%>
+          <%!-- Circuit Breakers (24h) --%>
           <div class="bg-base-200 rounded p-3 border border-base-300">
-            <p class="text-xs text-base-content/60 mb-1">Avg Risk Score</p>
-            <p class="text-xl font-bold text-base-content mb-0.5">6.2/10</p>
-            <p class="text-xs text-warning">Medium Risk</p>
+            <p class="text-xs text-base-content/60 mb-1">Breakers (24h)</p>
+            <p class="text-xl font-bold text-base-content mb-0.5"><%= @recent_breakers %></p>
+            <p class="text-xs text-base-content/50">Risk events</p>
+          </div>
+
+          <%!-- Pending Withdrawals --%>
+          <div class="bg-base-200 rounded p-3 border border-base-300">
+            <p class="text-xs text-base-content/60 mb-1">Pending Withdrawals</p>
+            <p class="text-xl font-bold text-base-content mb-0.5"><%= @pending_withdrawals %></p>
+            <p class="text-xs text-base-content/50">Awaiting approval</p>
+          </div>
+
+          <%!-- Active Bots Status --%>
+          <div class="bg-base-200 rounded p-3 border border-base-300">
+            <p class="text-xs text-base-content/60 mb-1">Active Bots</p>
+            <p class="text-xl font-bold text-base-content mb-0.5"><%= @active_bots %></p>
+            <p class="text-xs text-base-content/50">Status: running</p>
+          </div>
+
+          <%!-- Platform Status --%>
+          <div class="bg-base-200 rounded p-3 border border-base-300">
+            <p class="text-xs text-base-content/60 mb-1">Platform Status</p>
+            <p class="text-xl font-bold text-base-content mb-0.5">
+              <%= if @active_bots > 0 || @open_positions > 0, do: "Active", else: "Idle" %>
+            </p>
+            <p class="text-xs text-success">All Systems Operational</p>
+          </div>
+
+          <%!-- Database Status --%>
+          <div class="bg-base-200 rounded p-3 border border-base-300">
+            <p class="text-xs text-base-content/60 mb-1">Data Freshness</p>
+            <p class="text-xl font-bold text-base-content mb-0.5">Live</p>
+            <p class="text-xs text-base-content/50">Auto-refresh 10s</p>
           </div>
         </div>
       </div>

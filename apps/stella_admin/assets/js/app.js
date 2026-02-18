@@ -41,11 +41,43 @@ const ApexChartHook = {
   }
 }
 
+// Phone Input Hook - Auto-format phone numbers
+const PhoneInputHook = {
+  mounted() {
+    this.el.addEventListener('input', (e) => {
+      let value = e.target.value.replace(/\D/g, '')
+
+      // Auto-add + for international format
+      if (value.length > 0 && !e.target.value.startsWith('+')) {
+        value = '+' + value
+      } else if (e.target.value.startsWith('+')) {
+        value = '+' + value
+      }
+
+      e.target.value = value
+    })
+
+    this.el.addEventListener('blur', (e) => {
+      // Validate format on blur
+      const value = e.target.value
+      if (value && !value.match(/^\+\d{10,15}$/)) {
+        // Invalid format - show visual feedback
+        e.target.classList.add('border-red-500')
+      } else {
+        e.target.classList.remove('border-red-500')
+      }
+    })
+  }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {ApexChart: ApexChartHook},
+  hooks: {
+    ApexChart: ApexChartHook,
+    PhoneInput: PhoneInputHook
+  },
 })
 
 // Show progress bar on live navigation and form submits

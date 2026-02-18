@@ -8,19 +8,37 @@ defmodule StellaAdminWeb.Router do
     plug :put_root_layout, html: {StellaAdminWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug StellaAdminWeb.Plugs.LoadAdminUser
   end
 
   pipeline :api do
     plug :accepts, ["json"]
   end
 
-  scope "/", StellaAdminWeb do
+  pipeline :require_admin_auth do
+    plug StellaAdminWeb.Plugs.RequireAdminAuth
+  end
+
+  scope "/auth", StellaAdminWeb do
     pipe_through :browser
 
-    live_session :admin, layout: {StellaAdminWeb.Layouts, :admin} do
+    get "/sign-in", AuthController, :sign_in
+    get "/callback", AuthController, :callback
+    get "/sign-out", AuthController, :sign_out
+  end
+
+  scope "/", StellaAdminWeb do
+    pipe_through :browser
+    pipe_through :require_admin_auth
+
+    live_session :admin,
+      layout: {StellaAdminWeb.Layouts, :admin},
+      on_mount: {StellaAdminWeb.LiveAuth, :require_admin} do
       live "/", DashboardLive
       live "/users", UsersLive
       live "/users/:id", UserDetailLive
+      live "/kyc-review", KycReviewLive
+      live "/kyc-review/:id", KycDetailLive
       live "/trading", TradingLive
       live "/finance", FinanceLive
       live "/content", ContentLive
@@ -28,13 +46,19 @@ defmodule StellaAdminWeb.Router do
       live "/support", SupportLive
       live "/observability", ObservabilityLive
       live "/settings", SettingsLive
+      live "/system/admins", AdminUsersLive
+      live "/system/admins/new", InviteAdminLive
+      live "/system/admins/:id", AdminUserDetailLive
     end
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", StellaAdminWeb do
-  #   pipe_through :api
-  # end
+  # API routes
+  scope "/api", StellaAdminWeb.Api do
+    pipe_through :api
+
+    post "/user-webhooks", WebhookController, :user_webhooks
+    post "/admin-webhooks", WebhookController, :admin_webhooks
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:stella_admin, :dev_routes) do

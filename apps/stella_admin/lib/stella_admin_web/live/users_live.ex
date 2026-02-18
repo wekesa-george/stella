@@ -1,5 +1,6 @@
 defmodule StellaAdminWeb.UsersLive do
   use StellaAdminWeb, :live_view
+  alias StellaAdmin.Users
 
   @impl true
   def mount(_params, _session, socket) do
@@ -7,25 +8,84 @@ defmodule StellaAdminWeb.UsersLive do
      socket
      |> assign(:page_title, "Users")
      |> assign(:current_page, :users)
-     |> assign(:users, sample_users())
-     |> assign(:filter, "all")
+     |> assign(:users, [])
+     |> assign(:pagination, %{})
+     |> assign(:stats, %{})
+     |> assign(:filters, %{page: 1, page_size: 20})
+     |> assign(:show_filters, false)
      |> assign(:show_suspend_modal, false)
-     |> assign(:selected_user, nil)}
+     |> assign(:show_change_tier_modal, false)
+     |> assign(:selected_user, nil)
+     |> assign(:suspend_reason, "")
+     |> assign(:tier_change_reason, "")
+     |> assign(:new_tier, nil)}
   end
 
   @impl true
-  def handle_event("filter", %{"type" => type}, socket) do
-    {:noreply, assign(socket, :filter, type)}
+  def handle_params(params, _url, socket) do
+    page = String.to_integer(params["page"] || "1")
+
+    filters =
+      socket.assigns.filters
+      |> Map.put(:page, page)
+      |> maybe_add_filter(:email, params["email"])
+      |> maybe_add_filter(:status, parse_atom(params["status"]))
+      |> maybe_add_filter(:tier, parse_atom(params["tier"]))
+
+    {users, pagination} = Users.list_users(filters)
+    stats = Users.get_user_stats()
+
+    {:noreply,
+     socket
+     |> assign(:users, users)
+     |> assign(:pagination, pagination)
+     |> assign(:stats, stats)
+     |> assign(:filters, filters)}
+  end
+
+  @impl true
+  def handle_event("filter", %{"status" => status}, socket) do
+    filters = Map.put(socket.assigns.filters, :status, parse_atom(status))
+
+    params = build_params(filters)
+    {:noreply, push_patch(socket, to: ~p"/users?#{params}")}
+  end
+
+  @impl true
+  def handle_event("filter_tier", %{"tier" => tier}, socket) do
+    filters = Map.put(socket.assigns.filters, :tier, parse_atom(tier))
+
+    params = build_params(filters)
+    {:noreply, push_patch(socket, to: ~p"/users?#{params}")}
+  end
+
+  @impl true
+  def handle_event("search", %{"email" => email}, socket) do
+    filters = Map.put(socket.assigns.filters, :email, email)
+
+    params = build_params(filters)
+    {:noreply, push_patch(socket, to: ~p"/users?#{params}")}
+  end
+
+  @impl true
+  def handle_event("clear_filters", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/users")}
+  end
+
+  @impl true
+  def handle_event("toggle_filters", _params, socket) do
+    {:noreply, assign(socket, :show_filters, !socket.assigns.show_filters)}
   end
 
   @impl true
   def handle_event("show_suspend_modal", %{"user-id" => user_id}, socket) do
-    user = Enum.find(socket.assigns.users, &(&1.id == String.to_integer(user_id)))
+    user = Users.get_user_detail(user_id)
 
     {:noreply,
      socket
      |> assign(:show_suspend_modal, true)
-     |> assign(:selected_user, user)}
+     |> assign(:selected_user, user)
+     |> assign(:suspend_reason, "")}
   end
 
   @impl true
@@ -33,28 +93,116 @@ defmodule StellaAdminWeb.UsersLive do
     {:noreply,
      socket
      |> assign(:show_suspend_modal, false)
-     |> assign(:selected_user, nil)}
+     |> assign(:selected_user, nil)
+     |> assign(:suspend_reason, "")}
+  end
+
+  @impl true
+  def handle_event("update_suspend_reason", %{"reason" => reason}, socket) do
+    {:noreply, assign(socket, :suspend_reason, reason)}
   end
 
   @impl true
   def handle_event("suspend_user", _params, socket) do
     user = socket.assigns.selected_user
+    current_admin = socket.assigns.current_admin
+    reason = socket.assigns.suspend_reason
 
-    updated_users =
-      Enum.map(socket.assigns.users, fn u ->
-        if u.id == user.id do
-          %{u | status: "suspended"}
-        else
-          u
-        end
-      end)
+    case Users.suspend_user(user, current_admin.id, reason) do
+      {:ok, _updated_user} ->
+        # Reload users list
+        {users, pagination} = Users.list_users(socket.assigns.filters)
+
+        {:noreply,
+         socket
+         |> assign(:users, users)
+         |> assign(:pagination, pagination)
+         |> assign(:show_suspend_modal, false)
+         |> assign(:selected_user, nil)
+         |> assign(:suspend_reason, "")
+         |> put_flash(:info, "User suspended successfully.")}
+
+      {:error, _changeset} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to suspend user.")}
+    end
+  end
+
+  @impl true
+  def handle_event("show_change_tier_modal", %{"user-id" => user_id}, socket) do
+    user = Users.get_user_detail(user_id)
 
     {:noreply,
      socket
-     |> assign(:users, updated_users)
-     |> assign(:show_suspend_modal, false)
+     |> assign(:show_change_tier_modal, true)
+     |> assign(:selected_user, user)
+     |> assign(:new_tier, user.tier)
+     |> assign(:tier_change_reason, "")}
+  end
+
+  @impl true
+  def handle_event("close_change_tier_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_change_tier_modal, false)
      |> assign(:selected_user, nil)
-     |> put_flash(:info, "User #{user.name} has been suspended successfully.")}
+     |> assign(:new_tier, nil)
+     |> assign(:tier_change_reason, "")}
+  end
+
+  @impl true
+  def handle_event("update_tier_selection", %{"tier" => tier}, socket) do
+    {:noreply, assign(socket, :new_tier, String.to_atom(tier))}
+  end
+
+  @impl true
+  def handle_event("update_tier_reason", %{"reason" => reason}, socket) do
+    {:noreply, assign(socket, :tier_change_reason, reason)}
+  end
+
+  @impl true
+  def handle_event("change_tier", _params, socket) do
+    user = socket.assigns.selected_user
+    current_admin = socket.assigns.current_admin
+    new_tier = socket.assigns.new_tier
+    reason = socket.assigns.tier_change_reason
+
+    case Users.change_user_tier(user, new_tier, current_admin.id, reason) do
+      {:ok, _updated_user} ->
+        # Reload users list
+        {users, pagination} = Users.list_users(socket.assigns.filters)
+
+        {:noreply,
+         socket
+         |> assign(:users, users)
+         |> assign(:pagination, pagination)
+         |> assign(:show_change_tier_modal, false)
+         |> assign(:selected_user, nil)
+         |> assign(:new_tier, nil)
+         |> assign(:tier_change_reason, "")
+         |> put_flash(:info, "User tier changed successfully.")}
+
+      {:error, _changeset} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to change user tier.")}
+    end
+  end
+
+  defp maybe_add_filter(filters, _key, nil), do: filters
+  defp maybe_add_filter(filters, _key, ""), do: filters
+  defp maybe_add_filter(filters, key, value), do: Map.put(filters, key, value)
+
+  defp parse_atom(nil), do: nil
+  defp parse_atom(""), do: nil
+  defp parse_atom(value) when is_binary(value), do: String.to_atom(value)
+  defp parse_atom(value), do: value
+
+  defp build_params(filters) do
+    filters
+    |> Enum.reject(fn {k, v} -> k in [:page_size] or is_nil(v) or v == "" end)
+    |> Enum.into(%{})
   end
 
   defp format_number(number) when is_integer(number) do
@@ -67,129 +215,50 @@ defmodule StellaAdminWeb.UsersLive do
     |> String.reverse()
   end
 
-  defp sample_users do
-    [
-      %{
-        id: 1,
-        name: "Sarah Chen",
-        email: "sarah.chen@example.com",
-        username: "@crypto_queen",
-        status: "active",
-        verified: true,
-        joined: "2025-12-15",
-        total_trades: 1247,
-        portfolio_value: "$45,230",
-        followers: 2341,
-        following: 89,
-        win_rate: "68.3%",
-        avatar_color: "bg-purple-500"
-      },
-      %{
-        id: 2,
-        name: "Michael Torres",
-        email: "michael.torres@example.com",
-        username: "@btc_master",
-        status: "active",
-        verified: true,
-        joined: "2025-11-22",
-        total_trades: 892,
-        portfolio_value: "$32,450",
-        followers: 1892,
-        following: 124,
-        win_rate: "72.1%",
-        avatar_color: "bg-blue-500"
-      },
-      %{
-        id: 3,
-        name: "Emma Wilson",
-        email: "emma.wilson@example.com",
-        username: "@eth_trader",
-        status: "active",
-        verified: true,
-        joined: "2026-01-08",
-        total_trades: 654,
-        portfolio_value: "$28,900",
-        followers: 1654,
-        following: 67,
-        win_rate: "65.8%",
-        avatar_color: "bg-green-500"
-      },
-      %{
-        id: 4,
-        name: "James Park",
-        email: "james.park@example.com",
-        username: "@sol_whale",
-        status: "active",
-        verified: false,
-        joined: "2026-01-20",
-        total_trades: 423,
-        portfolio_value: "$18,750",
-        followers: 892,
-        following: 45,
-        win_rate: "61.4%",
-        avatar_color: "bg-orange-500"
-      },
-      %{
-        id: 5,
-        name: "Maria Garcia",
-        email: "maria.garcia@example.com",
-        username: "@defi_maven",
-        status: "suspended",
-        verified: true,
-        joined: "2025-10-14",
-        total_trades: 1089,
-        portfolio_value: "$0",
-        followers: 1234,
-        following: 156,
-        win_rate: "58.2%",
-        avatar_color: "bg-red-500"
-      },
-      %{
-        id: 6,
-        name: "Alex Kumar",
-        email: "alex.kumar@example.com",
-        username: "@alt_hunter",
-        status: "active",
-        verified: true,
-        joined: "2025-12-01",
-        total_trades: 734,
-        portfolio_value: "$22,100",
-        followers: 1456,
-        following: 92,
-        win_rate: "69.7%",
-        avatar_color: "bg-indigo-500"
-      },
-      %{
-        id: 7,
-        name: "Sophie Martin",
-        email: "sophie.martin@example.com",
-        username: "@margin_queen",
-        status: "inactive",
-        verified: false,
-        joined: "2025-09-05",
-        total_trades: 234,
-        portfolio_value: "$5,230",
-        followers: 456,
-        following: 34,
-        win_rate: "54.1%",
-        avatar_color: "bg-pink-500"
-      },
-      %{
-        id: 8,
-        name: "David Lee",
-        email: "david.lee@example.com",
-        username: "@day_trader",
-        status: "active",
-        verified: true,
-        joined: "2026-01-15",
-        total_trades: 2145,
-        portfolio_value: "$67,890",
-        followers: 3234,
-        following: 178,
-        win_rate: "71.5%",
-        avatar_color: "bg-teal-500"
-      }
+  defp format_number(nil), do: "0"
+
+  defp get_user_initials(user) do
+    cond do
+      user.username && user.username != "" ->
+        user.username |> String.first() |> String.upcase()
+
+      user.email ->
+        user.email |> String.first() |> String.upcase()
+
+      true ->
+        "U"
+    end
+  end
+
+  defp get_avatar_color(index) do
+    colors = [
+      "bg-purple-500",
+      "bg-blue-500",
+      "bg-green-500",
+      "bg-orange-500",
+      "bg-red-500",
+      "bg-indigo-500",
+      "bg-pink-500",
+      "bg-teal-500"
     ]
+
+    Enum.at(colors, rem(index, length(colors)))
+  end
+
+  defp format_tier(tier) do
+    case tier do
+      :stella_one -> "Stella One"
+      :stella_unum -> "Stella Unum"
+      :stella_eon -> "Stella Eon"
+      :stella_plenum -> "Stella Plenum"
+      _ -> "Unknown"
+    end
+  end
+
+  defp format_date(nil), do: "-"
+
+  defp format_date(datetime) do
+    Calendar.strftime(datetime, "%Y-%m-%d")
   end
 
   @impl true
@@ -214,32 +283,40 @@ defmodule StellaAdminWeb.UsersLive do
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Total Users</p>
-          <p class="text-2xl font-bold text-base-content mb-1">12,543</p>
-          <p class="text-xs text-success">+12.5% vs last month</p>
+          <p class="text-2xl font-bold text-base-content mb-1">
+            <%= format_number(@stats[:total_users] || 0) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Active Users</p>
-          <p class="text-2xl font-bold text-base-content mb-1">8,234</p>
-          <p class="text-xs text-success">+8.3% vs last month</p>
+          <p class="text-2xl font-bold text-base-content mb-1">
+            <%= format_number(@stats[:active_users] || 0) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Verified Users</p>
-          <p class="text-2xl font-bold text-base-content mb-1">9,876</p>
-          <p class="text-xs text-base-content/50">78.7% of total</p>
+          <p class="text-2xl font-bold text-base-content mb-1">
+            <%= format_number(@stats[:verified_users] || 0) %>
+          </p>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">Suspended</p>
-          <p class="text-2xl font-bold text-base-content mb-1">45</p>
-          <p class="text-xs text-error">Needs attention</p>
+          <p class="text-2xl font-bold text-base-content mb-1">
+            <%= format_number(@stats[:suspended_users] || 0) %>
+          </p>
+          <%= if @stats[:suspended_users] && @stats[:suspended_users] > 0 do %>
+            <p class="text-xs text-error">Needs attention</p>
+          <% end %>
         </div>
 
         <div class="bg-base-200 rounded p-4 border border-base-300">
           <p class="text-sm text-base-content/60 mb-1">New This Week</p>
-          <p class="text-2xl font-bold text-base-content mb-1">234</p>
-          <p class="text-xs text-success">+15.2% vs last week</p>
+          <p class="text-2xl font-bold text-base-content mb-1">
+            <%= format_number(@stats[:new_this_week] || 0) %>
+          </p>
         </div>
       </div>
 
@@ -249,10 +326,10 @@ defmodule StellaAdminWeb.UsersLive do
           <div class="flex items-center space-x-2 overflow-x-auto w-full md:w-auto">
             <button
               phx-click="filter"
-              phx-value-type="all"
+              phx-value-status=""
               class={[
-                "px-3 py-1.5 rounded text-xs font-medium transition-colors",
-                @filter == "all" && "bg-primary text-primary-content" ||
+                "px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                is_nil(@filters[:status]) && "bg-primary text-primary-content" ||
                   "bg-base-300 text-base-content/70 hover:text-base-content"
               ]}
             >
@@ -260,10 +337,10 @@ defmodule StellaAdminWeb.UsersLive do
             </button>
             <button
               phx-click="filter"
-              phx-value-type="active"
+              phx-value-status="active"
               class={[
-                "px-3 py-1.5 rounded text-xs font-medium transition-colors",
-                @filter == "active" && "bg-primary text-primary-content" ||
+                "px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                @filters[:status] == :active && "bg-primary text-primary-content" ||
                   "bg-base-300 text-base-content/70 hover:text-base-content"
               ]}
             >
@@ -271,35 +348,50 @@ defmodule StellaAdminWeb.UsersLive do
             </button>
             <button
               phx-click="filter"
-              phx-value-type="verified"
+              phx-value-status="suspended"
               class={[
-                "px-3 py-1.5 rounded text-xs font-medium transition-colors",
-                @filter == "verified" && "bg-primary text-primary-content" ||
-                  "bg-base-300 text-base-content/70 hover:text-base-content"
-              ]}
-            >
-              Verified
-            </button>
-            <button
-              phx-click="filter"
-              phx-value-type="suspended"
-              class={[
-                "px-3 py-1.5 rounded text-xs font-medium transition-colors",
-                @filter == "suspended" && "bg-primary text-primary-content" ||
+                "px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                @filters[:status] == :suspended && "bg-primary text-primary-content" ||
                   "bg-base-300 text-base-content/70 hover:text-base-content"
               ]}
             >
               Suspended
             </button>
+            <button
+              phx-click="filter"
+              phx-value-status="pending_verification"
+              class={[
+                "px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                @filters[:status] == :pending_verification && "bg-primary text-primary-content" ||
+                  "bg-base-300 text-base-content/70 hover:text-base-content"
+              ]}
+            >
+              Pending
+            </button>
+            <button
+              phx-click="filter"
+              phx-value-status="banned"
+              class={[
+                "px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                @filters[:status] == :banned && "bg-primary text-primary-content" ||
+                  "bg-base-300 text-base-content/70 hover:text-base-content"
+              ]}
+            >
+              Banned
+            </button>
           </div>
 
           <div class="relative w-full md:w-auto">
             <.icon name="hero-magnifying-glass" class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-base-content/40 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search users..."
-              class="bg-base-300 border-0 rounded pl-9 pr-3 py-2 text-sm text-base-content placeholder:text-base-content/40 focus:outline-none focus:ring-2 focus:ring-primary w-full md:w-64"
-            />
+            <form phx-submit="search">
+              <input
+                type="text"
+                name="email"
+                value={@filters[:email] || ""}
+                placeholder="Search by email..."
+                class="bg-base-300 border-0 rounded pl-9 pr-3 py-2 text-sm text-base-content placeholder:text-base-content/40 focus:outline-none focus:ring-2 focus:ring-primary w-full md:w-64"
+              />
+            </form>
           </div>
         </div>
       </div>
@@ -311,177 +403,349 @@ defmodule StellaAdminWeb.UsersLive do
             <tr>
               <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">User</th>
               <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Status</th>
+              <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Tier</th>
               <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                Portfolio Value
-              </th>
-              <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                Total Trades
-              </th>
-              <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Win Rate</th>
-              <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
-                Followers
+                Verified
               </th>
               <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Joined</th>
+              <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">
+                Last Login
+              </th>
               <th class="text-left py-3 px-4 text-xs font-medium text-base-content/60">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <%= for user <- @users do %>
-              <tr class="border-b border-base-300 hover:bg-base-300/30 transition-colors">
-                <td class="py-3 px-4">
-                  <div class="flex items-center space-x-3">
-                    <div class={"w-10 h-10 #{user.avatar_color} rounded-full flex items-center justify-center"}>
-                      <span class="text-white text-sm font-medium">
-                        <%= String.first(user.name) %>
-                      </span>
-                    </div>
-                    <div>
-                      <div class="flex items-center space-x-1">
-                        <p class="text-sm font-medium text-base-content"><%= user.name %></p>
-                        <%= if user.verified do %>
-                          <.icon name="hero-check-badge" class="size-4 text-primary" />
-                        <% end %>
-                      </div>
-                      <p class="text-xs text-base-content/60"><%= user.username %></p>
-                    </div>
-                  </div>
-                </td>
-                <td class="py-3 px-4">
-                  <span class={[
-                    "px-2 py-1 rounded-full text-xs font-medium",
-                    user.status == "active" && "bg-success/20 text-success",
-                    user.status == "suspended" && "bg-error/20 text-error",
-                    user.status == "inactive" && "bg-base-content/20 text-base-content/60"
-                  ]}>
-                    <%= String.capitalize(user.status) %>
-                  </span>
-                </td>
-                <td class="py-3 px-4">
-                  <p class="text-sm font-medium text-base-content"><%= user.portfolio_value %></p>
-                </td>
-                <td class="py-3 px-4">
-                  <p class="text-sm text-base-content">
-                    <%= format_number(user.total_trades) %>
-                  </p>
-                </td>
-                <td class="py-3 px-4">
-                  <p class="text-sm font-medium text-success"><%= user.win_rate %></p>
-                </td>
-                <td class="py-3 px-4">
-                  <p class="text-sm text-base-content">
-                    <%= format_number(user.followers) %>
-                  </p>
-                </td>
-                <td class="py-3 px-4">
-                  <p class="text-xs text-base-content/60"><%= user.joined %></p>
-                </td>
-                <td class="py-3 px-4">
-                  <div class="flex items-center space-x-2">
-                    <a
-                      href={~p"/users/#{user.id}"}
-                      class="p-1 hover:bg-base-300 rounded transition-colors"
-                      title="View Details"
-                    >
-                      <.icon name="hero-eye" class="size-4 text-base-content/60" />
-                    </a>
-                    <button
-                      phx-click="show_suspend_modal"
-                      phx-value-user-id={user.id}
-                      class="p-1 hover:bg-base-300 rounded transition-colors"
-                      title="Suspend User"
-                    >
-                      <.icon name="hero-no-symbol" class="size-4 text-error/60 hover:text-error" />
-                    </button>
-                  </div>
+            <%= if Enum.empty?(@users) do %>
+              <tr>
+                <td colspan="7" class="py-8 text-center text-base-content/60">
+                  No users found
                 </td>
               </tr>
+            <% else %>
+              <%= for {user, index} <- Enum.with_index(@users) do %>
+                <tr class="border-b border-base-300 hover:bg-base-300/30 transition-colors">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center space-x-3">
+                      <div class={"w-10 h-10 #{get_avatar_color(index)} rounded-full flex items-center justify-center"}>
+                        <span class="text-white text-sm font-medium">
+                          <%= get_user_initials(user) %>
+                        </span>
+                      </div>
+                      <div>
+                        <div class="flex items-center space-x-1">
+                          <p class="text-sm font-medium text-base-content"><%= user.email %></p>
+                        </div>
+                        <%= if user.username do %>
+                          <p class="text-xs text-base-content/60">@<%= user.username %></p>
+                        <% end %>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span class={[
+                      "px-2 py-1 rounded-full text-xs font-medium",
+                      user.status == :active && "bg-success/20 text-success",
+                      user.status == :suspended && "bg-error/20 text-error",
+                      user.status == :banned && "bg-error/20 text-error",
+                      user.status == :pending_verification && "bg-warning/20 text-warning",
+                      user.status == :deactivated && "bg-base-content/20 text-base-content/60"
+                    ]}>
+                      <%= user.status |> to_string() |> String.replace("_", " ") |> String.capitalize() %>
+                    </span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span class="px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary">
+                      <%= format_tier(user.tier) %>
+                    </span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <div class="flex items-center space-x-2">
+                      <%= if user.email_verified do %>
+                        <.icon name="hero-check-badge" class="size-4 text-success" />
+                      <% else %>
+                        <.icon name="hero-x-circle" class="size-4 text-base-content/40" />
+                      <% end %>
+                      <%= if user.phone_verified do %>
+                        <.icon name="hero-device-phone-mobile" class="size-4 text-success" />
+                      <% else %>
+                        <.icon name="hero-device-phone-mobile" class="size-4 text-base-content/40" />
+                      <% end %>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4">
+                    <p class="text-xs text-base-content/60"><%= format_date(user.created_at) %></p>
+                  </td>
+                  <td class="py-3 px-4">
+                    <p class="text-xs text-base-content/60"><%= format_date(user.last_login_at) %></p>
+                  </td>
+                  <td class="py-3 px-4">
+                    <div class="flex items-center space-x-2">
+                      <a
+                        href={~p"/users/#{user.id}"}
+                        class="p-1 hover:bg-base-300 rounded transition-colors"
+                        title="View Details"
+                      >
+                        <.icon name="hero-eye" class="size-4 text-base-content/60" />
+                      </a>
+                      <button
+                        phx-click="show_change_tier_modal"
+                        phx-value-user-id={user.id}
+                        class="p-1 hover:bg-base-300 rounded transition-colors"
+                        title="Change Tier"
+                      >
+                        <.icon name="hero-arrow-path" class="size-4 text-primary/60 hover:text-primary" />
+                      </button>
+                      <%= if user.status != :suspended do %>
+                        <button
+                          phx-click="show_suspend_modal"
+                          phx-value-user-id={user.id}
+                          class="p-1 hover:bg-base-300 rounded transition-colors"
+                          title="Suspend User"
+                        >
+                          <.icon name="hero-no-symbol" class="size-4 text-error/60 hover:text-error" />
+                        </button>
+                      <% end %>
+                    </div>
+                  </td>
+                </tr>
+              <% end %>
             <% end %>
           </tbody>
         </table>
       </div>
 
       <%!-- Pagination --%>
-      <div class="flex items-center justify-between">
-        <p class="text-xs text-base-content/60">
-          Showing 1 to 8 of 12,543 users
-        </p>
-        <div class="flex items-center space-x-2">
-          <button class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors">
-            Previous
-          </button>
-          <button class="px-3 py-1.5 bg-primary text-primary-content rounded text-xs font-medium transition-colors">
-            1
-          </button>
-          <button class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors">
-            2
-          </button>
-          <button class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors">
-            3
-          </button>
-          <span class="text-xs text-base-content/60">...</span>
-          <button class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors">
-            157
-          </button>
-          <button class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors">
-            Next
-          </button>
+      <%= if @pagination[:total_pages] && @pagination[:total_pages] > 1 do %>
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-base-content/60">
+            Showing <%= ((@pagination[:page] - 1) * @pagination[:page_size]) + 1 %> to <%= min(
+              @pagination[:page] * @pagination[:page_size],
+              @pagination[:total_count]
+            ) %> of <%= format_number(@pagination[:total_count]) %> users
+          </p>
+          <div class="flex items-center space-x-2">
+            <%= if @pagination[:page] > 1 do %>
+              <a
+                href={~p"/users?#{build_params(Map.put(@filters, :page, @pagination[:page] - 1))}"}
+                class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors"
+              >
+                Previous
+              </a>
+            <% end %>
+
+            <%= for page_num <- max(1, @pagination[:page] - 2)..min(
+                  @pagination[:total_pages],
+                  @pagination[:page] + 2
+                ) do %>
+              <a
+                href={~p"/users?#{build_params(Map.put(@filters, :page, page_num))}"}
+                class={[
+                  "px-3 py-1.5 rounded text-xs font-medium transition-colors",
+                  page_num == @pagination[:page] &&
+                    "bg-primary text-primary-content" ||
+                    "bg-base-200 hover:bg-base-300 text-base-content border border-base-300"
+                ]}
+              >
+                <%= page_num %>
+              </a>
+            <% end %>
+
+            <%= if @pagination[:page] < @pagination[:total_pages] do %>
+              <a
+                href={~p"/users?#{build_params(Map.put(@filters, :page, @pagination[:page] + 1))}"}
+                class="px-3 py-1.5 bg-base-200 hover:bg-base-300 rounded text-xs font-medium text-base-content border border-base-300 transition-colors"
+              >
+                Next
+              </a>
+            <% end %>
+          </div>
         </div>
-      </div>
+      <% end %>
     </div>
 
     <%!-- Suspend User Modal --%>
     <%= if @show_suspend_modal && @selected_user do %>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div class="bg-base-200 rounded border border-base-300 p-6 max-w-md w-full mx-4">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold text-base-content">Suspend User</h3>
-            <button
-              phx-click="close_suspend_modal"
-              class="p-1 hover:bg-base-300 rounded transition-colors"
-            >
-              <.icon name="hero-x-mark" class="size-5 text-base-content/60" />
-            </button>
+      <div
+        class="fixed inset-0 z-50 overflow-y-auto"
+        aria-labelledby="suspend-modal-title"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+          <div
+            class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/75 transition-opacity"
+            phx-click="close_suspend_modal"
+          >
           </div>
+          <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
+            &#8203;
+          </span>
+          <div class="relative inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-semibold text-base-content">Suspend User</h3>
+              <button
+                phx-click="close_suspend_modal"
+                class="p-1 hover:bg-base-300 rounded transition-colors"
+              >
+                <.icon name="hero-x-mark" class="size-5 text-base-content/60" />
+              </button>
+            </div>
 
-          <div class="mb-6">
-            <div class="flex items-center space-x-3 mb-4">
-              <div class={"w-12 h-12 #{@selected_user.avatar_color} rounded-full flex items-center justify-center"}>
-                <span class="text-white text-lg font-medium">
-                  <%= String.first(@selected_user.name) %>
-                </span>
+            <div class="mb-6">
+              <div class="flex items-center space-x-3 mb-4">
+                <div class="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                  <span class="text-white text-lg font-medium">
+                    <%= get_user_initials(@selected_user) %>
+                  </span>
+                </div>
+                <div>
+                  <p class="text-base font-medium text-base-content"><%= @selected_user.email %></p>
+                  <%= if @selected_user.username do %>
+                    <p class="text-sm text-base-content/60">@<%= @selected_user.username %></p>
+                  <% end %>
+                </div>
               </div>
+
+              <div class="bg-error/10 border border-error/20 rounded p-4 mb-4">
+                <p class="text-sm text-base-content/80">
+                  Are you sure you want to suspend this user? This action will:
+                </p>
+                <ul class="mt-2 space-y-1 text-xs text-base-content/70">
+                  <li>• Disable their trading capabilities</li>
+                  <li>• Stop all active bots</li>
+                  <li>• Prevent login access</li>
+                  <li>• Notify the user via email</li>
+                </ul>
+              </div>
+
               <div>
-                <p class="text-base font-medium text-base-content"><%= @selected_user.name %></p>
-                <p class="text-sm text-base-content/60"><%= @selected_user.username %></p>
+                <label class="block text-sm font-medium text-base-content mb-2">
+                  Reason for suspension (required)
+                </label>
+                <textarea
+                  phx-change="update_suspend_reason"
+                  name="reason"
+                  rows="3"
+                  placeholder="Enter the reason for suspending this user..."
+                  class="w-full px-3 py-2 bg-base-300 border border-base-content/20 rounded text-sm text-base-content placeholder:text-base-content/40 focus:outline-none focus:ring-2 focus:ring-primary"
+                ><%= @suspend_reason %></textarea>
               </div>
             </div>
 
-            <div class="bg-error/10 border border-error/20 rounded p-4">
-              <p class="text-sm text-base-content/80">
-                Are you sure you want to suspend this user? This action will:
-              </p>
-              <ul class="mt-2 space-y-1 text-xs text-base-content/70">
-                <li>• Disable their trading capabilities</li>
-                <li>• Close all open positions</li>
-                <li>• Prevent login access</li>
-                <li>• Notify the user via email</li>
-              </ul>
+            <div class="flex items-center justify-end space-x-3">
+              <button
+                phx-click="close_suspend_modal"
+                class="px-4 py-2 bg-base-300 hover:bg-base-content/20 rounded text-sm font-medium text-base-content transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                phx-click="suspend_user"
+                disabled={@suspend_reason == ""}
+                class="px-4 py-2 bg-error hover:bg-error/90 text-white rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Suspend User
+              </button>
             </div>
           </div>
+        </div>
+      </div>
+    <% end %>
+    <%!-- Change Tier Modal --%>
+    <%= if @show_change_tier_modal && @selected_user do %>
+      <div
+        class="fixed inset-0 z-50 overflow-y-auto"
+        aria-labelledby="tier-modal-title"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+          <div
+            class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/75 transition-opacity"
+            phx-click="close_change_tier_modal"
+          >
+          </div>
+          <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
+            &#8203;
+          </span>
+          <div class="relative inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-semibold text-base-content">Change User Tier</h3>
+              <button
+                phx-click="close_change_tier_modal"
+                class="p-1 hover:bg-base-300 rounded transition-colors"
+              >
+                <.icon name="hero-x-mark" class="size-5 text-base-content/60" />
+              </button>
+            </div>
 
-          <div class="flex items-center justify-end space-x-3">
-            <button
-              phx-click="close_suspend_modal"
-              class="px-4 py-2 bg-base-300 hover:bg-base-content/20 rounded text-sm font-medium text-base-content transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              phx-click="suspend_user"
-              class="px-4 py-2 bg-error hover:bg-error/90 text-white rounded text-sm font-medium transition-colors"
-            >
-              Suspend User
-            </button>
+            <div class="mb-6">
+              <div class="flex items-center space-x-3 mb-4">
+                <div class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                  <span class="text-white text-lg font-medium">
+                    <%= get_user_initials(@selected_user) %>
+                  </span>
+                </div>
+                <div>
+                  <p class="text-base font-medium text-base-content"><%= @selected_user.email %></p>
+                  <%= if @selected_user.username do %>
+                    <p class="text-sm text-base-content/60">@<%= @selected_user.username %></p>
+                  <% end %>
+                  <p class="text-xs text-base-content/50">
+                    Current tier: <%= format_tier(@selected_user.tier) %>
+                  </p>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-sm font-medium text-base-content mb-2">
+                  New Tier
+                </label>
+                <select
+                  phx-change="update_tier_selection"
+                  name="tier"
+                  class="w-full px-3 py-2 bg-base-300 border border-base-content/20 rounded text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="stella_one" selected={@new_tier == :stella_one}>Stella One</option>
+                  <option value="stella_unum" selected={@new_tier == :stella_unum}>
+                    Stella Unum
+                  </option>
+                  <option value="stella_eon" selected={@new_tier == :stella_eon}>Stella Eon</option>
+                  <option value="stella_plenum" selected={@new_tier == :stella_plenum}>
+                    Stella Plenum
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-base-content mb-2">
+                  Reason for tier change (required)
+                </label>
+                <textarea
+                  phx-change="update_tier_reason"
+                  name="reason"
+                  rows="3"
+                  placeholder="Enter the reason for changing this user's tier..."
+                  class="w-full px-3 py-2 bg-base-300 border border-base-content/20 rounded text-sm text-base-content placeholder:text-base-content/40 focus:outline-none focus:ring-2 focus:ring-primary"
+                ><%= @tier_change_reason %></textarea>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3">
+              <button
+                phx-click="close_change_tier_modal"
+                class="px-4 py-2 bg-base-300 hover:bg-base-content/20 rounded text-sm font-medium text-base-content transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                phx-click="change_tier"
+                disabled={@tier_change_reason == "" || @new_tier == @selected_user.tier}
+                class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-content rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Change Tier
+              </button>
+            </div>
           </div>
         </div>
       </div>
