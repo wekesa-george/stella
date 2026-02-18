@@ -68,13 +68,13 @@ export function generateInfraHistory(points = 40) {
 
 export function generateAlerts() {
   const types = [
-    { msg: "Bot BOT-0012 CPU > 85%", sev: "critical", service: "botWorker" },
-    { msg: "BOT-0007 heartbeat missed", sev: "critical", service: "BOT-0007" },
-    { msg: "Postgres RAM at 79%", sev: "warning", service: "postgres" },
-    { msg: "BotWorker RAM at 72%", sev: "warning", service: "botWorker" },
-    { msg: "BOT-0003 drawdown > 8%", sev: "warning", service: "BOT-0003" },
-    { msg: "RabbitMQ queue depth 4.2k", sev: "info", service: "rabbitmq" },
-    { msg: "BOT-0015 win rate drop to 41%", sev: "info", service: "BOT-0015" },
+    { msg: "Bot BOT-0012 CPU > 85%", sev: "critical" as const, service: "botWorker" },
+    { msg: "BOT-0007 heartbeat missed", sev: "critical" as const, service: "BOT-0007" },
+    { msg: "Postgres RAM at 79%", sev: "warning" as const, service: "postgres" },
+    { msg: "BotWorker RAM at 72%", sev: "warning" as const, service: "botWorker" },
+    { msg: "BOT-0003 drawdown > 8%", sev: "warning" as const, service: "BOT-0003" },
+    { msg: "RabbitMQ queue depth 4.2k", sev: "info" as const, service: "rabbitmq" },
+    { msg: "BOT-0015 win rate drop to 41%", sev: "info" as const, service: "BOT-0015" },
   ];
   return types.map((a, i) => ({ ...a, id: i, time: `${randInt(1, 58)}m ago`, acked: false }));
 }
