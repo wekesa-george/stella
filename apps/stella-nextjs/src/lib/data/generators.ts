@@ -25,7 +25,7 @@ export function generateBots(count = 18) {
     strategy: pick(STRATEGIES),
     exchange: pick(EXCHANGES),
     pair: pick(PAIRS),
-    status: pick(["running", "running", "running", "running", "paused", "error"]),
+    status: pick(["running", "running", "running", "running", "paused", "error"] as const),
     pnl: parseFloat((randBetween(-800, 3200)).toFixed(2)),
     pnlPct: parseFloat((randBetween(-4.5, 12.8)).toFixed(2)),
     equity: parseFloat((randBetween(5000, 85000)).toFixed(2)),
@@ -106,9 +106,9 @@ export function generateUsers(count = 50) {
   return Array.from({ length: count }, (_, i) => {
     const firstName = pick(FIRST_NAMES);
     const lastName = pick(LAST_NAMES);
-    const type = pick(["trader", "follower", "both", "both", "trader"]);
-    const status = pick(["active", "active", "active", "active", "inactive", "suspended"]);
-    const verificationLevel = pick(["unverified", "basic", "advanced", "full", "full"]);
+    const type = pick(["trader", "follower", "both", "both", "trader"] as const);
+    const status = pick(["active", "active", "active", "active", "inactive", "suspended"] as const);
+    const verificationLevel = pick(["unverified", "basic", "advanced", "full", "full"] as const);
 
     return {
       id: `USER-${String(i + 1).padStart(4, "0")}`,
@@ -132,9 +132,9 @@ export function generateUsers(count = 50) {
 
 export function generateUserTransactions(userId: string, count = 20) {
   return Array.from({ length: count }, (_, i) => {
-    const type = pick(["deposit", "withdrawal", "trade", "fee", "trade", "trade"]);
+    const type = pick(["deposit", "withdrawal", "trade", "fee", "trade", "trade"] as const);
     const amount = parseFloat((randBetween(10, 5000)).toFixed(2));
-    const status = pick(["completed", "completed", "completed", "pending", "failed"]);
+    const status = pick(["completed", "completed", "completed", "pending", "failed"] as const);
 
     return {
       id: `TXN-${String(i + 1).padStart(6, "0")}`,
@@ -153,7 +153,7 @@ export function generateUserTransactions(userId: string, count = 20) {
 
 export function generateUserActivity(userId: string, count = 30) {
   return Array.from({ length: count }, (_, i) => {
-    const type = pick(["login", "trade", "withdraw", "deposit", "settings_change", "login", "login"]);
+    const type = pick(["login", "trade", "withdraw", "deposit", "settings_change", "login", "login"] as const);
 
     return {
       id: `ACT-${String(i + 1).padStart(6, "0")}`,

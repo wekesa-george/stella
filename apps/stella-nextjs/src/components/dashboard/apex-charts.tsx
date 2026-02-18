@@ -37,8 +37,8 @@ export function RevenueChart() {
       labels: {
         style: { colors: "#888" },
         formatter: (val) => {
-          const num = parseInt(val);
-          if ([1, 5, 9, 13, 17, 21, 25, 29].includes(num)) return val;
+          const num = parseInt(String(val));
+          if ([1, 5, 9, 13, 17, 21, 25, 29].includes(num)) return String(val);
           if (num === 30) return "Now";
           return "";
         },

@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 // Utility functions
 function rnd(a: number, b: number) { return a + Math.random() * (b - a); }
 function ri(a: number, b: number) { return Math.floor(rnd(a, b)); }
-function fmt(n: number, decimals = 0) { return n.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigals: decimals }); }
+function fmt(n: number, decimals = 0) { return n.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }); }
 function fmtUSD(n: number) { return n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(2)}`; }
 function pct(n: number) { return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`; }
 

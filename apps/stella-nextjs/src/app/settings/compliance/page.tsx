@@ -138,7 +138,7 @@ export default function CompliancePage() {
               ["Audit Log Retention (years)", "auditRetention", 7],
               ["KYC Document Retention (years)", "kycRetention", 10],
             ].map(([label, key, def]) => (
-              <Field key={key} label={label} hint="Minimum 7 years required by most financial regulations.">
+              <Field key={key as string} label={label as string} hint="Minimum 7 years required by most financial regulations.">
                 <input
                   className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[11px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
                   type="number"
