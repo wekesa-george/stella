@@ -18,25 +18,30 @@ function pick<T>(arr: T[]): T {
 }
 
 export function generateBots(count = 18) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `BOT-${String(i + 1).padStart(4, "0")}`,
-    name: `${pick(STRATEGIES)}-${randInt(100, 999)}`,
-    user: pick(USERS),
-    strategy: pick(STRATEGIES),
-    exchange: pick(EXCHANGES),
-    pair: pick(PAIRS),
-    status: pick(["running", "running", "running", "running", "paused", "error"] as const),
-    pnl: parseFloat((randBetween(-800, 3200)).toFixed(2)),
-    pnlPct: parseFloat((randBetween(-4.5, 12.8)).toFixed(2)),
-    equity: parseFloat((randBetween(5000, 85000)).toFixed(2)),
-    openPositions: randInt(0, 8),
-    trades: randInt(12, 340),
-    winRate: parseFloat((randBetween(42, 78)).toFixed(1)),
-    lastHeartbeat: randInt(1, 45),
-    cpu: parseFloat((randBetween(5, 88)).toFixed(1)),
-    ram: parseFloat((randBetween(20, 85)).toFixed(1)),
-    uptime: `${randInt(1, 72)}h ${randInt(0, 59)}m`,
-  }));
+  return Array.from({ length: count }, (_, i) => {
+    // Each bot trades a single pair (assign pair based on bot index)
+    const pair = PAIRS[i % PAIRS.length];
+
+    return {
+      id: `BOT-${String(i + 1).padStart(4, "0")}`,
+      name: `${pick(STRATEGIES)}-${randInt(100, 999)}`,
+      user: pick(USERS),
+      strategy: pick(STRATEGIES),
+      exchange: pick(EXCHANGES),
+      pair, // Single pair per bot
+      status: pick(["running", "running", "running", "running", "paused", "error"] as const),
+      pnl: parseFloat((randBetween(-800, 3200)).toFixed(2)),
+      pnlPct: parseFloat((randBetween(-4.5, 12.8)).toFixed(2)),
+      equity: parseFloat((randBetween(5000, 85000)).toFixed(2)),
+      openPositions: randInt(0, 8),
+      trades: randInt(12, 340),
+      winRate: parseFloat((randBetween(42, 78)).toFixed(1)),
+      lastHeartbeat: randInt(1, 45),
+      cpu: parseFloat((randBetween(5, 88)).toFixed(1)),
+      ram: parseFloat((randBetween(20, 85)).toFixed(1)),
+      uptime: `${randInt(1, 72)}h ${randInt(0, 59)}m`,
+    };
+  });
 }
 
 export function generateEquityCurve(points = 60, base = 10000, volatility = 0.012) {
@@ -79,7 +84,10 @@ export function generateAlerts() {
   return types.map((a, i) => ({ ...a, id: i, time: `${randInt(1, 58)}m ago`, acked: false }));
 }
 
-export function generatePositions(botId: string) {
+export function generatePositions(botId: string, botPair?: string) {
+  // If bot pair is not provided, extract from botId or use default
+  const pair = botPair || PAIRS[parseInt(botId.split('-')[1]) % PAIRS.length] || PAIRS[0];
+
   return Array.from({ length: randInt(1, 6) }, (_, i) => {
     const entry = parseFloat((randBetween(100, 65000)).toFixed(2));
     const current = entry * (1 + (Math.random() - 0.48) * 0.08);
@@ -87,7 +95,7 @@ export function generatePositions(botId: string) {
     const pnl = parseFloat(((current - entry) * size).toFixed(2));
     return {
       id: `POS-${i}`,
-      pair: pick(PAIRS),
+      pair, // Use bot's single pair
       side: pick(["LONG", "SHORT"]),
       entry: parseFloat(entry.toFixed(2)),
       current: parseFloat(current.toFixed(2)),

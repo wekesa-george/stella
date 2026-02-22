@@ -5,6 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import { generateBots, generatePositions, generateEquityCurve, PAIRS } from "@/lib/data/generators";
 import type { Bot } from "@/lib/types/dashboard";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from "recharts";
+import { getBotConfig } from "@/lib/config/bot-fleet";
+import { fetchBinanceKlines } from "@/lib/api/binance";
+import { fetchBotOrders, fetchBotPositions } from "@/lib/api/trading-engine";
+import { BotCandlestickChart } from "@/components/trading/BotCandlestickChart";
+import type { CandlestickData, BotOrder, BotPosition, BotConfig } from '@/lib/types/bot.types';
 
 interface Position {
   id: string;
@@ -27,6 +32,13 @@ export default function BotDetailPage() {
   const [closePos, setClosePos] = useState<Position | null>(null);
   const [newOrder, setNewOrder] = useState({ pair: "", side: "LONG", size: "", price: "" });
 
+  // Chart state
+  const [botConfig, setBotConfig] = useState<BotConfig | null>(null);
+  const [candleData, setCandleData] = useState<CandlestickData[]>([]);
+  const [botOrders, setBotOrders] = useState<BotOrder[]>([]);
+  const [botPositions, setBotPositions] = useState<BotPosition[]>([]);
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
+
   useEffect(() => {
     // Find the bot from generated data
     const bots = generateBots(18);
@@ -34,11 +46,53 @@ export default function BotDetailPage() {
 
     if (foundBot) {
       setBot(foundBot);
-      setPositions(generatePositions(foundBot.id));
+      setPositions(generatePositions(foundBot.id, foundBot.pair));
       setEquityCurve(generateEquityCurve(60, foundBot.equity, 0.015));
       setNewOrder(prev => ({ ...prev, pair: foundBot.pair }));
+
+      // Load real trading data for BOT-0001 and BOT-0002
+      if (params.id === 'BOT-0001' || params.id === 'BOT-0002') {
+        loadRealBotData(params.id as string);
+      }
     }
   }, [params.id]);
+
+  async function loadRealBotData(botId: string) {
+    try {
+      setIsLoadingChart(true);
+
+      const config = getBotConfig(botId);
+      if (!config) return;
+
+      setBotConfig(config);
+
+      const symbol = config.exchange === 'binance' ? config.symbol : 'BTCUSDT';
+
+      // Fetch all data in parallel (120 candles for better zoom, matching /trading page)
+      const [klines, orders, positions] = await Promise.all([
+        fetchBinanceKlines(symbol, '1h', 120).catch((err) => {
+          console.error('Binance API error:', err);
+          return [];
+        }),
+        fetchBotOrders(botId),
+        fetchBotPositions(botId),
+      ]);
+
+      console.log('Loaded chart data:', {
+        candlesCount: klines.length,
+        ordersCount: orders.length,
+        positionsCount: positions.length,
+      });
+
+      setCandleData(klines);
+      setBotOrders(orders);
+      setBotPositions(positions);
+    } catch (err) {
+      console.error('Error loading real bot data:', err);
+    } finally {
+      setIsLoadingChart(false);
+    }
+  }
 
   const handleClosePos = (pos: Position) => {
     setPositions(prev => prev.filter(p => p.id !== pos.id));
@@ -128,38 +182,192 @@ export default function BotDetailPage() {
       {/* Scrollable Content Section */}
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
         <div className="max-w-7xl mx-auto space-y-3 sm:space-y-4">
-          {/* Equity curve */}
-        <div className="bg-dark-elevated border border-dark rounded-md overflow-hidden">
-          <div className="px-3 sm:px-3.5 py-2.5 border-b border-dark">
-            <span className="text-xs font-semibold text-foreground">Equity Curve (Session)</span>
-          </div>
-          <div className="p-3 sm:p-3.5 pb-2">
-            <ResponsiveContainer width="100%" height={120}>
-              <AreaChart data={equityCurve} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#00e5a0" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#00e5a0" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <YAxis domain={["auto", "auto"]} hide />
-                <XAxis dataKey="t" hide />
-                <Tooltip
-                  contentStyle={{
-                    background: "#131920",
-                    border: "1px solid #1e2d40",
-                    borderRadius: 4,
-                    fontSize: 10
-                  }}
-                  formatter={(v: any) => [`$${v.toLocaleString()}`]}
-                />
-                <Area type="monotone" dataKey="value" stroke="#00e5a0" strokeWidth={2} fill="url(#eqGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
 
-        {/* Open positions */}
+          {/* Chart & Positions - Only show for BOT-0001 and BOT-0002 */}
+          {(params.id === 'BOT-0001' || params.id === 'BOT-0002') && botConfig && (
+            <>
+              {/* Candlestick Chart */}
+              <div className="bg-[#080c10] border border-[#1e2d40] rounded-md overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-[#1e2d40] flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-[13px] font-semibold text-[#e8edf3]">{botConfig.symbol}</span>
+                    <div className="flex gap-0.5">
+                      {["1m", "5m", "15m", "1h", "4h", "1D"].map((t) => (
+                        <button
+                          key={t}
+                          className={`px-2 py-1 border border-[#1e2d40] font-mono text-[10px] rounded-sm transition-all ${
+                            t === "1h"
+                              ? "bg-[rgba(61,157,243,0.10)] text-[#3d9df3] border-[rgba(61,157,243,0.35)]"
+                              : "bg-transparent text-[#5a7090] hover:text-[#e8edf3] hover:border-[#253550]"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="h-[480px]">
+                  {isLoadingChart ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#00e5a0] mx-auto" />
+                        <p className="mt-4 text-[#8fa3b8] text-xs">Loading chart data...</p>
+                      </div>
+                    </div>
+                  ) : candleData.length === 0 ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center">
+                        <div className="text-[#ff4757] text-2xl mb-3">⚠️</div>
+                        <p className="text-[#8fa3b8] text-sm">Unable to load chart data</p>
+                        <button
+                          onClick={() => loadRealBotData(params.id as string)}
+                          className="mt-4 px-4 py-2 rounded-sm bg-[#00e5a0] text-black text-xs font-bold uppercase hover:bg-[#00ffb2] transition-all"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <BotCandlestickChart
+                      candles={candleData}
+                      botConfig={botConfig}
+                      orders={botOrders}
+                      positions={botPositions}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Open Positions Table */}
+              <div className="bg-[#0d1117] border border-[#1e2d40] rounded-md overflow-hidden">
+                <div className="px-4 py-2 border-b border-[#1e2d40] font-mono text-[9px] uppercase tracking-wider text-[#5a7090] flex items-center justify-between">
+                  <span>Open Positions — {botConfig.symbol}</span>
+                  <span className="text-[#5a7090]">
+                    {positions.length} position{positions.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  {positions.length === 0 ? (
+                    <div className="px-4 py-8 text-center font-mono text-[11px] text-[#5a7090]">
+                      No open positions
+                    </div>
+                  ) : (
+                    <table className="w-full border-collapse min-w-[640px]">
+                      <thead>
+                        <tr className="border-b border-[#1e2d40]">
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]">
+                            Side
+                          </th>
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]">
+                            Entry
+                          </th>
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]">
+                            Mark
+                          </th>
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]">
+                            Size
+                          </th>
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]">
+                            PnL %
+                          </th>
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]">
+                            Age
+                          </th>
+                          <th className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] px-3 py-1 text-left bg-[#131920]"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {positions.map((p) => (
+                          <tr
+                            key={p.id}
+                            className="border-b border-[#1e2d40] hover:bg-[#131920] transition-colors"
+                          >
+                            <td className="px-3 py-2">
+                              <span
+                                className={`px-1.5 py-0.5 rounded-sm text-[9px] font-bold uppercase tracking-wide font-mono ${
+                                  p.side === "LONG"
+                                    ? "bg-[rgba(0,229,160,0.10)] text-[#00e5a0]"
+                                    : "bg-[rgba(255,71,87,0.10)] text-[#ff4757]"
+                                }`}
+                              >
+                                {p.side}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 font-mono text-[10px] text-[#8fa3b8]">
+                              {p.entry.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-[10px] text-[#8fa3b8]">
+                              {p.current.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-[10px] text-[#8fa3b8]">
+                              {p.size}
+                            </td>
+                            <td
+                              className="px-3 py-2 font-mono text-[11px] font-semibold"
+                              style={{ color: p.pnlPct >= 0 ? "#00e5a0" : "#ff4757" }}
+                            >
+                              {p.pnlPct >= 0 ? "+" : ""}
+                              {p.pnlPct}%
+                            </td>
+                            <td className="px-3 py-2 font-mono text-[10px] text-[#5a7090]">
+                              {p.age}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex gap-1">
+                                <button
+                                  className="px-2 py-1 rounded-sm text-[9px] font-semibold uppercase tracking-wide cursor-pointer border transition-all bg-[rgba(245,166,35,0.10)] text-[#f5a623] border-[rgba(245,166,35,0.3)] hover:bg-[#f5a623] hover:text-black"
+                                  onClick={() => setClosePos(p)}
+                                >
+                                  Close
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Equity curve - Show for all other bots */}
+          {params.id !== 'BOT-0001' && params.id !== 'BOT-0002' && (
+            <div className="bg-dark-elevated border border-dark rounded-md overflow-hidden">
+              <div className="px-3 sm:px-3.5 py-2.5 border-b border-dark">
+                <span className="text-xs font-semibold text-foreground">Equity Curve (Session)</span>
+              </div>
+              <div className="p-3 sm:p-3.5 pb-2">
+                <ResponsiveContainer width="100%" height={120}>
+                  <AreaChart data={equityCurve} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#00e5a0" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#00e5a0" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <YAxis domain={["auto", "auto"]} hide />
+                    <XAxis dataKey="t" hide />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#131920",
+                        border: "1px solid #1e2d40",
+                        borderRadius: 4,
+                        fontSize: 10
+                      }}
+                      formatter={(v: any) => [`$${v.toLocaleString()}`]}
+                    />
+                    <Area type="monotone" dataKey="value" stroke="#00e5a0" strokeWidth={2} fill="url(#eqGrad)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+        {/* Open positions - Hide for BOT-0001 and BOT-0002 since they have their own table */}
+        {params.id !== 'BOT-0001' && params.id !== 'BOT-0002' && (
         <div className="bg-dark-elevated border border-dark rounded-md overflow-hidden">
           <div className="px-3 sm:px-3.5 py-2.5 border-b border-dark flex justify-between items-center">
             <span className="text-xs font-semibold text-foreground">Open Positions</span>
@@ -262,6 +470,7 @@ export default function BotDetailPage() {
             </table>
           </div>
         </div>
+        )}
 
         {/* Manual order panel */}
         <div className="bg-dark-elevated border border-dark rounded-md overflow-hidden">
