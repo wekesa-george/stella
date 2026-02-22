@@ -121,7 +121,7 @@ export function BotCandlestickChart({
       );
       return {
         i: candleIndex >= 0 ? candleIndex : 0,
-        price: o.filledPrice || o.price,
+        price: o.price,
         side: o.side.toUpperCase(),
         bot: o.botId,
         filled: true,
