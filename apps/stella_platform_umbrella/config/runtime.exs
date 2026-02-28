@@ -34,10 +34,18 @@ if config_env() == :prod do
 
   config :admin_gateway, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # Allow WebSocket connections from the admin UI and any subdomains
+  allowed_origins =
+    case System.get_env("WS_ALLOWED_ORIGINS") do
+      nil -> ["//*.stella.praetocloud.com", "//localhost"]
+      origins -> String.split(origins, ",", trim: true)
+    end
+
   config :admin_gateway, AdminGatewayWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}],
-    secret_key_base: secret_key_base
+    secret_key_base: secret_key_base,
+    check_origin: allowed_origins
 
   # Production database
   database_url =
