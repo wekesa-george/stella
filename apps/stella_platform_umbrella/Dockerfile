@@ -88,6 +88,6 @@ USER nobody
 ENV PHX_SERVER=true
 ENV PORT=4000
 
-EXPOSE 4000
+EXPOSE 4000 4002
 
 CMD ["/app/bin/stella_platform_umbrella", "start"]

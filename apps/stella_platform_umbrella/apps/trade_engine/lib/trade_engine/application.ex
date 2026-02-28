@@ -98,7 +98,7 @@ defmodule TradeEngine.Application do
       # Backtest manager (queues → VectorBT worker → results)
       {TradeEngine.Strategies.BacktestManager, []},
 
-      {Bandit, plug: TradeEngine.API.Router, port: 4002}
+      {Bandit, plug: TradeEngine.API.Router, port: String.to_integer(System.get_env("TRADE_ENGINE_API_PORT") || "4002")}
     ]
     |> List.flatten()
     |> Enum.reject(&is_nil/1)
