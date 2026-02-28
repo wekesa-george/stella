@@ -2,6 +2,12 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Navbar } from "@/components/navigation/navbar";
+import { getLogtoContext } from "@logto/next/server-actions";
+import { logtoConfig } from "./logto";
+import { redirect } from "next/navigation";
+import { SocketProviderWithAuth } from "@/components/SocketProvider";
+import { AdminUserProvider } from "@/components/AdminUserProvider";
+import { getAdminUserId } from "@/lib/getAdminUserId";
 
 const openSans = localFont({
   src: [
@@ -33,18 +39,38 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const { isAuthenticated, claims } = await getLogtoContext(logtoConfig, {
+    fetchUserInfo: true,
+  });
+
+  if (!isAuthenticated) {
+    redirect('/sign-in');
+  }
+
+  const user = {
+    name: claims?.name || claims?.username || 'Admin User',
+    email: claims?.email || '',
+    avatar: claims?.picture || '',
+  };
+
+  const adminUserId = await getAdminUserId();
+
   return (
     <html lang="en" className="dark">
       <body
         className={`${openSans.variable} ${gilanMedium.variable} antialiased font-sans`}
       >
-        <Navbar />
-        <main className="min-h-[calc(100vh-56px)] sm:min-h-[calc(100vh-64px)]">{children}</main>
+        <AdminUserProvider adminUserId={adminUserId}>
+          <Navbar user={user} />
+          <SocketProviderWithAuth>
+            <main className="min-h-[calc(100vh-56px)] sm:min-h-[calc(100vh-64px)]">{children}</main>
+          </SocketProviderWithAuth>
+        </AdminUserProvider>
       </body>
     </html>
   );

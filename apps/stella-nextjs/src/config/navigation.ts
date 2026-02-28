@@ -38,6 +38,11 @@ export const navigationConfig: MenuItem[] = [
     icon: "dots-horizontal",
     subMenu: [
       {
+        label: "Backtesting",
+        href: "/backtesting",
+        description: "Strategy backtesting with VectorBT",
+      },
+      {
         label: "KYC Review",
         href: "/kyc-review",
       },

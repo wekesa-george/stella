@@ -1,25 +1,64 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { generateAlerts } from "@/lib/data/generators";
+import { getAlerts, acknowledgeAlert as ackAlertApi, acknowledgeAlertsBulk, deleteAlert as deleteAlertApi } from "@/lib/stellaAdminApi";
+import { useAlertChannel } from "@/hooks/usePhoenixChannel";
+import { mapApiAlertToUiAlert, mapWsAlertToUiAlert } from "@/lib/api/mappers";
 import type { Alert } from "@/lib/types/dashboard";
+import { DashboardSkeleton } from "@/components/ui/skeleton";
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [loading, setLoading] = useState(true);
 
+  // Real-time alerts from WS
+  const { alerts: wsAlerts } = useAlertChannel();
+
+  // Load initial alerts from API
   useEffect(() => {
-    setAlerts(generateAlerts());
+    (async () => {
+      try {
+        const result = await getAlerts({ limit: 100 });
+        if (result.data && Array.isArray(result.data)) {
+          setAlerts(result.data.map(mapApiAlertToUiAlert));
+        }
+      } catch {
+        // API failed — alerts stays empty
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const handleAck = (id: number) => {
+  // Prepend real-time WS alerts
+  useEffect(() => {
+    if (wsAlerts.length > 0) {
+      const latest = wsAlerts[0];
+      const mapped = mapWsAlertToUiAlert(latest);
+      setAlerts((prev) => {
+        // Avoid duplicates
+        if (prev.some((a) => a.id === mapped.id)) return prev;
+        return [mapped, ...prev];
+      });
+    }
+  }, [wsAlerts]);
+
+  const handleAck = async (id: number | string) => {
+    // Optimistic update
     setAlerts((prev) =>
       prev.map((a) => (a.id === id ? { ...a, acked: true } : a))
     );
+    await ackAlertApi(String(id)).catch(console.error);
   };
 
-  const handleAckAll = (severity?: string) => {
+  const handleAckAll = async (severity?: string) => {
+    const toAck = alerts.filter((a) => {
+      if (a.acked) return false;
+      return severity ? a.sev === severity : true;
+    });
+    // Optimistic update
     setAlerts((prev) =>
       prev.map((a) => {
         if (severity) {
@@ -28,10 +67,15 @@ export default function AlertsPage() {
         return { ...a, acked: true };
       })
     );
+    const ids = toAck.map((a) => String(a.id));
+    if (ids.length > 0) {
+      await acknowledgeAlertsBulk(ids).catch(console.error);
+    }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: number | string) => {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
+    await deleteAlertApi(String(id)).catch(console.error);
   };
 
   // Filter alerts
@@ -51,6 +95,10 @@ export default function AlertsPage() {
   const criticalCount = unackedAlerts.filter((a) => a.sev === "critical").length;
   const warningCount = unackedAlerts.filter((a) => a.sev === "warning").length;
   const infoCount = unackedAlerts.filter((a) => a.sev === "info").length;
+
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="flex h-full">

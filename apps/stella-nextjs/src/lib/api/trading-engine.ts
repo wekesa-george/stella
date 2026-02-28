@@ -5,7 +5,14 @@
  * positions, orders, and performance metrics
  */
 
-import { tradingEngineApi } from '../tradingEngineApi';
+import {
+  getBotOrders,
+  getBotPositions,
+  getBot,
+  startBot as startBotAction,
+  pauseBot as pauseBotAction,
+  stopBot as stopBotAction,
+} from '../tradingEngineApi';
 import { BotOrder, BotPosition } from '../types/bot.types';
 
 /**
@@ -13,7 +20,7 @@ import { BotOrder, BotPosition } from '../types/bot.types';
  */
 export async function fetchBotOrders(botId: string): Promise<BotOrder[]> {
   try {
-    const { data, error } = await tradingEngineApi.getBotOrders(botId);
+    const { data, error } = await getBotOrders(botId) as { data?: any; error?: string };
 
     if (error) {
       console.warn('Trading engine API error:', error);
@@ -45,7 +52,7 @@ export async function fetchBotOrders(botId: string): Promise<BotOrder[]> {
  */
 export async function fetchBotPositions(botId: string): Promise<BotPosition[]> {
   try {
-    const { data, error } = await tradingEngineApi.getBotPositions(botId);
+    const { data, error } = await getBotPositions(botId) as { data?: any; error?: string };
 
     if (error) {
       console.warn('Trading engine API error:', error);
@@ -77,7 +84,7 @@ export async function fetchBotPositions(botId: string): Promise<BotPosition[]> {
  */
 export async function fetchBotDetails(botId: string) {
   try {
-    const { data, error } = await tradingEngineApi.getBot(botId);
+    const { data, error } = await getBot(botId);
 
     if (error) {
       throw new Error(error);
@@ -94,19 +101,19 @@ export async function fetchBotDetails(botId: string) {
  * Start a bot
  */
 export async function startBot(botId: string) {
-  return tradingEngineApi.startBot(botId);
+  return startBotAction(botId);
 }
 
 /**
  * Pause a bot
  */
 export async function pauseBot(botId: string) {
-  return tradingEngineApi.pauseBot(botId);
+  return pauseBotAction(botId);
 }
 
 /**
  * Stop a bot
  */
 export async function stopBot(botId: string) {
-  return tradingEngineApi.stopBot(botId);
+  return stopBotAction(botId);
 }

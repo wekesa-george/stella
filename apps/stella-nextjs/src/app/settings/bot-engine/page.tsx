@@ -1,38 +1,120 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { getBotEngineDefaults, updateBotEngineDefaults } from "@/lib/tradingEngineApi";
+
+interface BotEngineConfig {
+  heartbeatInterval: number;
+  orderTimeout: number;
+  retryAttempts: number;
+  retryBackoff: number;
+  reconcileFreq: number;
+  defaultSlippage: number;
+  maxOrderAge: number;
+  positionPrecision: number;
+  enableHeartbeatAlert: boolean;
+  enableStaleOrderCancel: boolean;
+  enableAutoReconcile: boolean;
+  enablePartialFillContinue: boolean;
+}
+
+const DEFAULTS: BotEngineConfig = {
+  heartbeatInterval: 5,
+  orderTimeout: 30,
+  retryAttempts: 3,
+  retryBackoff: 2,
+  reconcileFreq: 15,
+  defaultSlippage: 0.1,
+  maxOrderAge: 300,
+  positionPrecision: 4,
+  enableHeartbeatAlert: true,
+  enableStaleOrderCancel: true,
+  enableAutoReconcile: true,
+  enablePartialFillContinue: true,
+};
+
+function toBool(val: any, fallback: boolean): boolean {
+  if (val === undefined || val === null) return fallback;
+  if (typeof val === "boolean") return val;
+  return val === "true" || val === true;
+}
+
+function mapApiToLocal(api: Record<string, any>): BotEngineConfig {
+  return {
+    heartbeatInterval: api.heartbeat_interval_sec ?? DEFAULTS.heartbeatInterval,
+    orderTimeout: api.order_timeout_sec ?? DEFAULTS.orderTimeout,
+    retryAttempts: api.retry_attempts ?? DEFAULTS.retryAttempts,
+    retryBackoff: Number(api.retry_backoff_multiplier ?? DEFAULTS.retryBackoff),
+    reconcileFreq: api.reconcile_frequency_min ?? DEFAULTS.reconcileFreq,
+    defaultSlippage: Number(api.default_slippage_pct ?? DEFAULTS.defaultSlippage),
+    maxOrderAge: api.max_order_age_sec ?? DEFAULTS.maxOrderAge,
+    positionPrecision: api.position_precision ?? DEFAULTS.positionPrecision,
+    enableHeartbeatAlert: toBool(api.enable_heartbeat_alert, DEFAULTS.enableHeartbeatAlert),
+    enableStaleOrderCancel: toBool(api.enable_stale_order_cancel, DEFAULTS.enableStaleOrderCancel),
+    enableAutoReconcile: toBool(api.enable_auto_reconcile, DEFAULTS.enableAutoReconcile),
+    enablePartialFillContinue: toBool(api.enable_partial_fill_continue, DEFAULTS.enablePartialFillContinue),
+  };
+}
+
+function mapLocalToApi(local: BotEngineConfig): Record<string, any> {
+  return {
+    heartbeat_interval_sec: local.heartbeatInterval,
+    order_timeout_sec: local.orderTimeout,
+    retry_attempts: local.retryAttempts,
+    retry_backoff_multiplier: local.retryBackoff,
+    reconcile_frequency_min: local.reconcileFreq,
+    default_slippage_pct: local.defaultSlippage,
+    max_order_age_sec: local.maxOrderAge,
+    position_precision: local.positionPrecision,
+    enable_heartbeat_alert: local.enableHeartbeatAlert,
+    enable_stale_order_cancel: local.enableStaleOrderCancel,
+    enable_auto_reconcile: local.enableAutoReconcile,
+    enable_partial_fill_continue: local.enablePartialFillContinue,
+  };
+}
 
 export default function BotEngineDefaultsPage() {
-  const [b, setB] = useState({
-    heartbeatInterval: 5,
-    orderTimeout: 30,
-    retryAttempts: 3,
-    retryBackoff: 2,
-    reconcileFreq: 15,
-    defaultSlippage: 0.1,
-    maxOrderAge: 300,
-    positionPrecision: 4,
-    enableHeartbeatAlert: true,
-    enableStaleOrderCancel: true,
-    enableAutoReconcile: true,
-    enablePartialFillContinue: true,
-  });
-
+  const [b, setB] = useState<BotEngineConfig>(DEFAULTS);
+  const originalRef = useRef<BotEngineConfig>(DEFAULTS);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    getBotEngineDefaults().then((res) => {
+      if (res.data) {
+        const mapped = mapApiToLocal(res.data);
+        setB(mapped);
+        originalRef.current = mapped;
+      }
+      setLoaded(true);
+    });
+  }, []);
 
   const set = (k: string, v: any) => {
     setB((p) => ({ ...p, [k]: v }));
     setDirty(true);
+    setSaveError(null);
   };
 
-  const handleSave = () => {
-    setDirty(false);
-    // In real app, save to API
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    const result = await updateBotEngineDefaults(mapLocalToApi(b));
+    if (result.error) {
+      setSaveError(result.error);
+    } else {
+      originalRef.current = b;
+      setDirty(false);
+    }
+    setSaving(false);
   };
 
   const handleDiscard = () => {
+    setB(originalRef.current);
     setDirty(false);
-    // In real app, reset to original values
+    setSaveError(null);
   };
 
   return (
@@ -180,19 +262,24 @@ export default function BotEngineDefaultsPage() {
             onChange={(v) => set("enablePartialFillContinue", v)}
           />
         </div>
-        {dirty && (
-          <div className="px-4 py-2.5 border-t border-[#1e2d40] flex gap-2 justify-end bg-[#131920]">
+        {(dirty || saveError) && (
+          <div className="px-4 py-2.5 border-t border-[#1e2d40] flex items-center gap-2 justify-end bg-[#131920]">
+            {saveError && (
+              <span className="text-[9px] text-[#ff4757] mr-auto">{saveError}</span>
+            )}
             <button
               onClick={handleDiscard}
-              className="px-3 py-1.5 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] hover:border-[#253550] transition-all"
+              disabled={saving}
+              className="px-3 py-1.5 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] hover:border-[#253550] transition-all disabled:opacity-50"
             >
               Discard Changes
             </button>
             <button
               onClick={handleSave}
-              className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all"
+              disabled={saving}
+              className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all disabled:opacity-50"
             >
-              Save Changes
+              {saving ? "Saving..." : "Save Changes"}
             </button>
           </div>
         )}

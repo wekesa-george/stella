@@ -1,11 +1,23 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { generateBots, USERS } from "@/lib/data/generators";
+import {
+  getCurrentShift,
+  getShiftActivities,
+  getShiftWatchList,
+  logShiftActivity,
+  addToShiftWatchList,
+  submitHandoff,
+  updateShiftNotes,
+} from "@/lib/stellaAdminApi";
+import { listBots } from "@/lib/tradingEngineApi";
+import { mapApiBotToUiBot } from "@/lib/api/mappers";
+import { useBotChannel } from "@/hooks/usePhoenixChannel";
 import type { Bot } from "@/lib/types/dashboard";
+import { DashboardSkeleton } from "@/components/ui/skeleton";
 
 interface ShiftLog {
-  id: number;
+  id: string | number;
   timestamp: string;
   user: string;
   action: string;
@@ -13,7 +25,15 @@ interface ShiftLog {
   priority: "normal" | "warning" | "critical";
 }
 
+interface WatchItem {
+  id: string | number;
+  title: string;
+  description: string;
+  severity: "critical" | "warning" | "info";
+}
+
 interface CurrentShift {
+  id?: string;
   user: string;
   startTime: string;
   duration: string;
@@ -21,42 +41,91 @@ interface CurrentShift {
   incidents: number;
 }
 
-function generateShiftLogs(): ShiftLog[] {
-  const actions = [
-    { action: "Killed bot BOT-0012", notes: "CPU exceeded 95% threshold", priority: "critical" as const },
-    { action: "Paused bot BOT-0007", notes: "Unusual trading pattern detected", priority: "warning" as const },
-    { action: "Resumed bot BOT-0003", notes: "Fixed config issue and restarted", priority: "normal" as const },
-    { action: "Deployed new bot BOT-0019", notes: "Momentum Grid strategy on BTC/USDT", priority: "normal" as const },
-    { action: "Acknowledged infrastructure alert", notes: "Postgres RAM usage normalized", priority: "warning" as const },
-    { action: "Manually closed position", notes: "Bot BOT-0015 - Risk limit reached", priority: "critical" as const },
-    { action: "Updated bot parameters", notes: "BOT-0008 - Adjusted stop loss from 2% to 1.5%", priority: "normal" as const },
-    { action: "Investigated heartbeat miss", notes: "BOT-0007 - Network latency spike resolved", priority: "warning" as const },
-  ];
-
-  return actions.map((a, i) => ({
-    id: i,
-    timestamp: `${Math.floor(Math.random() * 12) + 1}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')} ${Math.random() > 0.5 ? 'AM' : 'PM'}`,
-    user: USERS[Math.floor(Math.random() * USERS.length)].split('@')[0],
-    ...a,
-  }));
-}
-
 export default function ShiftHandoffPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [shiftLogs, setShiftLogs] = useState<ShiftLog[]>([]);
+  const [watchList, setWatchList] = useState<WatchItem[]>([]);
   const [handoffNotes, setHandoffNotes] = useState("");
-  const [currentShift, setCurrentShift] = useState<CurrentShift>({
-    user: "bob.m",
-    startTime: "9:00 AM",
-    duration: "3h 42m",
-    actions: 12,
-    incidents: 3,
-  });
+  const [currentShift, setCurrentShift] = useState<CurrentShift | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
+  // Real-time bot updates
+  const { bots: wsBots } = useBotChannel();
+
+  // Load all data from APIs
   useEffect(() => {
-    setBots(generateBots(18));
-    setShiftLogs(generateShiftLogs());
+    (async () => {
+      try {
+        const [shiftResult, activitiesResult, watchResult, botsResult] = await Promise.all([
+          getCurrentShift(),
+          getShiftActivities(),
+          getShiftWatchList(),
+          listBots(),
+        ]);
+
+        if (shiftResult.data) {
+          const s = shiftResult.data as any;
+          setCurrentShift({
+            id: s.id,
+            user: s.operator ?? s.user ?? s.user_name ?? '--',
+            startTime: formatTime(s.started_at ?? s.start_time),
+            duration: formatDuration(s.started_at ?? s.start_time),
+            actions: s.action_count ?? s.actions ?? 0,
+            incidents: s.incident_count ?? s.incidents ?? 0,
+          });
+          if (s.notes) setHandoffNotes(s.notes);
+        }
+
+        if (activitiesResult.data && Array.isArray(activitiesResult.data)) {
+          setShiftLogs(activitiesResult.data.map((a: any) => ({
+            id: a.id ?? a.activity_id ?? 0,
+            timestamp: formatTime(a.timestamp ?? a.created_at),
+            user: a.operator ?? a.user ?? a.user_name ?? '--',
+            action: a.action ?? a.title ?? '',
+            notes: a.notes ?? a.description ?? '',
+            priority: normalizePriority(a.priority ?? a.severity),
+          })));
+        }
+
+        if (watchResult.data && Array.isArray(watchResult.data)) {
+          setWatchList(watchResult.data.map((w: any) => ({
+            id: w.id,
+            title: w.title ?? w.name ?? '',
+            description: w.description ?? w.notes ?? '',
+            severity: normalizeSeverity(w.severity ?? w.priority),
+          })));
+        }
+
+        if (botsResult.data && Array.isArray(botsResult.data)) {
+          setBots(botsResult.data.map(mapApiBotToUiBot));
+        }
+      } catch {
+        // API failed — everything stays empty
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
+
+  // Overlay WS bot updates
+  useEffect(() => {
+    if (wsBots.length > 0) {
+      setBots((prev) => {
+        const updated = [...prev];
+        for (const wsBot of wsBots) {
+          const idx = updated.findIndex((b) => b.id === wsBot.id);
+          const mapped = mapApiBotToUiBot(wsBot as any);
+          if (idx >= 0) {
+            updated[idx] = { ...updated[idx], ...mapped, user: updated[idx].user || mapped.user };
+          } else {
+            updated.push(mapped);
+          }
+        }
+        return updated;
+      });
+    }
+  }, [wsBots]);
 
   const totalEquity = bots.reduce((s, b) => s + b.equity, 0);
   const totalPnl = bots.reduce((s, b) => s + b.pnl, 0);
@@ -66,6 +135,27 @@ export default function ShiftHandoffPage() {
 
   const criticalLogs = shiftLogs.filter(l => l.priority === "critical");
   const warningLogs = shiftLogs.filter(l => l.priority === "warning");
+
+  const handleSubmitHandoff = async () => {
+    setSubmitting(true);
+    try {
+      await submitHandoff({ notes: handoffNotes });
+    } catch {
+      console.error('Failed to submit handoff');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (currentShift?.id) {
+      await updateShiftNotes(currentShift.id, { notes: handoffNotes }).catch(console.error);
+    }
+  };
+
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="flex h-full">
@@ -93,28 +183,35 @@ export default function ShiftHandoffPage() {
               <span className="text-xs font-semibold text-[#8fa3b8] uppercase tracking-wider">Current Shift</span>
             </div>
             <div className="p-3 sm:p-3.5">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
-                <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
-                  <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Operator</div>
-                  <div className="font-mono text-lg font-semibold text-foreground">{currentShift.user}</div>
+              {currentShift ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
+                  <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
+                    <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Operator</div>
+                    <div className="font-mono text-lg font-semibold text-foreground">{currentShift.user}</div>
+                  </div>
+                  <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
+                    <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Start Time</div>
+                    <div className="font-mono text-lg font-semibold text-foreground">{currentShift.startTime}</div>
+                  </div>
+                  <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
+                    <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Duration</div>
+                    <div className="font-mono text-lg font-semibold text-foreground">{currentShift.duration}</div>
+                  </div>
+                  <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
+                    <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Actions Taken</div>
+                    <div className="font-mono text-lg font-semibold text-foreground">{currentShift.actions}</div>
+                  </div>
+                  <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
+                    <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Incidents</div>
+                    <div className="font-mono text-lg font-semibold text-[#ff4757]">{currentShift.incidents}</div>
+                  </div>
                 </div>
-                <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
-                  <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Start Time</div>
-                  <div className="font-mono text-lg font-semibold text-foreground">{currentShift.startTime}</div>
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-sm text-[#8fa3b8]">No active shift</p>
+                  <p className="text-xs text-[#5a7090] mt-1">Start a shift to begin logging activities</p>
                 </div>
-                <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
-                  <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Duration</div>
-                  <div className="font-mono text-lg font-semibold text-foreground">{currentShift.duration}</div>
-                </div>
-                <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
-                  <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Actions Taken</div>
-                  <div className="font-mono text-lg font-semibold text-foreground">{currentShift.actions}</div>
-                </div>
-                <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
-                  <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Incidents</div>
-                  <div className="font-mono text-lg font-semibold text-[#ff4757]">{currentShift.incidents}</div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -128,10 +225,10 @@ export default function ShiftHandoffPage() {
                 <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
                   <div className="text-[10px] text-[#5a7090] uppercase tracking-widest mb-1.5">Total Equity</div>
                   <div className="font-mono text-[28px] font-semibold text-foreground leading-none mb-1.5">
-                    ${(totalEquity / 1000).toFixed(1)}k
+                    {bots.length > 0 ? `$${(totalEquity / 1000).toFixed(1)}k` : '$--'}
                   </div>
                   <div className={`text-xs font-mono ${totalPnl >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]"}`}>
-                    {totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(0)} today
+                    {bots.length > 0 ? `${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(0)} today` : '--'}
                   </div>
                 </div>
                 <div className="bg-[#0d1117] border border-dark rounded-md p-3.5">
@@ -158,7 +255,7 @@ export default function ShiftHandoffPage() {
                     {bots.length}
                   </div>
                   <div className="text-xs text-[#5a7090]">
-                    across {new Set(bots.map(b => b.user)).size} users
+                    {bots.length > 0 ? `across ${new Set(bots.map(b => b.user)).size} users` : '--'}
                   </div>
                 </div>
               </div>
@@ -172,62 +269,70 @@ export default function ShiftHandoffPage() {
               <span className="text-[10px] text-[#5a7090]">{shiftLogs.length} entries</span>
             </div>
 
-            {/* Mobile Card View */}
-            <div className="lg:hidden divide-y divide-dark/50">
-              {shiftLogs.map(log => (
-                <div key={log.id} className="p-3 space-y-2 hover:bg-[#0d1117] transition-colors">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
-                        log.priority === "critical" ? "bg-[rgba(255,71,87,0.12)] text-[#ff4757]" :
-                        log.priority === "warning" ? "bg-[rgba(245,166,35,0.12)] text-[#f5a623]" :
-                        "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
-                      }`}>
-                        {log.priority}
-                      </span>
-                      <span className="font-mono text-xs text-foreground">{log.user}</span>
-                    </div>
-                    <span className="font-mono text-[10px] text-[#5a7090] whitespace-nowrap">{log.timestamp}</span>
-                  </div>
-                  <div className="text-xs text-foreground font-semibold">{log.action}</div>
-                  <div className="text-xs text-[#8fa3b8]">{log.notes}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Desktop Table View */}
-            <div className="hidden lg:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-dark">
-                    <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Time</th>
-                    <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Operator</th>
-                    <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Priority</th>
-                    <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Action</th>
-                    <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
+            {shiftLogs.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-sm text-[#8fa3b8]">No activities logged this shift</p>
+              </div>
+            ) : (
+              <>
+                {/* Mobile Card View */}
+                <div className="lg:hidden divide-y divide-dark/50">
                   {shiftLogs.map(log => (
-                    <tr key={log.id} className="border-b border-dark/50 hover:bg-[#0d1117] transition-colors">
-                      <td className="px-3.5 py-2 font-mono text-xs text-[#5a7090]">{log.timestamp}</td>
-                      <td className="px-3.5 py-2 font-mono text-xs text-foreground">{log.user}</td>
-                      <td className="px-3.5 py-2">
-                        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
-                          log.priority === "critical" ? "bg-[rgba(255,71,87,0.12)] text-[#ff4757]" :
-                          log.priority === "warning" ? "bg-[rgba(245,166,35,0.12)] text-[#f5a623]" :
-                          "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
-                        }`}>
-                          {log.priority}
-                        </span>
-                      </td>
-                      <td className="px-3.5 py-2 text-xs text-foreground">{log.action}</td>
-                      <td className="px-3.5 py-2 text-xs text-[#8fa3b8]">{log.notes}</td>
-                    </tr>
+                    <div key={log.id} className="p-3 space-y-2 hover:bg-[#0d1117] transition-colors">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
+                            log.priority === "critical" ? "bg-[rgba(255,71,87,0.12)] text-[#ff4757]" :
+                            log.priority === "warning" ? "bg-[rgba(245,166,35,0.12)] text-[#f5a623]" :
+                            "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
+                          }`}>
+                            {log.priority}
+                          </span>
+                          <span className="font-mono text-xs text-foreground">{log.user}</span>
+                        </div>
+                        <span className="font-mono text-[10px] text-[#5a7090] whitespace-nowrap">{log.timestamp}</span>
+                      </div>
+                      <div className="text-xs text-foreground font-semibold">{log.action}</div>
+                      <div className="text-xs text-[#8fa3b8]">{log.notes}</div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-dark">
+                        <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Time</th>
+                        <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Operator</th>
+                        <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Priority</th>
+                        <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Action</th>
+                        <th className="text-left px-3.5 py-2 text-[10px] font-semibold text-[#8fa3b8] uppercase tracking-wider">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shiftLogs.map(log => (
+                        <tr key={log.id} className="border-b border-dark/50 hover:bg-[#0d1117] transition-colors">
+                          <td className="px-3.5 py-2 font-mono text-xs text-[#5a7090]">{log.timestamp}</td>
+                          <td className="px-3.5 py-2 font-mono text-xs text-foreground">{log.user}</td>
+                          <td className="px-3.5 py-2">
+                            <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
+                              log.priority === "critical" ? "bg-[rgba(255,71,87,0.12)] text-[#ff4757]" :
+                              log.priority === "warning" ? "bg-[rgba(245,166,35,0.12)] text-[#f5a623]" :
+                              "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
+                            }`}>
+                              {log.priority}
+                            </span>
+                          </td>
+                          <td className="px-3.5 py-2 text-xs text-foreground">{log.action}</td>
+                          <td className="px-3.5 py-2 text-xs text-[#8fa3b8]">{log.notes}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Handoff Notes */}
@@ -247,10 +352,17 @@ export default function ShiftHandoffPage() {
                 />
               </div>
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-2.5">
-                <button className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all whitespace-nowrap">
-                  Submit Handoff
+                <button
+                  onClick={handleSubmitHandoff}
+                  disabled={submitting}
+                  className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all whitespace-nowrap disabled:opacity-50"
+                >
+                  {submitting ? 'Submitting...' : 'Submit Handoff'}
                 </button>
-                <button className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-dark hover:border-[#253550] hover:text-foreground transition-all whitespace-nowrap">
+                <button
+                  onClick={handleSaveDraft}
+                  className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-dark hover:border-[#253550] hover:text-foreground transition-all whitespace-nowrap"
+                >
                   Save Draft
                 </button>
               </div>
@@ -263,31 +375,78 @@ export default function ShiftHandoffPage() {
               <span className="text-xs font-semibold text-[#8fa3b8] uppercase tracking-wider">Watch List</span>
             </div>
             <div className="p-3 sm:p-3.5 space-y-2.5">
-              <div className="flex items-start gap-3 p-2.5 bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#ff4757] shadow-[0_0_6px_#ff4757] mt-1"></div>
-                <div className="flex-1">
-                  <div className="text-xs text-foreground font-semibold">BOT-0012 - High CPU Usage</div>
-                  <div className="text-[10px] text-[#8fa3b8] mt-0.5">Consistently running above 85% CPU. Consider restarting if it hits 95%.</div>
+              {watchList.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-sm text-[#8fa3b8]">No items on watch list</p>
                 </div>
-              </div>
-              <div className="flex items-start gap-3 p-2.5 bg-[rgba(245,166,35,0.08)] border border-[rgba(245,166,35,0.2)] rounded-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#f5a623] mt-1"></div>
-                <div className="flex-1">
-                  <div className="text-xs text-foreground font-semibold">Postgres RAM Trending Up</div>
-                  <div className="text-[10px] text-[#8fa3b8] mt-0.5">RAM usage at 79%. Monitor for next 30 minutes.</div>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-2.5 bg-[rgba(245,166,35,0.08)] border border-[rgba(245,166,35,0.2)] rounded-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#f5a623] mt-1"></div>
-                <div className="flex-1">
-                  <div className="text-xs text-foreground font-semibold">BOT-0007 - Intermittent Heartbeat</div>
-                  <div className="text-[10px] text-[#8fa3b8] mt-0.5">Missed 2 heartbeats in past hour. Network latency suspected.</div>
-                </div>
-              </div>
+              ) : (
+                watchList.map((item) => {
+                  const colors = item.severity === "critical"
+                    ? { bg: "rgba(255,71,87,0.08)", border: "rgba(255,71,87,0.2)", dot: "#ff4757", shadow: "shadow-[0_0_6px_#ff4757]" }
+                    : item.severity === "warning"
+                    ? { bg: "rgba(245,166,35,0.08)", border: "rgba(245,166,35,0.2)", dot: "#f5a623", shadow: "" }
+                    : { bg: "rgba(61,157,243,0.08)", border: "rgba(61,157,243,0.2)", dot: "#3d9df3", shadow: "" };
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-start gap-3 p-2.5 rounded-sm"
+                      style={{ background: colors.bg, border: `1px solid ${colors.border}` }}
+                    >
+                      <div
+                        className={`w-1.5 h-1.5 rounded-full mt-1 ${colors.shadow}`}
+                        style={{ background: colors.dot }}
+                      />
+                      <div className="flex-1">
+                        <div className="text-xs text-foreground font-semibold">{item.title}</div>
+                        <div className="text-[10px] text-[#8fa3b8] mt-0.5">{item.description}</div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+// ==================== HELPERS ====================
+
+function formatTime(ts: string | undefined): string {
+  if (!ts) return '--';
+  try {
+    return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch {
+    return ts;
+  }
+}
+
+function formatDuration(startTs: string | undefined): string {
+  if (!startTs) return '--';
+  try {
+    const diff = Date.now() - new Date(startTs).getTime();
+    if (diff < 0 || isNaN(diff)) return '--';
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    return `${hours}h ${minutes}m`;
+  } catch {
+    return '--';
+  }
+}
+
+function normalizePriority(p: string): "normal" | "warning" | "critical" {
+  const lower = (p ?? '').toLowerCase();
+  if (lower === 'critical' || lower === 'error') return 'critical';
+  if (lower === 'warning' || lower === 'warn') return 'warning';
+  return 'normal';
+}
+
+function normalizeSeverity(s: string): "critical" | "warning" | "info" {
+  const lower = (s ?? '').toLowerCase();
+  if (lower === 'critical' || lower === 'error') return 'critical';
+  if (lower === 'warning' || lower === 'warn') return 'warning';
+  return 'info';
 }

@@ -1,242 +1,225 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { getSettingsExchanges } from "@/lib/stellaAdminApi";
 
-const EXCHANGES_DATA = [
-  { id: "binance", name: "Binance", color: "#C99400", bg: "#C9940018", abbr: "BN", status: "connected", apiKey: "BNCE-••••-••••-••••-3f2a", rateLimit: 1200, pairs: 47, env: "live", lastPing: "1s ago", fees: "0.02/0.04" },
-  { id: "bybit", name: "Bybit", color: "#00e5a0", bg: "#00e5a018", abbr: "BY", status: "connected", apiKey: "BYBT-••••-••••-••••-9c1d", rateLimit: 600, pairs: 31, env: "live", lastPing: "2s ago", fees: "0.01/0.06" },
-  { id: "okx", name: "OKX", color: "#3d9df3", bg: "#3d9df318", abbr: "OK", status: "connected", apiKey: "OKEX-••••-••••-••••-7b3e", rateLimit: 1000, pairs: 28, env: "live", lastPing: "3s ago", fees: "0.02/0.05" },
-  { id: "kraken", name: "Kraken", color: "#8B5CF6", bg: "#8B5CF618", abbr: "KR", status: "degraded", apiKey: "KRKN-••••-••••-••••-2d1f", rateLimit: 60, pairs: 19, env: "live", lastPing: "18s ago", fees: "0.16/0.26" },
-  { id: "kucoin", name: "Kucoin", color: "#21A179", bg: "#21A17918", abbr: "KC", status: "connected", apiKey: "KUCN-••••-••••-••••-5a8c", rateLimit: 600, pairs: 22, env: "live", lastPing: "2s ago", fees: "0.10/0.10" },
-  { id: "binance_t", name: "Binance Testnet", color: "#7a6200", bg: "#7a620018", abbr: "BT", status: "connected", apiKey: "BNTST-••••-••••-8812", rateLimit: 1200, pairs: 47, env: "sandbox", lastPing: "5s ago", fees: "0/0" },
-];
+// ── Types ────────────────────────────────────────────────────────
 
-export default function ExchangeManagementPage() {
-  const [exs, setExs] = useState(EXCHANGES_DATA);
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-  const [testing, setTesting] = useState<Record<string, boolean>>({});
-  const [testedOk, setTestedOk] = useState<Record<string, boolean>>({});
-  const [expanded, setExpanded] = useState<string | null>(null);
+interface AdapterKpis {
+  active: number;
+  inactive: number;
+  maintenance: number;
+  total: number;
+}
 
-  function test(id: string) {
-    setTesting((p) => ({ ...p, [id]: true }));
-    setTimeout(() => {
-      setTesting((p) => ({ ...p, [id]: false }));
-      setTestedOk((p) => ({ ...p, [id]: true }));
-    }, 1500);
-  }
+interface Adapter {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  status: "active" | "inactive" | "maintenance" | "deprecated";
+  authModel: string;
+  supportsSpot: boolean;
+  supportsMargin: boolean;
+  supportsFutures: boolean;
+  supportsOptions: boolean;
+  supportsStaking: boolean;
+  requiresPlatformAuth: boolean;
+  lastSyncAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncPairCount: number | null;
+}
+
+// ── Page ─────────────────────────────────────────────────────────
+
+export default function ExchangeAdaptersPage() {
+  const router = useRouter();
+  const [kpis, setKpis] = useState<AdapterKpis>({ active: 0, inactive: 0, maintenance: 0, total: 0 });
+  const [adapters, setAdapters] = useState<Adapter[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchAdapters = useCallback(async () => {
+    setLoading(true);
+    const res = await getSettingsExchanges();
+    if (res.data) {
+      const d = res.data as any;
+      setKpis(d.kpis || { active: 0, inactive: 0, maintenance: 0, total: 0 });
+      setAdapters(d.adapters || []);
+      setError(null);
+    } else {
+      setError(res.error || "Failed to load adapters");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAdapters(); }, [fetchAdapters]);
 
   return (
     <div className="p-4 md:p-6 flex flex-col gap-5 max-w-[1100px]">
       {/* Page Header */}
       <div className="mb-1">
-        <div className="font-mono text-[11px] md:text-[13px] font-semibold text-[#e8edf3] tracking-wider mb-1">Exchange Management</div>
+        <div className="font-mono text-[11px] md:text-[13px] font-semibold text-[#e8edf3] tracking-wider mb-1">Exchange Adapters</div>
         <div className="font-mono text-[10px] text-[#5a7090]">
-          API credentials, rate limits, and connection health per connected exchange.
+          Configure exchange adapters — status, credentials, trading pairs, and execution capabilities.
         </div>
       </div>
+
+      {/* Error */}
+      {error && (
+        <div className="text-xs text-[#ff4757] bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded px-3 py-2">
+          {error}
+          <button onClick={() => setError(null)} className="ml-2 text-[#5a7090] hover:text-[#e8edf3]">&times;</button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-[#0d1117] border border-[#1e2d40] border-t-2 border-t-[#00e5a0] rounded px-3.5 py-3">
-          <div className="font-mono text-[8px] uppercase tracking-wider text-[#5a7090] mb-1">Connected</div>
-          <div className="font-mono text-[20px] font-semibold text-[#00e5a0]">5</div>
-          <div className="font-mono text-[8px] text-[#5a7090] mt-0.5">1 sandbox</div>
-        </div>
-        <div className="bg-[#0d1117] border border-[#1e2d40] border-t-2 border-t-[#f5a623] rounded px-3.5 py-3">
-          <div className="font-mono text-[8px] uppercase tracking-wider text-[#5a7090] mb-1">Degraded</div>
-          <div className="font-mono text-[20px] font-semibold text-[#f5a623]">1</div>
-          <div className="font-mono text-[8px] text-[#5a7090] mt-0.5">Kraken · high latency</div>
-        </div>
-        <div className="bg-[#0d1117] border border-[#1e2d40] border-t-2 border-t-[#3d9df3] rounded px-3.5 py-3">
-          <div className="font-mono text-[8px] uppercase tracking-wider text-[#5a7090] mb-1">Total Pairs</div>
-          <div className="font-mono text-[20px] font-semibold text-[#3d9df3]">147</div>
-          <div className="font-mono text-[8px] text-[#5a7090] mt-0.5">Across all exchanges</div>
-        </div>
-        <div className="bg-[#0d1117] border border-[#1e2d40] border-t-2 border-t-[#00e5a0] rounded px-3.5 py-3">
-          <div className="font-mono text-[8px] uppercase tracking-wider text-[#5a7090] mb-1">Avg Latency</div>
-          <div className="font-mono text-[20px] font-semibold text-[#e8edf3]">84ms</div>
-          <div className="font-mono text-[8px] text-[#5a7090] mt-0.5">Last 5 min avg</div>
-        </div>
+        <KpiCard label="Active" value={kpis.active} color="#00e5a0" />
+        <KpiCard label="Inactive" value={kpis.inactive} color="#5a7090" />
+        <KpiCard label="Maintenance" value={kpis.maintenance} color="#3d9df3" />
+        <KpiCard label="Total" value={kpis.total} color="#f5a623" />
       </div>
 
-      {/* Exchange Cards */}
-      {exs.map((ex) => (
-        <div key={ex.id} className="bg-[#0d1117] border border-[#1e2d40] rounded overflow-hidden" style={{ borderTop: `2px solid ${ex.color}` }}>
-          <div
-            className="px-4 py-3 border-b border-[#1e2d40] cursor-pointer"
-            onClick={() => setExpanded(expanded === ex.id ? null : ex.id)}
-          >
+      {/* Loading */}
+      {loading && (
+        <div className="text-center py-8 font-mono text-[10px] text-[#5a7090]">Loading adapters...</div>
+      )}
+
+      {/* Adapter Cards */}
+      {!loading && adapters.map((a) => (
+        <div
+          key={a.id}
+          onClick={() => router.push(`/settings/exchanges/${a.id}`)}
+          className="bg-[#0d1117] border border-[#1e2d40] rounded overflow-hidden cursor-pointer hover:bg-[#131920] hover:border-[#253550] transition-all"
+          style={{ borderTop: `2px solid ${statusColor(a.status)}` }}
+        >
+          <div className="px-4 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div
-                  className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0 overflow-hidden relative"
-                  style={{ background: ex.bg }}
-                >
+                <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0 overflow-hidden relative" style={{ background: `${statusColor(a.status)}18` }}>
                   <Image
-                    src={`/exchanges/${ex.id}.png`}
-                    alt={`${ex.name} logo`}
+                    src={`/exchanges/${a.code}.png`}
+                    alt={`${a.name} logo`}
                     width={28}
                     height={28}
                     className="object-contain"
                     onError={(e) => {
-                      // Fallback to initials if logo not found
                       const target = e.target as HTMLImageElement;
-                      target.style.display = 'none';
+                      target.style.display = "none";
                       const parent = target.parentElement;
-                      if (parent) {
-                        parent.innerHTML = `<span class="font-mono text-[10px] font-bold" style="color: ${ex.color}">${ex.abbr}</span>`;
-                      }
+                      if (parent) parent.innerHTML = `<span class="font-mono text-[10px] font-bold" style="color: ${statusColor(a.status)}">${a.code.slice(0, 2).toUpperCase()}</span>`;
                     }}
                   />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-[12px] font-semibold text-[#e8edf3]">{ex.name}</span>
-                    <StatusDot status={ex.status} />
-                    <span
-                      className={`px-2 py-0.5 rounded-sm font-mono text-[9px] font-bold uppercase tracking-wide ${
-                        ex.status === "connected"
-                          ? "bg-[rgba(0,229,160,0.10)] text-[#00e5a0]"
-                          : ex.status === "degraded"
-                          ? "bg-[rgba(245,166,35,0.10)] text-[#f5a623]"
-                          : "bg-[rgba(255,71,87,0.10)] text-[#ff4757]"
-                      }`}
-                    >
-                      {ex.status}
-                    </span>
-                    {ex.env === "sandbox" && (
-                      <span className="px-2 py-0.5 rounded-sm bg-[rgba(34,211,238,0.10)] text-[#22d3ee] font-mono text-[9px] font-bold uppercase tracking-wide">
-                        Sandbox
+                    <span className="font-mono text-[12px] font-semibold text-[#e8edf3]">{a.name}</span>
+                    <span className="font-mono text-[9px] text-[#5a7090]">{a.code}</span>
+                    <StatusBadge status={a.status} />
+                    {a.requiresPlatformAuth && (
+                      <span className="px-1.5 py-0.5 rounded-sm bg-[rgba(245,166,35,0.10)] text-[#f5a623] font-mono text-[8px] uppercase tracking-wide font-bold">
+                        Auth Required
                       </span>
                     )}
                   </div>
-                  <div className="font-mono text-[9px] text-[#5a7090] mt-0.5">
-                    {ex.pairs} pairs · Last ping {ex.lastPing} · Fees {ex.fees}% maker/taker
+                  <div className="font-mono text-[9px] text-[#5a7090] mt-0.5 flex items-center gap-2">
+                    <MarketIcons adapter={a} />
+                    {a.lastSyncAt && (
+                      <>
+                        <span className="text-[#253550]">·</span>
+                        <span className="text-[#3a5068]">
+                          Last sync: {formatDate(a.lastSyncAt)}
+                          {a.lastSyncStatus && (
+                            <span className={`ml-1 px-1 py-0.5 rounded-sm text-[7px] uppercase font-bold ${
+                              a.lastSyncStatus === "success"
+                                ? "bg-[rgba(0,229,160,0.10)] text-[#00e5a0]"
+                                : a.lastSyncStatus === "running"
+                                ? "bg-[rgba(61,157,243,0.10)] text-[#3d9df3]"
+                                : "bg-[rgba(255,71,87,0.10)] text-[#ff4757]"
+                            }`}>
+                              {a.lastSyncStatus}
+                            </span>
+                          )}
+                          {a.lastSyncPairCount != null && (
+                            <span className="ml-1 text-[#5a7090]">({a.lastSyncPairCount} pairs)</span>
+                          )}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="flex gap-2 items-center">
-                <button
-                  className="px-3 py-1.5 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] hover:border-[#253550] transition-all"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    test(ex.id);
-                  }}
-                >
-                  {testing[ex.id] ? "Testing…" : testedOk[ex.id] ? "✓ Healthy" : "Test"}
-                </button>
-                <span className="font-mono text-[11px] text-[#5a7090]">{expanded === ex.id ? "▲" : "▼"}</span>
-              </div>
+              <span className="font-mono text-[11px] text-[#5a7090]">&#8250;</span>
             </div>
           </div>
-
-          {expanded === ex.id && (
-            <div className="px-4 py-4">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left Column */}
-                <div className="flex flex-col gap-3">
-                  <Field label="API Key">
-                    <div className="flex gap-1.5 items-center">
-                      <div className="flex-1 bg-[#131920] border border-[#1e2d40] text-[#5a7090] font-mono text-[10px] px-2.5 py-1.5 rounded overflow-hidden text-ellipsis whitespace-nowrap">
-                        {revealed[ex.id + "-key"] ? `LIVE-KEY-${ex.id.toUpperCase()}-EXAMPLE` : ex.apiKey}
-                      </div>
-                      <button
-                        className="px-2 py-1 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] transition-all"
-                        onClick={() => setRevealed((p) => ({ ...p, [ex.id + "-key"]: !p[ex.id + "-key"] }))}
-                      >
-                        {revealed[ex.id + "-key"] ? "Hide" : "Reveal"}
-                      </button>
-                    </div>
-                  </Field>
-                  <Field label="API Secret">
-                    <div className="flex gap-1.5 items-center">
-                      <div className="flex-1 bg-[#131920] border border-[#1e2d40] text-[#5a7090] font-mono text-[10px] px-2.5 py-1.5 rounded">
-                        ••••••••••••••••••••••••••••••••••••
-                      </div>
-                      <button className="px-2 py-1 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] transition-all">
-                        Rotate
-                      </button>
-                    </div>
-                  </Field>
-                  <Field label="Passphrase (if required)">
-                    <div className="flex gap-1.5 items-center">
-                      <div className="flex-1 bg-[#131920] border border-[#1e2d40] text-[#5a7090] font-mono text-[10px] px-2.5 py-1.5 rounded">
-                        ••••••••
-                      </div>
-                      <button className="px-2 py-1 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] transition-all">
-                        Update
-                      </button>
-                    </div>
-                  </Field>
-                </div>
-
-                {/* Right Column */}
-                <div className="flex flex-col gap-3">
-                  <Field label="Rate Limit (requests/min)" hint="Maximum API calls per minute to this exchange.">
-                    <input
-                      className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[11px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
-                      type="number"
-                      defaultValue={ex.rateLimit}
-                    />
-                  </Field>
-                  <Field label="Environment">
-                    <select
-                      className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[11px] px-2.5 py-1.5 rounded outline-none w-full cursor-pointer"
-                      defaultValue={ex.env}
-                    >
-                      <option value="live">Live / Production</option>
-                      <option value="sandbox">Sandbox / Testnet</option>
-                    </select>
-                  </Field>
-                  <Field label="Max Open Orders" hint="Hard limit on simultaneous open orders on this exchange.">
-                    <input
-                      className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[11px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
-                      type="number"
-                      defaultValue={200}
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              <div className="h-px bg-[#1e2d40] my-3.5" />
-
-              <div className="flex gap-2 justify-end">
-                <button className="px-3 py-1.5 rounded border bg-[rgba(255,71,87,0.10)] text-[#ff4757] border-[rgba(255,71,87,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#ff4757] hover:text-white transition-all">
-                  Disconnect
-                </button>
-                <button className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all">
-                  Save Changes
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       ))}
 
-      {/* Add Exchange */}
-      <div className="border border-dashed border-[#253550] rounded p-4.5 flex items-center justify-center gap-3">
-        <span className="font-mono text-[11px] text-[#5a7090]">Connect a new exchange — Bitget, MEXC, Deribit, Hyperliquid…</span>
-        <button className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all">
-          + Add Exchange
-        </button>
-      </div>
+      {!loading && adapters.length === 0 && (
+        <div className="text-center py-8 font-mono text-[10px] text-[#5a7090]">No exchange adapters configured.</div>
+      )}
     </div>
   );
 }
 
-function StatusDot({ status }: { status: string }) {
-  const col = status === "connected" ? "#00e5a0" : status === "degraded" ? "#f5a623" : "#ff4757";
-  return <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: col, flexShrink: 0 }} />;
-}
+// ── Sub-components ───────────────────────────────────────────────
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function KpiCard({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="font-mono text-[9px] uppercase tracking-wider text-[#5a7090] flex items-center gap-1.5">{label}</div>
-      {children}
-      {hint && <div className="font-mono text-[9px] text-[#3a5068]">{hint}</div>}
+    <div className="bg-[#0d1117] border border-[#1e2d40] rounded px-3.5 py-3" style={{ borderTop: `2px solid ${color}` }}>
+      <div className="font-mono text-[8px] uppercase tracking-wider text-[#5a7090] mb-1">{label}</div>
+      <div className="font-mono text-[20px] font-semibold" style={{ color }}>{value}</div>
     </div>
   );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const cls: Record<string, string> = {
+    active: "bg-[rgba(0,229,160,0.10)] text-[#00e5a0]",
+    inactive: "bg-[rgba(90,112,144,0.10)] text-[#5a7090]",
+    maintenance: "bg-[rgba(61,157,243,0.10)] text-[#3d9df3]",
+    deprecated: "bg-[rgba(255,71,87,0.10)] text-[#ff4757]",
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-sm font-mono text-[9px] font-bold uppercase tracking-wide ${cls[status] || cls.inactive}`}>
+      {status}
+    </span>
+  );
+}
+
+function MarketIcons({ adapter: a }: { adapter: Adapter }) {
+  const markets = [];
+  if (a.supportsSpot) markets.push("Spot");
+  if (a.supportsMargin) markets.push("Margin");
+  if (a.supportsFutures) markets.push("Futures");
+  if (a.supportsOptions) markets.push("Options");
+  if (a.supportsStaking) markets.push("Staking");
+  if (markets.length === 0) return <span className="text-[#3a5068]">No markets</span>;
+  return (
+    <span className="flex gap-1">
+      {markets.map((m) => (
+        <span key={m} className="px-1 py-0 rounded bg-[rgba(90,112,144,0.08)] text-[#8fa3b8] text-[8px] font-mono">{m}</span>
+      ))}
+    </span>
+  );
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+function statusColor(status: string): string {
+  switch (status) {
+    case "active": return "#00e5a0";
+    case "maintenance": return "#3d9df3";
+    case "deprecated": return "#ff4757";
+    default: return "#5a7090";
+  }
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch { return "\u2014"; }
 }

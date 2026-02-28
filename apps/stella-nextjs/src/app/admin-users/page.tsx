@@ -1,85 +1,32 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-
-// Mock data - would come from Logto API
-const MOCK_ADMIN_USERS = [
-  {
-    id: "usr_01h8g3j9k2m4n5p6",
-    firstName: "Sarah",
-    lastName: "Chen",
-    email: "sarah.chen@stella.io",
-    status: "active",
-    isSuperAdmin: true,
-    lastLoginAt: "2026-02-18T14:23:00Z",
-    lastLoginIp: "192.168.1.100",
-    createdAt: "2025-11-15T08:00:00Z",
-    mfaEnabled: true,
-  },
-  {
-    id: "usr_01h8g3k4l5m6n7p8",
-    firstName: "James",
-    lastName: "Wilson",
-    email: "james.wilson@stella.io",
-    status: "active",
-    isSuperAdmin: false,
-    lastLoginAt: "2026-02-18T12:45:00Z",
-    lastLoginIp: "192.168.1.101",
-    createdAt: "2025-12-01T10:30:00Z",
-    mfaEnabled: true,
-  },
-  {
-    id: "usr_01h8g3l5m6n7p8q9",
-    firstName: "Emily",
-    lastName: "Rodriguez",
-    email: "emily.rodriguez@stella.io",
-    status: "invited",
-    isSuperAdmin: false,
-    lastLoginAt: null,
-    lastLoginIp: null,
-    createdAt: "2026-02-10T16:20:00Z",
-    mfaEnabled: false,
-  },
-  {
-    id: "usr_01h8g3m6n7p8q9r0",
-    firstName: "Michael",
-    lastName: "Kim",
-    email: "michael.kim@stella.io",
-    status: "active",
-    isSuperAdmin: false,
-    lastLoginAt: "2026-02-17T18:15:00Z",
-    lastLoginIp: "192.168.1.102",
-    createdAt: "2026-01-05T09:00:00Z",
-    mfaEnabled: true,
-  },
-  {
-    id: "usr_01h8g3n7p8q9r0s1",
-    firstName: "Alex",
-    lastName: "Thompson",
-    email: "alex.thompson@stella.io",
-    status: "suspended",
-    isSuperAdmin: false,
-    lastLoginAt: "2026-02-10T11:30:00Z",
-    lastLoginIp: "192.168.1.103",
-    createdAt: "2025-10-20T14:45:00Z",
-    mfaEnabled: false,
-  },
-  {
-    id: "usr_01h8g3p8q9r0s1t2",
-    firstName: "Lisa",
-    lastName: "Anderson",
-    email: "lisa.anderson@stella.io",
-    status: "deactivated",
-    isSuperAdmin: false,
-    lastLoginAt: "2026-01-25T09:20:00Z",
-    lastLoginIp: "192.168.1.104",
-    createdAt: "2025-09-12T11:00:00Z",
-    mfaEnabled: true,
-  },
-];
+import { getAdminUsers } from "@/lib/stellaAdminApi";
 
 type AdminUserStatus = "active" | "invited" | "suspended" | "deactivated";
+
+interface AdminUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+  email: string;
+  status: AdminUserStatus;
+  isSuperAdmin: boolean;
+  lastLoginAt: string | null;
+  lastLoginIp: string | null;
+  createdAt: string;
+  mfaEnabled: boolean;
+}
+
+interface Summary {
+  total: number;
+  active: number;
+  invited: number;
+  suspended: number;
+  deactivated: number;
+}
 
 function formatDateTime(date: string | null) {
   if (!date) return "Never";
@@ -98,29 +45,40 @@ export default function AdminUsersPage() {
     status: "" as AdminUserStatus | "",
     search: "",
   });
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [summary, setSummary] = useState<Summary>({ total: 0, active: 0, invited: 0, suspended: 0, deactivated: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Filter admin users
-  const filteredUsers = useMemo(() => {
-    return MOCK_ADMIN_USERS.filter((user) => {
-      const matchesStatus = !filters.status || user.status === filters.status;
-      const matchesSearch =
-        !filters.search ||
-        user.firstName.toLowerCase().includes(filters.search.toLowerCase()) ||
-        user.lastName.toLowerCase().includes(filters.search.toLowerCase()) ||
-        user.email.toLowerCase().includes(filters.search.toLowerCase());
-      return matchesStatus && matchesSearch;
-    });
-  }, [filters]);
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getAdminUsers({
+        search: filters.search || undefined,
+        status: filters.status || undefined,
+        limit: 100,
+      });
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      const payload = res.data as { data?: AdminUser[]; summary?: Summary } | undefined;
+      setUsers(payload?.data || []);
+      if (payload?.summary) {
+        setSummary(payload.summary);
+      }
+    } catch {
+      setError("Failed to fetch admin users");
+    } finally {
+      setLoading(false);
+    }
+  }, [filters.search, filters.status]);
 
-  // Count by status
-  const statusCounts = useMemo(() => {
-    return {
-      active: MOCK_ADMIN_USERS.filter((u) => u.status === "active").length,
-      invited: MOCK_ADMIN_USERS.filter((u) => u.status === "invited").length,
-      suspended: MOCK_ADMIN_USERS.filter((u) => u.status === "suspended").length,
-      deactivated: MOCK_ADMIN_USERS.filter((u) => u.status === "deactivated").length,
-    };
-  }, []);
+  useEffect(() => {
+    const timeout = setTimeout(fetchUsers, filters.search ? 300 : 0);
+    return () => clearTimeout(timeout);
+  }, [fetchUsers, filters.search]);
 
   return (
     <div className="p-4 md:p-6 flex flex-col gap-5">
@@ -129,7 +87,7 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="font-mono text-xl md:text-2xl font-semibold text-[#e8edf3]">Admin Users</h1>
           <p className="mt-1 font-mono text-[11px] text-[#5a7090]">
-            Manage admin users and their permissions. Total: {MOCK_ADMIN_USERS.length}
+            Manage admin users and their permissions. Total: {summary.total}
           </p>
         </div>
         <div className="flex items-center gap-2 md:gap-3">
@@ -143,23 +101,23 @@ export default function AdminUsersPage() {
             <span>{showFilters ? "Hide Filters" : "Show Filters"}</span>
           </button>
           <Link
-            href="/admin-users/invite"
+            href="/admin-users/new"
             className="inline-flex items-center gap-2 px-3 py-2 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[10px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            <span>Invite Admin</span>
+            <span>Create Admin</span>
           </Link>
         </div>
       </div>
 
       {/* Status KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatusCard label="Active" count={statusCounts.active} color="#00e5a0" />
-        <StatusCard label="Invited" count={statusCounts.invited} color="#3d9df3" />
-        <StatusCard label="Suspended" count={statusCounts.suspended} color="#f5a623" />
-        <StatusCard label="Deactivated" count={statusCounts.deactivated} color="#5a7090" />
+        <StatusCard label="Active" count={summary.active} color="#00e5a0" />
+        <StatusCard label="Invited" count={summary.invited} color="#3d9df3" />
+        <StatusCard label="Suspended" count={summary.suspended} color="#f5a623" />
+        <StatusCard label="Deactivated" count={summary.deactivated} color="#5a7090" />
       </div>
 
       {/* Filters */}
@@ -212,6 +170,19 @@ export default function AdminUsersPage() {
         </div>
       )}
 
+      {/* Error */}
+      {error && (
+        <div className="bg-[rgba(255,71,87,0.10)] border border-[rgba(255,71,87,0.3)] rounded p-4">
+          <p className="font-mono text-[11px] text-[#ff4757]">{error}</p>
+          <button
+            onClick={fetchUsers}
+            className="mt-2 font-mono text-[10px] text-[#3d9df3] hover:text-[#00e5a0] transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Admin Users Table */}
       <div className="bg-[#131920] border border-[#1e2d40] rounded overflow-hidden">
         <div className="overflow-x-auto">
@@ -220,6 +191,9 @@ export default function AdminUsersPage() {
               <tr>
                 <th className="px-4 py-3 text-left font-mono text-[9px] uppercase tracking-wider text-[#5a7090]">
                   Name
+                </th>
+                <th className="px-4 py-3 text-left font-mono text-[9px] uppercase tracking-wider text-[#5a7090]">
+                  Username
                 </th>
                 <th className="px-4 py-3 text-left font-mono text-[9px] uppercase tracking-wider text-[#5a7090]">
                   Email
@@ -239,66 +213,81 @@ export default function AdminUsersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1e2d40]">
-              {filteredUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-[#0d1117] transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[11px] font-semibold text-[#e8edf3]">
-                        {user.firstName} {user.lastName}
-                      </span>
-                      {user.isSuperAdmin && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-sm bg-[rgba(167,139,250,0.15)] text-[#a78bfa] border border-[rgba(167,139,250,0.3)] font-mono text-[8px] font-bold uppercase tracking-wide">
-                          Super Admin
-                        </span>
-                      )}
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center">
+                    <div className="inline-flex items-center gap-2">
+                      <svg className="w-4 h-4 animate-spin text-[#3d9df3]" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <span className="font-mono text-[11px] text-[#5a7090]">Loading admin users...</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[10px] text-[#8fa3b8]">{user.email}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={user.status} />
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[10px] text-[#8fa3b8]">
-                    {formatDateTime(user.lastLoginAt)}
-                  </td>
-                  <td className="px-4 py-3">
-                    {user.mfaEnabled ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-[rgba(0,229,160,0.10)] text-[#00e5a0] font-mono text-[8px] font-bold">
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        Enabled
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-[rgba(90,112,144,0.10)] text-[#5a7090] font-mono text-[8px] font-bold">
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        Disabled
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/admin-users/${user.id}`}
-                      className="font-mono text-[10px] font-semibold text-[#3d9df3] hover:text-[#00e5a0] transition-colors"
-                    >
-                      View
-                    </Link>
-                  </td>
                 </tr>
-              ))}
+              ) : (
+                users.map((user) => (
+                  <tr key={user.id} className="hover:bg-[#0d1117] transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] font-semibold text-[#e8edf3]">
+                          {user.firstName} {user.lastName}
+                        </span>
+                        {user.isSuperAdmin && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm bg-[rgba(167,139,250,0.15)] text-[#a78bfa] border border-[rgba(167,139,250,0.3)] font-mono text-[8px] font-bold uppercase tracking-wide">
+                            Super Admin
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[10px] text-[#3d9df3]">{user.username || "—"}</td>
+                    <td className="px-4 py-3 font-mono text-[10px] text-[#8fa3b8]">{user.email}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={user.status} />
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[10px] text-[#8fa3b8]">
+                      {formatDateTime(user.lastLoginAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {user.mfaEnabled ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-[rgba(0,229,160,0.10)] text-[#00e5a0] font-mono text-[8px] font-bold">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          Enabled
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-[rgba(90,112,144,0.10)] text-[#5a7090] font-mono text-[8px] font-bold">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          Disabled
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        href={`/admin-users/${user.id}`}
+                        className="font-mono text-[10px] font-semibold text-[#3d9df3] hover:text-[#00e5a0] transition-colors"
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
 
-          {filteredUsers.length === 0 && (
+          {!loading && users.length === 0 && !error && (
             <div className="text-center py-12">
               <p className="font-mono text-[11px] text-[#5a7090]">No admin users found.</p>
             </div>

@@ -1,399 +1,557 @@
-/**
- * Trading Engine API Client
- *
- * A comprehensive utility class for interacting with the Trading Engine API.
- * Provides methods for managing bots, trading controls, capital management,
- * positions, and risk management.
- */
+'use server';
 
-const BASE_URL = 'http://170.168.103.207:4000';
+import { getAccessToken } from '@logto/next/server-actions';
+import { logtoConfig, TRADING_ENGINE_API_RESOURCE } from '@/app/logto';
+
+// Backend base URLs
+const BACKENDS = {
+  /** Admin Gateway (Phoenix) — WS socket, infra metrics, auth */
+  gateway: process.env.ADMIN_GATEWAY_URL || 'http://localhost:4000',
+  /** Trade Engine (Bandit) — bots, service accounts, trading, positions */
+  engine: process.env.TRADING_ENGINE_API_URL || 'http://localhost:4002',
+} as const;
+
+type Backend = keyof typeof BACKENDS;
 
 interface ApiResponse<T = any> {
   data?: T;
   error?: string;
   message?: string;
+  statusCode?: number;
 }
 
-interface BotConfig {
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await getAccessToken(logtoConfig, TRADING_ENGINE_API_RESOURCE);
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+  } catch {
+    return { 'Content-Type': 'application/json' };
+  }
+}
+
+async function request<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  backend: Backend = 'engine',
+): Promise<ApiResponse<T>> {
+  try {
+    const headers = await getAuthHeaders();
+    const url = `${BACKENDS[backend]}${endpoint}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: { ...headers, ...options.headers },
+    });
+
+    const text = await response.text();
+    const json = text ? JSON.parse(text) : {};
+
+    if (!response.ok) {
+      return {
+        error: json.error || json.message || `HTTP ${response.status}`,
+        message: json.message,
+        statusCode: response.status,
+      };
+    }
+
+    // Backend endpoints wrap responses in { data: ..., ok: true }.
+    // Unwrap so callers get the inner payload directly.
+    return { data: json.data !== undefined ? json.data : json };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+// ==================== AUTH ====================
+
+export async function getTradingEngineHealth() {
+  return request('/api/health', {}, 'gateway');
+}
+
+export async function getTradingEngineMe() {
+  return request('/api/admin/me', {}, 'gateway');
+}
+
+// ==================== BOTS API ====================
+
+export async function createBot(config: {
   user_id: string;
   name?: string;
   strategy?: string;
   [key: string]: any;
+}) {
+  return request('/api/bots', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
 }
 
-interface CapitalConfig {
+export async function listBots() {
+  return request('/api/bots');
+}
+
+export async function listUserBots(userId: string) {
+  return request(`/api/bots/user/${userId}`);
+}
+
+export async function getBot(botId: string) {
+  return request(`/api/bots/${botId}`);
+}
+
+export async function updateBot(
+  botId: string,
+  config: Record<string, any>,
+) {
+  return request(`/api/bots/${botId}`, {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  });
+}
+
+export async function deleteBot(botId: string) {
+  return request(`/api/bots/${botId}`, { method: 'DELETE' });
+}
+
+export async function startBot(botId: string) {
+  return request(`/api/bots/${botId}/start`, { method: 'POST' });
+}
+
+export async function pauseBot(botId: string) {
+  return request(`/api/bots/${botId}/pause`, { method: 'POST' });
+}
+
+export async function stopBot(botId: string) {
+  return request(`/api/bots/${botId}/stop`, { method: 'POST' });
+}
+
+export async function placeManualOrder(botId: string, order: { side: string; size: number }) {
+  return request(`/api/bots/${botId}/manual-order`, {
+    method: 'POST',
+    body: JSON.stringify(order),
+  });
+}
+
+export async function getBotPositions(botId: string) {
+  return request(`/api/bots/${botId}/positions`);
+}
+
+export async function getBotOrders(botId: string) {
+  return request(`/api/bots/${botId}/orders`);
+}
+
+export async function createSystemBot(config: {
+  service_account_id: string;
+  name?: string;
+  credential_id?: string;
+  trading_pairs?: string[];
+  [key: string]: any;
+}) {
+  return request('/api/bots/system', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
+export async function deployBot(config: {
+  user_id: string;
+  name?: string;
+  [key: string]: any;
+}) {
+  return request('/api/bots/deploy', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
+export async function deploySystemBot(config: {
+  service_account_id: string;
+  name?: string;
+  credential_id?: string;
+  trading_pairs?: string[];
+  [key: string]: any;
+}) {
+  return request('/api/bots/system/deploy', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
+export async function getBotBars(
+  botId: string,
+  timeframe: string = '5Min',
+  limit: number = 120,
+) {
+  const params = new URLSearchParams({ timeframe, limit: String(limit) });
+  return request(`/api/bots/${botId}/bars?${params}`);
+}
+
+export async function getBotEquityCurve(botId: string, since?: string) {
+  const params = new URLSearchParams({ limit: '500' });
+  if (since) params.set('since', since);
+  return request(`/api/bots/${botId}/equity-curve?${params}`);
+}
+
+export async function getBotTransitions(botId: string, limit?: number) {
+  const qs = limit ? `?limit=${limit}` : '';
+  return request(`/api/bots/${botId}/transitions${qs}`);
+}
+
+export async function getBotLogs(
+  botId: string,
+  opts?: { limit?: number; level?: string; category?: string },
+) {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.level) params.set('level', opts.level);
+  if (opts?.category) params.set('category', opts.category);
+  const qs = params.toString();
+  return request(`/api/bots/${botId}/logs${qs ? `?${qs}` : ''}`);
+}
+
+// ==================== SERVICE ACCOUNTS API ====================
+
+export async function listServiceAccounts() {
+  return request('/api/service-accounts');
+}
+
+export async function getServiceAccount(id: string) {
+  return request(`/api/service-accounts/${id}`);
+}
+
+export async function createServiceAccount(data: {
+  name: string;
+  account_type?: string;
+  description?: string;
+}) {
+  return request('/api/service-accounts', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateServiceAccount(id: string, data: Record<string, any>) {
+  return request(`/api/service-accounts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteServiceAccount(id: string) {
+  return request(`/api/service-accounts/${id}`, { method: 'DELETE' });
+}
+
+// ==================== STRATEGIES API ====================
+
+export async function listStrategies(filters?: {
+  type?: string;
+  status?: string;
+  live_only?: boolean;
+}) {
+  const query = new URLSearchParams();
+  if (filters) {
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return request(`/api/strategies${qs ? `?${qs}` : ''}`);
+}
+
+export async function getStrategy(id: string) {
+  return request(`/api/strategies/${id}`);
+}
+
+export async function createStrategy(attrs: Record<string, any>) {
+  return request('/api/strategies', { method: 'POST', body: JSON.stringify(attrs) });
+}
+
+export async function updateStrategy(id: string, attrs: Record<string, any>) {
+  return request(`/api/strategies/${id}`, { method: 'PUT', body: JSON.stringify(attrs) });
+}
+
+// ==================== BACKTESTS API ====================
+
+export async function createBacktest(config: {
+  strategy_id: string;
+  user_id?: string;
+  trading_pair: string;
+  exchange_code: string;
+  timeframe: string;
+  start_date: string;
+  end_date: string;
+  initial_capital_usd: number;
+  config_overrides?: Record<string, any>;
+  metadata?: Record<string, any>;
+}) {
+  return request('/api/backtests', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
+export async function listBacktests(filters?: {
+  strategy_id?: string;
+  user_id?: string;
+  status?: string;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (filters) {
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined) params.set(k, String(v));
+    });
+  }
+  const qs = params.toString();
+  return request(`/api/backtests${qs ? `?${qs}` : ''}`);
+}
+
+export async function getBacktest(id: string) {
+  return request(`/api/backtests/${id}`);
+}
+
+export async function cancelBacktest(id: string) {
+  return request(`/api/backtests/${id}/cancel`, { method: 'POST' });
+}
+
+export async function listStrategyBacktests(strategyId: string) {
+  return request(`/api/strategies/${strategyId}/backtests`);
+}
+
+// ==================== EXCHANGES API ====================
+
+export async function listExchanges() {
+  return request('/api/exchanges');
+}
+
+export async function getExchange(id: string) {
+  return request(`/api/exchanges/${id}`);
+}
+
+export async function listTradingPairs(exchangeId: string) {
+  return request(`/api/exchanges/${exchangeId}/trading-pairs`);
+}
+
+export async function listUserCredentials(userId: string) {
+  return request(`/api/users/${userId}/credentials`);
+}
+
+// ==================== SERVICE ACCOUNT CREDENTIALS API ====================
+
+export async function listServiceAccountCredentials(serviceAccountId: string) {
+  return request(`/api/service-accounts/${serviceAccountId}/credentials`);
+}
+
+export async function getCredential(id: string) {
+  return request(`/api/credentials/${id}`);
+}
+
+export async function createCredential(data: {
+  service_account_id?: string;
+  user_id?: string;
+  adapter_id: string;
+  auth_model: string;
+  exchange_name?: string;
+  status?: string;
+  is_sandbox?: boolean;
+  permissions?: string[];
+  config_overrides?: Record<string, any>;
+  encrypted_api_key?: string;
+  encrypted_api_secret?: string;
+  encrypted_passphrase?: string;
+}) {
+  return request('/api/credentials', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateCredential(id: string, data: Record<string, any>) {
+  return request(`/api/credentials/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCredential(id: string) {
+  return request(`/api/credentials/${id}`, { method: 'DELETE' });
+}
+
+export async function listAdapters() {
+  return request('/api/adapters');
+}
+
+// ==================== BOT ENGINE DEFAULTS API ====================
+
+export async function getBotEngineDefaults() {
+  return request('/api/bot-engine-defaults');
+}
+
+export async function updateBotEngineDefaults(config: Record<string, any>) {
+  return request('/api/bot-engine-defaults', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  });
+}
+
+// ==================== TRADING CONTROLS API ====================
+
+export async function startTrading() {
+  return request('/api/trading/start', { method: 'POST' });
+}
+
+export async function stopTrading() {
+  return request('/api/trading/stop', { method: 'POST' });
+}
+
+export async function restartTrading() {
+  return request('/api/trading/restart', { method: 'POST' });
+}
+
+export async function closeAllPositions() {
+  return request('/api/trading/close-all', { method: 'POST' });
+}
+
+export async function pauseUserTrading(userId: string) {
+  return request(`/api/trading/pause/${userId}`, { method: 'POST' });
+}
+
+export async function resumeUserTrading(userId: string) {
+  return request(`/api/trading/resume/${userId}`, { method: 'POST' });
+}
+
+// ==================== CAPITAL MANAGEMENT API ====================
+
+export async function configureCapital(config: {
   user_id: string;
   total_capital: number;
   active_capital: number;
   scaling_mode: string;
   [key: string]: any;
+}) {
+  return request('/api/capital/configure', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
 }
 
-interface RiskLimits {
-  [key: string]: any;
+export async function setActiveCapital(userId: string, amount: number) {
+  return request(`/api/capital/${userId}/active`, {
+    method: 'PUT',
+    body: JSON.stringify({ amount }),
+  });
 }
+
+export async function setTotalCapital(userId: string, amount: number) {
+  return request(`/api/capital/${userId}/total`, {
+    method: 'PUT',
+    body: JSON.stringify({ amount }),
+  });
+}
+
+export async function setScalingMode(userId: string, mode: string) {
+  return request(`/api/capital/${userId}/mode`, {
+    method: 'PUT',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export async function getCapitalStatus(userId: string) {
+  return request(`/api/capital/${userId}`);
+}
+
+export async function getAllCapitalAllocations() {
+  return request('/api/capital');
+}
+
+// ==================== POSITIONS API ====================
+
+export async function getOpenPositions() {
+  return request('/api/positions/open');
+}
+
+export async function getUserPositions(userId: string) {
+  return request(`/api/positions/${userId}`);
+}
+
+export async function getUserOpenPositions(userId: string) {
+  return request(`/api/positions/${userId}/open`);
+}
+
+export async function getUserClosedPositions(userId: string) {
+  return request(`/api/positions/${userId}/closed`);
+}
+
+// ==================== RISK MANAGEMENT API ====================
+
+export async function getRiskTier(balance: number) {
+  return request(`/api/risk/tier/${balance}`);
+}
+
+export async function getAllowedAssets(balance: number) {
+  return request(`/api/risk/assets/${balance}`);
+}
+
+export async function getRecommendedPositionSize(
+  balance: number,
+  confidence: number,
+) {
+  return request(
+    `/api/risk/position-size?balance=${balance}&confidence=${confidence}`,
+  );
+}
+
+export async function getUserRiskLimits(userId: string) {
+  return request(`/api/risk/limits/${userId}`);
+}
+
+export async function updateUserRiskLimits(
+  userId: string,
+  limits: Record<string, any>,
+) {
+  return request(`/api/risk/limits/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify(limits),
+  });
+}
+
+// ==================== INFRASTRUCTURE & SERVICE HEALTH ====================
+
+export async function getServiceHealth() {
+  return request('/api/phoenix/services/health', {}, 'gateway');
+}
+
+export async function getServiceHealthByName(name: string) {
+  return request(`/api/phoenix/services/health/${name}`, {}, 'gateway');
+}
+
+export async function getServiceHealthByCategory(category: string) {
+  return request(`/api/phoenix/services/health/category/${category}`, {}, 'gateway');
+}
+
+export async function getInfraMetrics() {
+  return request('/api/phoenix/infra/metrics', {}, 'gateway');
+}
+
+export async function getExchangeHealth() {
+  return request('/api/phoenix/infra/exchanges', {}, 'gateway');
+}
+
+// ==================== WEBSOCKET HELPER ====================
 
 /**
- * Trading Engine API Client
+ * Get a JWT token for authenticating Phoenix WebSocket connections.
+ * Usage: pass the returned token as `params.token` when connecting to the socket.
+ *
+ * Example:
+ *   const token = await getWebSocketToken();
+ *   const socket = new Phoenix.Socket(WS_URL, { params: { token } });
  */
-export class TradingEngineApi {
-  private baseUrl: string;
-
-  constructor(baseUrl: string = BASE_URL) {
-    this.baseUrl = baseUrl;
-  }
-
-  /**
-   * Generic HTTP request handler
-   */
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<ApiResponse<T>> {
-    try {
-      const url = `${this.baseUrl}${endpoint}`;
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return {
-          error: data.error || `HTTP ${response.status}: ${response.statusText}`,
-          message: data.message,
-        };
-      }
-
-      return { data };
-    } catch (error) {
-      return {
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      };
-    }
-  }
-
-  // ==================== BOTS API (11 routes) ====================
-
-  /**
-   * Create a new bot
-   */
-  async createBot(config: BotConfig): Promise<ApiResponse> {
-    return this.request('/api/bots', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  /**
-   * List all bots (enriched + system metrics)
-   */
-  async listBots(): Promise<ApiResponse> {
-    return this.request('/api/bots', {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * List bots for a specific user
-   */
-  async listUserBots(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/user/${userId}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get single bot (full runtime data)
-   */
-  async getBot(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Update bot configuration
-   */
-  async updateBot(botId: string, config: Partial<BotConfig>): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}`, {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    });
-  }
-
-  /**
-   * Delete bot (must be stopped)
-   */
-  async deleteBot(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  /**
-   * Start bot
-   */
-  async startBot(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}/start`, {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Pause bot
-   */
-  async pauseBot(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}/pause`, {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Stop bot
-   */
-  async stopBot(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}/stop`, {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Get bot's positions (enriched)
-   */
-  async getBotPositions(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}/positions`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get bot's orders (enriched)
-   */
-  async getBotOrders(botId: string): Promise<ApiResponse> {
-    return this.request(`/api/bots/${botId}/orders`, {
-      method: 'GET',
-    });
-  }
-
-  // ==================== TRADING CONTROLS API (6 routes) ====================
-
-  /**
-   * Start signal trader
-   */
-  async startTrading(): Promise<ApiResponse> {
-    return this.request('/api/trading/start', {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Stop signal trader
-   */
-  async stopTrading(): Promise<ApiResponse> {
-    return this.request('/api/trading/stop', {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Restart (stop → reset → start)
-   */
-  async restartTrading(): Promise<ApiResponse> {
-    return this.request('/api/trading/restart', {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Emergency close all positions
-   */
-  async closeAllPositions(): Promise<ApiResponse> {
-    return this.request('/api/trading/close-all', {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Pause trading for user
-   */
-  async pauseUserTrading(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/trading/pause/${userId}`, {
-      method: 'POST',
-    });
-  }
-
-  /**
-   * Resume trading for user
-   */
-  async resumeUserTrading(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/trading/resume/${userId}`, {
-      method: 'POST',
-    });
-  }
-
-  // ==================== CAPITAL MANAGEMENT API (6 routes) ====================
-
-  /**
-   * Configure capital allocation
-   */
-  async configureCapital(config: CapitalConfig): Promise<ApiResponse> {
-    return this.request('/api/capital/configure', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-  }
-
-  /**
-   * Set active trading capital
-   */
-  async setActiveCapital(userId: string, amount: number): Promise<ApiResponse> {
-    return this.request(`/api/capital/${userId}/active`, {
-      method: 'PUT',
-      body: JSON.stringify({ amount }),
-    });
-  }
-
-  /**
-   * Set total capital
-   */
-  async setTotalCapital(userId: string, amount: number): Promise<ApiResponse> {
-    return this.request(`/api/capital/${userId}/total`, {
-      method: 'PUT',
-      body: JSON.stringify({ amount }),
-    });
-  }
-
-  /**
-   * Set scaling mode
-   */
-  async setScalingMode(userId: string, mode: string): Promise<ApiResponse> {
-    return this.request(`/api/capital/${userId}/mode`, {
-      method: 'PUT',
-      body: JSON.stringify({ mode }),
-    });
-  }
-
-  /**
-   * Get capital status for user
-   */
-  async getCapitalStatus(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/capital/${userId}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get all capital allocations
-   */
-  async getAllCapitalAllocations(): Promise<ApiResponse> {
-    return this.request('/api/capital', {
-      method: 'GET',
-    });
-  }
-
-  // ==================== POSITIONS API (4 routes) ====================
-
-  /**
-   * Get live open positions from SignalTrader (enriched)
-   */
-  async getOpenPositions(): Promise<ApiResponse> {
-    return this.request('/api/positions/open', {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get all user positions (enriched)
-   */
-  async getUserPositions(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/positions/${userId}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get user open positions only
-   */
-  async getUserOpenPositions(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/positions/${userId}/open`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get user closed positions only
-   */
-  async getUserClosedPositions(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/positions/${userId}/closed`, {
-      method: 'GET',
-    });
-  }
-
-  // ==================== RISK MANAGEMENT API (5 routes) ====================
-
-  /**
-   * Get tier info for balance amount
-   */
-  async getRiskTier(balance: number): Promise<ApiResponse> {
-    return this.request(`/api/risk/tier/${balance}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get allowed trading assets for balance
-   */
-  async getAllowedAssets(balance: number): Promise<ApiResponse> {
-    return this.request(`/api/risk/assets/${balance}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Get recommended position size
-   */
-  async getRecommendedPositionSize(
-    balance: number,
-    confidence: number
-  ): Promise<ApiResponse> {
-    return this.request(
-      `/api/risk/position-size?balance=${balance}&confidence=${confidence}`,
-      {
-        method: 'GET',
-      }
-    );
-  }
-
-  /**
-   * Get user risk limits
-   */
-  async getUserRiskLimits(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/risk/limits/${userId}`, {
-      method: 'GET',
-    });
-  }
-
-  /**
-   * Update user risk limits
-   */
-  async updateUserRiskLimits(
-    userId: string,
-    limits: RiskLimits
-  ): Promise<ApiResponse> {
-    return this.request(`/api/risk/limits/${userId}`, {
-      method: 'PUT',
-      body: JSON.stringify(limits),
-    });
+export async function getWebSocketToken(): Promise<string | null> {
+  try {
+    return await getAccessToken(logtoConfig, TRADING_ENGINE_API_RESOURCE);
+  } catch {
+    return null;
   }
 }
-
-// Export a singleton instance for convenience
-export const tradingEngineApi = new TradingEngineApi();
-
-// Export default
-export default TradingEngineApi;

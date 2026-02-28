@@ -61,6 +61,11 @@ const Icons = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
     </svg>
   ),
+  key: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+    </svg>
+  ),
 };
 
 const NAV_CONFIG = [
@@ -70,6 +75,7 @@ const NAV_CONFIG = [
       { key: "risk", label: "Risk Controls", href: "/settings/risk", icon: Icons.bolt, critical: true },
       { key: "exchanges", label: "Exchange Management", href: "/settings/exchanges", icon: Icons.exchange },
       { key: "bot-engine", label: "Bot Engine Defaults", href: "/settings/bot-engine", icon: Icons.bot },
+      { key: "service-accounts", label: "Service Accounts", href: "/settings/service-accounts", icon: Icons.key },
     ],
   },
   {
@@ -136,7 +142,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           <div key={group.group}>
             <div className="px-4 py-1.5 font-mono text-[8px] uppercase tracking-widest text-[#3a5068]">{group.group}</div>
             {group.items.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
               return (
                 <Link
                   key={item.key}

@@ -52,13 +52,35 @@ export function generateEquityCurve(points = 60, base = 10000, volatility = 0.01
   });
 }
 
-export function generateInfraMetrics() {
+export function generateTradeEngineMetrics() {
+  const schedulerCount = 8;
+  const runQueue = randInt(0, 4);
+  const totalMemoryMb = parseFloat(randBetween(200, 800).toFixed(1));
   return {
-    phoenix:   { cpu: parseFloat((randBetween(18, 65)).toFixed(1)), ram: parseFloat((randBetween(30, 72)).toFixed(1)), disk: 24.1 },
-    postgres:  { cpu: parseFloat((randBetween(10, 55)).toFixed(1)), ram: parseFloat((randBetween(45, 82)).toFixed(1)), disk: 38.7 },
-    rabbitmq:  { cpu: parseFloat((randBetween(5, 40)).toFixed(1)),  ram: parseFloat((randBetween(20, 55)).toFixed(1)), disk: 12.2 },
-    redis:     { cpu: parseFloat((randBetween(3, 35)).toFixed(1)),  ram: parseFloat((randBetween(25, 60)).toFixed(1)), disk: 8.4 },
-    botWorker: { cpu: parseFloat((randBetween(30, 91)).toFixed(1)), ram: parseFloat((randBetween(50, 89)).toFixed(1)), disk: 18.6 },
+    beam: {
+      cpuPercent: Math.min(100, Math.round((runQueue / schedulerCount) * 100)),
+      totalMemoryMb,
+      processMemoryMb: parseFloat((totalMemoryMb * 0.6).toFixed(1)),
+      etsMemoryMb: parseFloat((totalMemoryMb * 0.2).toFixed(1)),
+      atomMemoryMb: parseFloat((totalMemoryMb * 0.05).toFixed(1)),
+      processCount: randInt(2000, 15000),
+      processLimit: 262144,
+      schedulerCount,
+      runQueue,
+      ioInputMb: parseFloat(randBetween(10, 500).toFixed(1)),
+      ioOutputMb: parseFloat(randBetween(10, 500).toFixed(1)),
+      uptimeSeconds: randInt(3600, 864000),
+    },
+    ets: {
+      totalEntries: randInt(500, 50000),
+      totalMemoryBytes: randInt(100000, 5000000),
+      tableCount: randInt(5, 30),
+    },
+    dbPool: {
+      poolSize: 10,
+      status: pick(["connected", "connected", "connected", "ok"]),
+    },
+    collectedAt: new Date().toISOString(),
   };
 }
 
