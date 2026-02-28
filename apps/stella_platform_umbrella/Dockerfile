@@ -11,6 +11,11 @@ RUN apt-get update -y && \
     apt-get install -y build-essential git curl && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
 
+# Node.js is required by ccxtex (CCXT Elixir wrapper) at compile + runtime
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && rm -f /var/lib/apt/lists/*_*
+
 WORKDIR /app
 
 # Install hex + rebar
@@ -54,7 +59,12 @@ RUN mix release
 FROM debian:trixie-slim AS runner
 
 RUN apt-get update -y && \
-    apt-get install -y libstdc++6 openssl libncurses6 locales ca-certificates && \
+    apt-get install -y libstdc++6 openssl libncurses6 locales ca-certificates curl && \
+    apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# Node.js required at runtime by ccxtex (spawns node process for CCXT)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set locale
