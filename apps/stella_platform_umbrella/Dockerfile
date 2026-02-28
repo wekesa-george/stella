@@ -50,10 +50,11 @@ COPY config/runtime.exs config/
 RUN mix release
 
 # ── Stage 2: Runner ───────────────────────────────────────────
-FROM debian:bookworm-slim AS runner
+# Must use same base as elixir:1.18-slim (Debian Trixie) for GLIBC compatibility
+FROM debian:trixie-slim AS runner
 
 RUN apt-get update -y && \
-    apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates && \
+    apt-get install -y libstdc++6 openssl libncurses6 locales ca-certificates && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set locale

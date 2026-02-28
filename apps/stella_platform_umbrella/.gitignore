@@ -30,6 +30,10 @@ erl_crash.dump
 # OS
 .DS_Store
 
+# Environment files
+.env
+.env.*
+
 # Large training data (667MB+)
 apps/trade_engine/priv/scripts/training_data/*.csv
 apps/trade_engine/priv/scripts/training_data/*.jsonl
