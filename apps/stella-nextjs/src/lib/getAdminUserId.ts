@@ -15,12 +15,13 @@ export async function getAdminUserId(): Promise<string | null> {
   }
 
   const result = await getAdminMe();
+  const data = result.data as any;
 
-  if (!result.data?.id) {
+  if (!data?.id) {
     return null;
   }
 
-  const adminUserId: string = result.data.id;
+  const adminUserId: string = data.id;
 
   cookieStore.set(COOKIE_NAME, adminUserId, {
     httpOnly: true,

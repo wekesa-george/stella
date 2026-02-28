@@ -38,10 +38,11 @@ export default function BotFleetPage() {
         ]);
 
         // listBots returns { bots: [...], system: {...} } or a flat array
-        const botsArr = Array.isArray(botsResult.data)
-          ? botsResult.data
-          : botsResult.data?.bots && Array.isArray(botsResult.data.bots)
-            ? botsResult.data.bots
+        const raw = botsResult.data as any;
+        const botsArr = Array.isArray(raw)
+          ? raw
+          : raw?.bots && Array.isArray(raw.bots)
+            ? raw.bots
             : null;
         if (botsArr) {
           setBots(botsArr.map(mapApiBotToUiBot));
