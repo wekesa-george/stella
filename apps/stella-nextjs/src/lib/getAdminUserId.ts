@@ -1,19 +1,9 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cache } from 'react';
 import { getAdminMe } from './stellaAdminApi';
 
-const COOKIE_NAME = 'stella_admin_user_id';
-const MAX_AGE = 60 * 60 * 24; // 24 hours
-
-export async function getAdminUserId(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const cached = cookieStore.get(COOKIE_NAME);
-
-  if (cached?.value) {
-    return cached.value;
-  }
-
+async function fetchAdminUserId(): Promise<string | null> {
   const result = await getAdminMe();
   const data = result.data as any;
 
@@ -21,15 +11,8 @@ export async function getAdminUserId(): Promise<string | null> {
     return null;
   }
 
-  const adminUserId: string = data.id;
-
-  cookieStore.set(COOKIE_NAME, adminUserId, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: MAX_AGE,
-    sameSite: 'lax',
-    path: '/',
-  });
-
-  return adminUserId;
+  return data.id;
 }
+
+// React cache() deduplicates calls within the same request/render
+export const getAdminUserId = cache(fetchAdminUserId);
