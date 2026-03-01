@@ -55,5 +55,9 @@ EXPOSE 3000
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
+# Docker health check
+HEALTHCHECK --interval=5s --timeout=5s --retries=10 --start-period=10s \
+  CMD wget -qO- http://localhost:3000/api/health || exit 1
+
 # Start the application
 CMD ["node", "server.js"]
