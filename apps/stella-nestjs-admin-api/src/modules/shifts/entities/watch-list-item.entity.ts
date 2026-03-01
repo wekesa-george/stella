@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Shift } from './shift.entity';
 
 @Entity({ schema: 'operations', name: 'watch_list_items' })
 export class WatchListItem {
@@ -49,4 +52,8 @@ export class WatchListItem {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+
+  @ManyToOne(() => Shift, (shift) => shift.watchItems)
+  @JoinColumn({ name: 'shift_id' })
+  shift: Shift;
 }

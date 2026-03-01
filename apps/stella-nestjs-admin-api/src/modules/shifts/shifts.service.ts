@@ -9,6 +9,9 @@ import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateWatchItemDto } from './dto/create-watch-item.dto';
 import { HandoffDto } from './dto/handoff.dto';
 import { UpdateNotesDto } from './dto/update-notes.dto';
+import { QueryShiftHistoryDto } from './dto/query-shift-history.dto';
+import { PaginatedResponse } from '../../common/dto/pagination.dto';
+import { FindOptionsWhere } from 'typeorm';
 
 @Injectable()
 export class ShiftsService {
@@ -100,5 +103,29 @@ export class ShiftsService {
 
     shift.handoffNotes = dto.handoffNotes;
     return this.shiftsRepo.save(shift);
+  }
+
+  async getHistory(query: QueryShiftHistoryDto): Promise<PaginatedResponse<Shift>> {
+    const where: FindOptionsWhere<Shift> = {};
+    if (query.status) where.status = query.status;
+    if (query.userId) where.userId = query.userId;
+
+    const [data, total] = await this.shiftsRepo.findAndCount({
+      where,
+      relations: ['activities', 'watchItems'],
+      order: { startTime: 'DESC' },
+      skip: (query.page - 1) * query.limit,
+      take: query.limit,
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit),
+      },
+    };
   }
 }

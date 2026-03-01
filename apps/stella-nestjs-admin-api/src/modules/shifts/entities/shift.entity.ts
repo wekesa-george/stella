@@ -7,6 +7,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { ShiftActivity } from './shift-activity.entity';
+import { WatchListItem } from './watch-list-item.entity';
 
 @Entity({ schema: 'operations', name: 'shifts' })
 export class Shift {
@@ -51,4 +52,7 @@ export class Shift {
 
   @OneToMany(() => ShiftActivity, (activity) => activity.shift)
   activities: ShiftActivity[];
+
+  @OneToMany(() => WatchListItem, (item) => item.shift)
+  watchItems: WatchListItem[];
 }
