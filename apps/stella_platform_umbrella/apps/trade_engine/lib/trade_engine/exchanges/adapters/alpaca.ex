@@ -201,13 +201,18 @@ defmodule TradeEngine.Exchanges.Adapters.Alpaca do
 
   @impl true
   def normalize_symbol(symbol, :trading) do
-    symbol
-    |> String.upcase()
-    |> String.replace("/", "")
-    |> String.replace("USDT", "USD")
-    |> then(fn s ->
-      if String.ends_with?(s, "USD"), do: s, else: s <> "USD"
-    end)
+    normalized =
+      symbol
+      |> String.upcase()
+      |> String.replace("/", "")
+
+    cond do
+      String.ends_with?(normalized, "USDT") -> String.replace_suffix(normalized, "USDT", "USD")
+      String.ends_with?(normalized, "USDC") -> String.replace_suffix(normalized, "USDC", "USD")
+      String.ends_with?(normalized, "BUSD") -> String.replace_suffix(normalized, "BUSD", "USD")
+      String.ends_with?(normalized, "USD") -> normalized
+      true -> normalized <> "USD"
+    end
   end
 
   def normalize_symbol(symbol, :data) do
