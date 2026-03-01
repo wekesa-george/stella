@@ -436,8 +436,8 @@ export async function startShift(body: Record<string, any>) {
   });
 }
 
-export async function getShiftActivities() {
-  return request('/shift/activities');
+export async function getShiftActivities(shiftId: string) {
+  return request(`/shift/activities?shiftId=${shiftId}`);
 }
 
 export async function logShiftActivity(body: Record<string, any>) {
@@ -467,12 +467,26 @@ export async function submitHandoff(body: Record<string, any>) {
 
 export async function updateShiftNotes(
   id: string,
-  body: { notes: string },
+  body: { handoffNotes: string },
 ) {
   return request(`/shift/${id}/notes`, {
     method: 'PUT',
     body: JSON.stringify(body),
   });
+}
+
+export async function getShiftHistory(params?: {
+  page?: number;
+  limit?: number;
+  status?: string;
+  userId?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  if (params?.status) qs.set('status', params.status);
+  if (params?.userId) qs.set('userId', params.userId);
+  return request(`/shift/history?${qs.toString()}`);
 }
 
 // ==================== SETTINGS: RISK ====================
