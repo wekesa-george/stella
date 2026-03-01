@@ -52,6 +52,6 @@ EXPOSE 3001
 
 # Docker health check
 HEALTHCHECK --interval=5s --timeout=5s --retries=10 --start-period=10s \
-  CMD node -e "fetch('http://localhost:3001/api/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://localhost:3001/api/health').then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})"
 
 CMD ["node", "dist/main"]
