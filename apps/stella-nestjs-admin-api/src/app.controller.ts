@@ -16,6 +16,12 @@ export class AppController {
     return this.appService.getHello();
   }
 
+  @Get('health')
+  @Public()
+  health(): string {
+    return 'OK';
+  }
+
   @Get('admin/me')
   @ApiBearerAuth()
   @ApiTags('Auth')
