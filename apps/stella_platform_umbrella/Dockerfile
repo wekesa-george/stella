@@ -90,4 +90,8 @@ ENV PORT=4000
 
 EXPOSE 4000 4002
 
+# Docker health check (trade engine API on port 4002)
+HEALTHCHECK --interval=5s --timeout=5s --retries=10 --start-period=30s \
+  CMD curl -sf http://localhost:4002/api/health || exit 1
+
 CMD ["/app/bin/stella_platform_umbrella", "start"]
