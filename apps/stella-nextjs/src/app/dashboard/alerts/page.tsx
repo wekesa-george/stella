@@ -109,7 +109,7 @@ export default function AlertsPage() {
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5a7090]">Dashboard</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">Alerts</span>
+            <span className="text-[#FFD700]">Alerts</span>
           </div>
 
           {/* Page Header */}
@@ -123,7 +123,7 @@ export default function AlertsPage() {
             <button
               onClick={() => handleAckAll()}
               disabled={unackedAlerts.length === 0}
-              className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
               Acknowledge All
             </button>
@@ -183,7 +183,7 @@ export default function AlertsPage() {
                     onClick={() => setFilter(f)}
                     className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-sm text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
                       filter === f
-                        ? "bg-[#00e5a0] text-black"
+                        ? "bg-[#FFD700] text-black"
                         : "bg-transparent text-[#8fa3b8] border border-dark hover:border-[#253550] hover:text-foreground"
                     }`}
                   >
@@ -283,7 +283,7 @@ export default function AlertsPage() {
                       </div>
                       <div className="text-xs text-foreground leading-relaxed mb-2">{alert.msg}</div>
                       {alert.acked && (
-                        <div className="text-[10px] text-[#00e5a0] flex items-center gap-1.5">
+                        <div className="text-[10px] text-[#FFD700] flex items-center gap-1.5">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                             <polyline points="20 6 9 17 4 12" />
                           </svg>
@@ -297,7 +297,7 @@ export default function AlertsPage() {
                       {!alert.acked && (
                         <button
                           onClick={() => handleAck(alert.id)}
-                          className="px-2 py-1 rounded-sm text-[9px] font-bold uppercase bg-transparent text-[#8fa3b8] border border-dark hover:border-[#00e5a0] hover:text-[#00e5a0] transition-all whitespace-nowrap"
+                          className="px-2 py-1 rounded-sm text-[9px] font-bold uppercase bg-transparent text-[#8fa3b8] border border-dark hover:border-[#FFD700] hover:text-[#FFD700] transition-all whitespace-nowrap"
                         >
                           ACK
                         </button>

@@ -109,7 +109,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     <div className="flex h-[calc(100vh-64px)] overflow-hidden">
       {/* Mobile menu button */}
       <button
-        className="md:hidden fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-[#00e5a0] text-black flex items-center justify-center shadow-lg"
+        className="md:hidden fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-[#FFD700] text-black flex items-center justify-center shadow-lg"
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -150,12 +150,12 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center gap-2.5 px-4 py-2 cursor-pointer transition-all border-l-2 ${
                     isActive
-                      ? "bg-[#131920] border-l-[#00e5a0] text-[#00e5a0]"
+                      ? "bg-[#131920] border-l-[#FFD700] text-[#FFD700]"
                       : "border-l-transparent text-[#8fa3b8] hover:bg-[#131920] hover:text-[#e8edf3]"
                   }`}
                 >
                   <span className="flex-shrink-0">{item.icon}</span>
-                  <span className={`font-sans text-[12px] font-medium flex-1 ${isActive ? "text-[#00e5a0]" : "text-inherit"}`}>
+                  <span className={`font-sans text-[12px] font-medium flex-1 ${isActive ? "text-[#FFD700]" : "text-inherit"}`}>
                     {item.label}
                   </span>
                   {item.critical && !isActive && (

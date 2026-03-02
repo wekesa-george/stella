@@ -113,7 +113,7 @@ export default function BacktestingPage() {
       <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-[#00e5a0]">Backtesting</span>
+          <span className="text-[#FFD700]">Backtesting</span>
         </div>
 
         {/* Header */}
@@ -134,7 +134,7 @@ export default function BacktestingPage() {
             </button>
             <button
               onClick={() => setModalOpen(true)}
-              className="px-4 py-2 rounded bg-[#00e5a0] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#00ffb2] transition-all"
+              className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all"
             >
               + New Backtest
             </button>
@@ -197,7 +197,7 @@ export default function BacktestingPage() {
               <p className="text-xs text-[#5a7090] mb-4">Run your first backtest to see results here</p>
               <button
                 onClick={() => setModalOpen(true)}
-                className="px-4 py-2 rounded bg-[#00e5a0] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#00ffb2] transition-all"
+                className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all"
               >
                 + New Backtest
               </button>
@@ -229,7 +229,7 @@ export default function BacktestingPage() {
                           href={`/backtesting/${run.id}`}
                           className="contents"
                         >
-                          <tr className="border-b border-dark/50 hover:bg-[rgba(0,229,160,0.03)] cursor-pointer transition-colors">
+                          <tr className="border-b border-dark/50 hover:bg-[rgba(255,215,0,0.03)] cursor-pointer transition-colors">
                             <td className="px-3 py-2.5 text-xs text-foreground font-medium">
                               {getStrategyName(run.strategy_id)}
                               <span className="block text-[10px] text-[#5a7090] font-mono">

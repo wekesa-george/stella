@@ -31,7 +31,7 @@ export function BotCard({ bot, onKill, onPause, onResume, onStart, onDelete, onS
       className={cn(
         "bg-dark-elevated border rounded-md p-3 flex flex-col gap-2 cursor-pointer transition-all relative overflow-hidden",
         "hover:border-dark-2",
-        selected && "border-[#00e5a0]",
+        selected && "border-[#FFD700]",
         (bot.status === "error" || bot.status === "circuit_broken") && "border-[#ff4757]",
         (bot.status === "paused" || bot.status === "maintenance") && "border-[#f5a623]",
         (bot.status === "initializing" || bot.status === "stopping") && "border-[#3d9df3]",
@@ -152,7 +152,7 @@ export function BotCard({ bot, onKill, onPause, onResume, onStart, onDelete, onS
                 e.stopPropagation();
                 onStart?.(bot.id);
               }}
-              className="px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[rgba(0,229,160,0.12)] text-[#00e5a0] border border-[rgba(0,229,160,0.3)] hover:bg-[#00e5a0] hover:text-black transition-all"
+              className="px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[rgba(255,215,0,0.12)] text-[#FFD700] border border-[rgba(255,215,0,0.3)] hover:bg-[#FFD700] hover:text-black transition-all"
             >
               START
             </button>

@@ -11,7 +11,7 @@ interface StrategyCardProps {
 }
 
 const TYPE_COLORS: Record<StrategyType, { text: string; bg: string }> = {
-  core_momentum:       { text: "text-[#00e5a0]", bg: "bg-[rgba(0,229,160,0.12)]" },
+  core_momentum:       { text: "text-[#FFD700]", bg: "bg-[rgba(255,215,0,0.12)]" },
   core_grid:           { text: "text-[#3d9df3]", bg: "bg-[rgba(61,157,243,0.12)]" },
   core_dca:            { text: "text-[#f5a623]", bg: "bg-[rgba(245,166,35,0.12)]" },
   core_mean_reversion: { text: "text-[#a855f7]", bg: "bg-[rgba(168,85,247,0.12)]" },
@@ -54,7 +54,7 @@ export function StrategyCard({ strategy, selected, onSelect, onStatusChange, onB
       className={cn(
         "bg-dark-elevated border rounded-md p-3.5 flex flex-col gap-2.5 cursor-pointer transition-all relative overflow-hidden",
         "hover:border-dark-2",
-        selected ? "border-[#00e5a0]" : borderColor
+        selected ? "border-[#FFD700]" : borderColor
       )}
     >
       {/* Type + Status badges */}

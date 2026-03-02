@@ -11,8 +11,8 @@
   --color-popover: #131920;
   --color-popover-foreground: #e8edf3;
 
-  /* Green: #00e5a0 */
-  --color-primary: #00e5a0;
+  /* Gold: #FFD700 */
+  --color-primary: #FFD700;
   --color-primary-foreground: #080c10;
 
   --color-secondary: #1a2230;
@@ -21,8 +21,8 @@
   --color-muted: #1a2230;
   --color-muted-foreground: #8fa3b8;
 
-  /* Accent green */
-  --color-accent: #00e5a0;
+  /* Accent gold */
+  --color-accent: #FFD700;
   --color-accent-foreground: #080c10;
 
   /* Red */
@@ -35,7 +35,7 @@
 
   --color-border: #1e2d40;
   --color-input: #1e2d40;
-  --color-ring: #00e5a0;
+  --color-ring: #FFD700;
 
   --radius: 0.5rem;
 }
@@ -79,6 +79,10 @@
 
 @utility text-green {
   color: #00e5a0;
+}
+
+@utility text-gold {
+  color: #FFD700;
 }
 
 @utility text-red {

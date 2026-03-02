@@ -54,7 +54,8 @@ export function Navbar({ user }: NavbarProps) {
 
   return (
     <>
-      <nav className="border-b border-border/40 bg-card">
+      <nav className="border-b border-border/40 bg-card/90 "
+           style={{ backgroundSize: "10px" }} >
         <div className="container mx-auto px-3 sm:px-4 md:px-6">
           <div className="flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4">
             {/* Left Section - Logo and Nav */}
@@ -62,11 +63,11 @@ export function Navbar({ user }: NavbarProps) {
               {/* Logo */}
               <Link href="/" className="flex items-center">
                 <Image
-                  src="/stella.svg"
+                  src="/stf.png"
                   alt="Stella Logo"
-                  width={120}
-                  height={32}
-                  className="h-6 sm:h-8"
+                  width={65}
+                  height={30}
+                  className=""
                   style={{ width: "auto" }}
                 />
               </Link>
@@ -299,8 +300,8 @@ function NavigationItem({ item }: { item: MenuItem }) {
           <Button
             variant="ghost"
             className={cn(
-              "gap-1 bg-transparent text-muted-foreground hover:bg-[rgba(0,229,160,0.12)] hover:text-foreground relative h-16 rounded-none border-b-2 border-transparent transition-all",
-              isActive && "text-[#00e5a0] border-b-[#00e5a0] hover:text-[#00e5a0] bg-[rgba(0,229,160,0.08)] hover:bg-[rgba(0,229,160,0.15)]"
+              "gap-1 bg-transparent text-muted-foreground hover:bg-[rgba(255,215,0,0.12)] hover:text-foreground relative h-16 rounded-none border-b-2 border-transparent transition-all",
+              isActive && "text-[#FFD700] border-b-[#FFD700] hover:text-[#FFD700] bg-[rgba(255,215,0,0.08)] hover:bg-[rgba(255,215,0,0.15)]"
             )}
           >
             {item.label}
@@ -334,8 +335,8 @@ function NavigationItem({ item }: { item: MenuItem }) {
     <Button
       variant="ghost"
       className={cn(
-        "bg-transparent text-muted-foreground hover:bg-[rgba(0,229,160,0.12)] hover:text-foreground relative h-16 rounded-none border-b-2 border-transparent transition-all",
-        isActive && "text-[#00e5a0] border-b-[#00e5a0] hover:text-[#00e5a0] bg-[rgba(0,229,160,0.08)] hover:bg-[rgba(0,229,160,0.15)]"
+        "bg-transparent text-muted-foreground hover:bg-[rgba(255,215,0,0.12)] hover:text-foreground relative h-16 rounded-none border-b-2 border-transparent transition-all",
+        isActive && "text-[#FFD700] border-b-[#FFD700] hover:text-[#FFD700] bg-[rgba(255,215,0,0.08)] hover:bg-[rgba(255,215,0,0.15)]"
       )}
       asChild
     >

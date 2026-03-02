@@ -122,7 +122,7 @@ export default function ShiftHistoryPage() {
             <span className="text-[#5a7090]">/</span>
             <span className="text-[#5a7090]">Shift Handoff</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">History</span>
+            <span className="text-[#FFD700]">History</span>
           </div>
 
           {/* Sub-navigation */}
@@ -133,7 +133,7 @@ export default function ShiftHistoryPage() {
             >
               Current Shift
             </Link>
-            <span className="px-1 pb-2 text-xs font-semibold text-[#00e5a0] border-b-2 border-[#00e5a0] cursor-default">
+            <span className="px-1 pb-2 text-xs font-semibold text-[#FFD700] border-b-2 border-[#FFD700] cursor-default">
               History
             </span>
           </div>
@@ -398,7 +398,7 @@ function PriorityBadge({ priority }: { priority: string }) {
       ? "bg-[rgba(255,71,87,0.12)] text-[#ff4757]"
       : priority === "warning"
         ? "bg-[rgba(245,166,35,0.12)] text-[#f5a623]"
-        : "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]";
+        : "bg-[rgba(255,215,0,0.12)] text-[#FFD700]";
 
   return (
     <span

@@ -122,7 +122,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 className={cn(
                   "px-3 sm:px-4 py-2.5 text-[10px] sm:text-xs font-medium uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 whitespace-nowrap",
                   isActive
-                    ? "text-[#00e5a0] border-[#00e5a0]"
+                    ? "text-[#FFD700] border-[#FFD700]"
                     : "text-[#5a7090] border-transparent hover:text-foreground"
                 )}
               >

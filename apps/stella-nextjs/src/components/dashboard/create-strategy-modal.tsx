@@ -204,7 +204,7 @@ export function CreateStrategyModal({ open, onClose, onCreated }: CreateStrategy
                   type="checkbox"
                   checked={value}
                   onChange={(e) => set(e.target.checked)}
-                  className="accent-[#00e5a0]"
+                  className="accent-[#FFD700]"
                 />
                 <span className="text-[10px] text-[#8fa3b8]">{label}</span>
               </label>
@@ -305,7 +305,7 @@ export function CreateStrategyModal({ open, onClose, onCreated }: CreateStrategy
           <button
             onClick={handleSubmit}
             disabled={submitting || !name.trim()}
-            className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50"
+            className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50"
           >
             {submitting ? "Creating..." : "Create Strategy"}
           </button>

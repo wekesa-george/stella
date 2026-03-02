@@ -421,7 +421,7 @@ export default function ServiceAccountsPage() {
         </div>
         <button
           onClick={openCreate}
-          className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all"
+          className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all"
         >
           + New Account
         </button>
@@ -446,7 +446,7 @@ export default function ServiceAccountsPage() {
       {!loading && accounts.length === 0 && (
         <div className="bg-[#0d1117] border border-[#1e2d40] rounded px-4 py-8 text-center">
           <div className="font-mono text-[10px] text-[#5a7090]">No service accounts found.</div>
-          <button onClick={openCreate} className="mt-2 font-mono text-[10px] text-[#00e5a0] hover:underline">
+          <button onClick={openCreate} className="mt-2 font-mono text-[10px] text-[#FFD700] hover:underline">
             Create your first service account
           </button>
         </div>
@@ -586,7 +586,7 @@ export default function ServiceAccountsPage() {
                 <label className="font-mono text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">Account Type</label>
                 <div className="flex gap-2">
                   {ACCOUNT_TYPES.map((t) => (
-                    <button key={t} onClick={() => setFormType(t)} className={`px-3 py-1.5 rounded-sm text-[11px] font-bold uppercase border transition-all ${formType === t ? "border-[#00e5a0] bg-[rgba(0,229,160,0.08)] text-[#00e5a0]" : "border-[#1e2d40] text-[#8fa3b8] hover:border-[#253550]"}`}>
+                    <button key={t} onClick={() => setFormType(t)} className={`px-3 py-1.5 rounded-sm text-[11px] font-bold uppercase border transition-all ${formType === t ? "border-[#FFD700] bg-[rgba(255,215,0,0.08)] text-[#FFD700]" : "border-[#1e2d40] text-[#8fa3b8] hover:border-[#253550]"}`}>
                       {t.replace("_", " ")}
                     </button>
                   ))}
@@ -611,7 +611,7 @@ export default function ServiceAccountsPage() {
             </div>
             <div className="px-5 py-4 border-t border-[#1e2d40] flex gap-2.5 justify-end">
               <button onClick={closeModal} disabled={saving} className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-[#1e2d40] hover:border-[#253550] hover:text-[#e8edf3] transition-all">Cancel</button>
-              <button onClick={handleSave} disabled={saving} className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50">
+              <button onClick={handleSave} disabled={saving} className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50">
                 {saving ? "Saving..." : modalMode === "create" ? "Create" : "Save"}
               </button>
             </div>
@@ -914,7 +914,7 @@ function CredentialRow({
             className={`px-2 py-1 rounded border font-mono text-[7px] font-semibold uppercase tracking-wide transition-all ${
               cred.status === "active"
                 ? "border-[rgba(255,71,87,0.25)] text-[#ff4757] hover:bg-[rgba(255,71,87,0.08)]"
-                : "border-[rgba(0,229,160,0.25)] text-[#00e5a0] hover:bg-[rgba(0,229,160,0.08)]"
+                : "border-[rgba(255,215,0,0.25)] text-[#FFD700] hover:bg-[rgba(255,215,0,0.08)]"
             }`}
           >
             {cred.status === "active" ? "Revoke" : "Activate"}
@@ -942,8 +942,8 @@ function ToggleSwitch({ checked: rawChecked, onChange }: { checked: boolean; onC
   return (
     <label className="relative w-9 h-5 flex-shrink-0 cursor-pointer">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="opacity-0 w-0 h-0" />
-      <span className={`absolute inset-0 rounded-full border transition-all duration-200 ${checked ? "bg-[rgba(0,229,160,0.10)] border-[rgba(0,229,160,0.4)]" : "bg-[#1a2230] border-[#253550]"}`}>
-        <span className={`absolute h-3.5 w-3.5 rounded-full transition-all duration-200 left-0.5 top-0.5 ${checked ? "translate-x-4 bg-[#00e5a0]" : "translate-x-0 bg-[#5a7090]"}`} />
+      <span className={`absolute inset-0 rounded-full border transition-all duration-200 ${checked ? "bg-[rgba(255,215,0,0.10)] border-[rgba(255,215,0,0.4)]" : "bg-[#1a2230] border-[#253550]"}`}>
+        <span className={`absolute h-3.5 w-3.5 rounded-full transition-all duration-200 left-0.5 top-0.5 ${checked ? "translate-x-4 bg-[#FFD700]" : "translate-x-0 bg-[#5a7090]"}`} />
       </span>
     </label>
   );

@@ -188,7 +188,7 @@ export function RunBacktestModal({ open, onClose, onCreated, preselectedStrategy
                   onClick={() => setTimeframe(tf)}
                   className={`flex-1 px-2 py-1.5 rounded text-xs font-mono font-bold uppercase transition-all ${
                     timeframe === tf
-                      ? "bg-[rgba(0,229,160,0.15)] text-[#00e5a0] border border-[#00e5a0]"
+                      ? "bg-[rgba(255,215,0,0.15)] text-[#FFD700] border border-[#FFD700]"
                       : "bg-dark-elevated border border-dark text-[#5a7090] hover:text-foreground hover:border-dark-2"
                   }`}
                 >
@@ -281,7 +281,7 @@ export function RunBacktestModal({ open, onClose, onCreated, preselectedStrategy
           <button
             onClick={handleSubmit}
             disabled={loading || !strategyId}
-            className="px-4 py-2 rounded bg-[#00e5a0] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#00ffb2] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? "Submitting..." : "Run Backtest"}
           </button>

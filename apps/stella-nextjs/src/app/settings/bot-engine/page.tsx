@@ -277,7 +277,7 @@ export default function BotEngineDefaultsPage() {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all disabled:opacity-50"
+              className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>
@@ -307,7 +307,7 @@ function RangeField({
   hint: string;
   onChange: (v: number) => void;
 }) {
-  const thumbColor = "#00e5a0";
+  const thumbColor = "#FFD700";
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -393,13 +393,13 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       <span
         className={`absolute inset-0 rounded-full border transition-all duration-200 ${
           checked
-            ? "bg-[rgba(0,229,160,0.10)] border-[rgba(0,229,160,0.4)]"
+            ? "bg-[rgba(255,215,0,0.10)] border-[rgba(255,215,0,0.4)]"
             : "bg-[#1a2230] border-[#253550]"
         }`}
       >
         <span
           className={`absolute h-3.5 w-3.5 rounded-full transition-all duration-200 left-0.5 top-0.5 ${
-            checked ? "translate-x-4 bg-[#00e5a0]" : "translate-x-0 bg-[#5a7090]"
+            checked ? "translate-x-4 bg-[#FFD700]" : "translate-x-0 bg-[#5a7090]"
           }`}
         />
       </span>

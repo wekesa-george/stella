@@ -78,7 +78,7 @@ const STEPS = [
 const TOTAL_STEPS = STEPS.length;
 
 const STRATEGY_TYPE_COLORS: Record<string, string> = {
-  core_momentum: "text-[#00e5a0] bg-[rgba(0,229,160,0.12)]",
+  core_momentum: "text-[#FFD700] bg-[rgba(255,215,0,0.12)]",
   core_grid: "text-[#3d9df3] bg-[rgba(61,157,243,0.12)]",
   core_dca: "text-[#f5a623] bg-[rgba(245,166,35,0.12)]",
   core_mean_reversion: "text-[#a855f7] bg-[rgba(168,85,247,0.12)]",
@@ -331,7 +331,7 @@ export default function NewBotPage() {
             <span className="text-[#5a7090]">/</span>
             <span className="text-[#5a7090]">Bot Fleet</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">New Bot</span>
+            <span className="text-[#FFD700]">New Bot</span>
           </div>
         </div>
 
@@ -351,9 +351,9 @@ export default function NewBotPage() {
               onClick={() => i + 1 < step && setStep(i + 1)}
               className={`flex-1 h-1.5 rounded-full transition-all ${
                 i + 1 === step
-                  ? "bg-[#00e5a0]"
+                  ? "bg-[#FFD700]"
                   : i + 1 < step
-                  ? "bg-[#00e5a0]/40 cursor-pointer hover:bg-[#00e5a0]/60"
+                  ? "bg-[#FFD700]/40 cursor-pointer hover:bg-[#FFD700]/60"
                   : "bg-[#1e2d40]"
               }`}
               disabled={i + 1 >= step}
@@ -386,7 +386,7 @@ export default function NewBotPage() {
                     }}
                     className={`p-5 rounded-md border text-left transition-all ${
                       ownerType === type
-                        ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                        ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                         : "border-dark hover:border-dark-2"
                     }`}
                   >
@@ -438,7 +438,7 @@ export default function NewBotPage() {
                       onClick={() => setSelectedUserId(u.id)}
                       className={`w-full px-3 py-2.5 flex items-center justify-between text-left border-b border-dark last:border-b-0 transition-all ${
                         selectedUserId === u.id
-                          ? "bg-[rgba(0,229,160,0.06)]"
+                          ? "bg-[rgba(255,215,0,0.06)]"
                           : "hover:bg-dark-elevated"
                       }`}
                     >
@@ -454,14 +454,14 @@ export default function NewBotPage() {
                         <span
                           className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
                             u.status === "active"
-                              ? "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
+                              ? "bg-[rgba(255,215,0,0.12)] text-[#FFD700]"
                               : "bg-[rgba(90,112,144,0.12)] text-[#5a7090]"
                           }`}
                         >
                           {u.status}
                         </span>
                         {selectedUserId === u.id && (
-                          <Check className="h-3.5 w-3.5 text-[#00e5a0]" />
+                          <Check className="h-3.5 w-3.5 text-[#FFD700]" />
                         )}
                       </div>
                     </button>
@@ -492,7 +492,7 @@ export default function NewBotPage() {
                       onClick={() => setSelectedSaId(sa.id)}
                       className={`w-full p-4 rounded-md border text-left transition-all ${
                         selectedSaId === sa.id
-                          ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                          ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                           : "border-dark hover:border-dark-2"
                       }`}
                     >
@@ -512,14 +512,14 @@ export default function NewBotPage() {
                           <span
                             className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
                               sa.is_active
-                                ? "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
+                                ? "bg-[rgba(255,215,0,0.12)] text-[#FFD700]"
                                 : "bg-[rgba(90,112,144,0.12)] text-[#5a7090]"
                             }`}
                           >
                             {sa.is_active ? "active" : "inactive"}
                           </span>
                           {selectedSaId === sa.id && (
-                            <Check className="h-3.5 w-3.5 text-[#00e5a0]" />
+                            <Check className="h-3.5 w-3.5 text-[#FFD700]" />
                           )}
                         </div>
                       </div>
@@ -551,7 +551,7 @@ export default function NewBotPage() {
                   </div>
                   <button
                     onClick={() => router.push("/settings/service-accounts")}
-                    className="text-[10px] text-[#00e5a0] hover:underline"
+                    className="text-[10px] text-[#FFD700] hover:underline"
                   >
                     Go to Settings to create one
                   </button>
@@ -564,7 +564,7 @@ export default function NewBotPage() {
                       onClick={() => setSelectedCredentialId(cred.id)}
                       className={`w-full p-4 rounded-md border text-left transition-all ${
                         selectedCredentialId === cred.id
-                          ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                          ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                           : "border-dark hover:border-dark-2"
                       }`}
                     >
@@ -588,7 +588,7 @@ export default function NewBotPage() {
                           <span
                             className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
                               cred.status === "active"
-                                ? "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
+                                ? "bg-[rgba(255,215,0,0.12)] text-[#FFD700]"
                                 : cred.status === "inactive"
                                 ? "bg-[rgba(90,112,144,0.12)] text-[#5a7090]"
                                 : "bg-[rgba(255,71,87,0.12)] text-[#ff4757]"
@@ -597,7 +597,7 @@ export default function NewBotPage() {
                             {cred.status}
                           </span>
                           {selectedCredentialId === cred.id && (
-                            <Check className="h-3.5 w-3.5 text-[#00e5a0]" />
+                            <Check className="h-3.5 w-3.5 text-[#FFD700]" />
                           )}
                         </div>
                       </div>
@@ -646,7 +646,7 @@ export default function NewBotPage() {
                       onClick={() => setSelectedPair(tp.symbol)}
                       className={`w-full px-3 py-2.5 flex items-center justify-between transition-all ${
                         selectedPair === tp.symbol
-                          ? "bg-[rgba(0,229,160,0.06)]"
+                          ? "bg-[rgba(255,215,0,0.06)]"
                           : "hover:bg-dark-elevated"
                       }`}
                     >
@@ -671,7 +671,7 @@ export default function NewBotPage() {
                         </div>
                       </div>
                       {selectedPair === tp.symbol && (
-                        <Check className="h-4 w-4 text-[#00e5a0] flex-shrink-0" />
+                        <Check className="h-4 w-4 text-[#FFD700] flex-shrink-0" />
                       )}
                     </button>
                   ))}
@@ -702,7 +702,7 @@ export default function NewBotPage() {
                       onClick={() => setSelectedStrategyId(s.id)}
                       className={`w-full p-4 rounded-md border text-left transition-all ${
                         selectedStrategyId === s.id
-                          ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                          ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                           : "border-dark hover:border-dark-2"
                       }`}
                     >
@@ -717,12 +717,12 @@ export default function NewBotPage() {
                             {s.type.replace("core_", "")}
                           </span>
                           {s.is_live_enabled && (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm bg-[rgba(0,229,160,0.12)] text-[#00e5a0]">
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm bg-[rgba(255,215,0,0.12)] text-[#FFD700]">
                               LIVE
                             </span>
                           )}
                           {selectedStrategyId === s.id && (
-                            <Check className="h-3.5 w-3.5 text-[#00e5a0]" />
+                            <Check className="h-3.5 w-3.5 text-[#FFD700]" />
                           )}
                         </div>
                       </div>
@@ -851,7 +851,7 @@ export default function NewBotPage() {
               <button
                 onClick={handleNext}
                 disabled={!canNext()}
-                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 Next
               </button>
@@ -859,7 +859,7 @@ export default function NewBotPage() {
               <button
                 onClick={handleDeploy}
                 disabled={submitting || !canNext()}
-                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50 flex items-center gap-2"
+                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50 flex items-center gap-2"
               >
                 {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
                 {submitting ? "Deploying..." : "Deploy Bot"}

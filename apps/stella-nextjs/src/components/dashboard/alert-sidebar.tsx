@@ -88,7 +88,7 @@ export function AlertSidebar({ alerts, onAck }: AlertSidebarProps) {
             {!alert.acked && (
               <button
                 onClick={() => onAck(alert.id)}
-                className="text-[9px] text-[#5a7090] px-1.5 py-0.5 border border-dark rounded hover:text-[#00e5a0] hover:border-[#00e5a0] transition-colors flex-shrink-0"
+                className="text-[9px] text-[#5a7090] px-1.5 py-0.5 border border-dark rounded hover:text-[#FFD700] hover:border-[#FFD700] transition-colors flex-shrink-0"
               >
                 ACK
               </button>

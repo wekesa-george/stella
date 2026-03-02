@@ -95,7 +95,7 @@ export default function HistoryTab({ botId }: HistoryTabProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00e5a0]" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FFD700]" />
       </div>
     );
   }

@@ -263,8 +263,16 @@ export default function ExchangeDetailPage() {
   const handleBulkToggle = async (isActive: boolean) => {
     const pairIds = pairs.map((p) => p.id);
     if (pairIds.length === 0) return;
-    const res = await bulkToggleTradingPairs(id, { pairIds, isActive });
-    if (!res.error) {
+
+    // Batch into chunks of 500 to avoid payload size limits
+    const BATCH_SIZE = 500;
+    let hasError = false;
+    for (let i = 0; i < pairIds.length; i += BATCH_SIZE) {
+      const batch = pairIds.slice(i, i + BATCH_SIZE);
+      const res = await bulkToggleTradingPairs(id, { pairIds: batch, isActive });
+      if (res.error) { hasError = true; setError(res.error); break; }
+    }
+    if (!hasError) {
       await fetchPairs(pairSearch, pairMarketFilter);
     }
   };
@@ -341,7 +349,7 @@ export default function ExchangeDetailPage() {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all disabled:opacity-50"
+            className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>
@@ -364,7 +372,7 @@ export default function ExchangeDetailPage() {
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${
               activeTab === tab.key
-                ? "text-[#00e5a0] border-b-[#00e5a0]"
+                ? "text-[#FFD700] border-b-[#FFD700]"
                 : "text-[#5a7090] border-b-transparent hover:text-[#8fa3b8]"
             }`}
           >
@@ -893,7 +901,7 @@ function TradingPairsTab({
         <div className="flex gap-1 ml-auto">
           <button
             onClick={() => onBulkToggle(true)}
-            className="px-2 py-1 rounded border border-[rgba(0,229,160,0.2)] bg-transparent text-[#00e5a0] font-mono text-[8px] uppercase tracking-wide hover:bg-[rgba(0,229,160,0.08)] transition-all"
+            className="px-2 py-1 rounded border border-[rgba(255,215,0,0.2)] bg-transparent text-[#FFD700] font-mono text-[8px] uppercase tracking-wide hover:bg-[rgba(255,215,0,0.08)] transition-all"
           >
             Enable All Filtered
           </button>
@@ -1006,7 +1014,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`relative w-8 h-[18px] rounded-full transition-colors ${checked ? "bg-[#00e5a0]" : "bg-[#253550]"}`}
+        className={`relative w-8 h-[18px] rounded-full transition-colors ${checked ? "bg-[#FFD700]" : "bg-[#253550]"}`}
       >
         <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-transform ${checked ? "left-[16px]" : "left-[2px]"}`} />
       </button>

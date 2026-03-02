@@ -551,7 +551,7 @@ export default function InfraPage() {
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5a7090]">Dashboard</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">Infrastructure</span>
+            <span className="text-[#FFD700]">Infrastructure</span>
           </div>
 
           {/* Page Header */}

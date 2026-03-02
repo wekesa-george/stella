@@ -358,9 +358,9 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
               onClick={() => i + 1 < step && setStep(i + 1)}
               className={`flex-1 h-1.5 rounded-full transition-all ${
                 i + 1 === step
-                  ? "bg-[#00e5a0]"
+                  ? "bg-[#FFD700]"
                   : i + 1 < step
-                  ? "bg-[#00e5a0]/40 cursor-pointer hover:bg-[#00e5a0]/60"
+                  ? "bg-[#FFD700]/40 cursor-pointer hover:bg-[#FFD700]/60"
                   : "bg-[#1e2d40]"
               }`}
               disabled={i + 1 >= step}
@@ -453,7 +453,7 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
               <button
                 onClick={handleNext}
                 disabled={!canNext()}
-                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 Next
               </button>
@@ -461,7 +461,7 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
               <button
                 onClick={handleDeploy}
                 disabled={submitting || !canNext()}
-                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50"
+                className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50"
               >
                 {submitting ? "Deploying..." : "Deploy Bot"}
               </button>
@@ -495,7 +495,7 @@ function StepOwnerType({
             onClick={() => setOwnerType(type)}
             className={`p-4 rounded-md border text-left transition-all ${
               ownerType === type
-                ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                 : "border-dark hover:border-dark-2"
             }`}
           >
@@ -557,7 +557,7 @@ function StepUserPicker({
               onClick={() => onSelect(u.id)}
               className={`w-full px-3 py-2.5 flex items-center justify-between text-left border-b border-dark last:border-b-0 transition-all ${
                 selectedId === u.id
-                  ? "bg-[rgba(0,229,160,0.06)]"
+                  ? "bg-[rgba(255,215,0,0.06)]"
                   : "hover:bg-dark-elevated"
               }`}
             >
@@ -573,14 +573,14 @@ function StepUserPicker({
                 <span
                   className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
                     u.status === "active"
-                      ? "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]"
+                      ? "bg-[rgba(255,215,0,0.12)] text-[#FFD700]"
                       : "bg-[rgba(90,112,144,0.12)] text-[#5a7090]"
                   }`}
                 >
                   {u.status}
                 </span>
                 {selectedId === u.id && (
-                  <span className="text-[#00e5a0] text-sm">&#10003;</span>
+                  <span className="text-[#FFD700] text-sm">&#10003;</span>
                 )}
               </div>
             </button>
@@ -616,7 +616,7 @@ function StepServiceAccountPicker({
               onClick={() => onSelect(sa.id)}
               className={`w-full p-3 rounded-md border text-left transition-all ${
                 selectedId === sa.id
-                  ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                  ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                   : "border-dark hover:border-dark-2"
               }`}
             >
@@ -672,7 +672,7 @@ function StepExchange({
                 onClick={() => onSelectExchange(ex.id)}
                 className={`px-3 py-1.5 rounded-sm text-[11px] font-bold uppercase border transition-all ${
                   selectedExchangeId === ex.id
-                    ? "border-[#00e5a0] bg-[rgba(0,229,160,0.08)] text-[#00e5a0]"
+                    ? "border-[#FFD700] bg-[rgba(255,215,0,0.08)] text-[#FFD700]"
                     : "border-dark text-[#8fa3b8] hover:border-dark-2"
                 }`}
               >
@@ -688,7 +688,7 @@ function StepExchange({
         <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
           Trading Pairs
           {selectedPairs.length > 0 && (
-            <span className="text-[#00e5a0] ml-2">{selectedPairs.length} selected</span>
+            <span className="text-[#FFD700] ml-2">{selectedPairs.length} selected</span>
           )}
         </label>
         {tradingPairs.length === 0 ? (
@@ -704,7 +704,7 @@ function StepExchange({
                   onClick={() => onTogglePair(tp.symbol)}
                   className={`px-2.5 py-2 text-[11px] font-mono border-b border-r border-dark text-left transition-all ${
                     selectedPairs.includes(tp.symbol)
-                      ? "bg-[rgba(0,229,160,0.06)] text-[#00e5a0]"
+                      ? "bg-[rgba(255,215,0,0.06)] text-[#FFD700]"
                       : "text-[#8fa3b8] hover:bg-dark-elevated"
                   }`}
                 >
@@ -754,7 +754,7 @@ function StepStrategy({
   onSelect: (id: string) => void;
 }) {
   const typeColors: Record<string, string> = {
-    core_momentum: "text-[#00e5a0] bg-[rgba(0,229,160,0.12)]",
+    core_momentum: "text-[#FFD700] bg-[rgba(255,215,0,0.12)]",
     core_grid: "text-[#3d9df3] bg-[rgba(61,157,243,0.12)]",
     core_dca: "text-[#f5a623] bg-[rgba(245,166,35,0.12)]",
     core_mean_reversion: "text-[#a855f7] bg-[rgba(168,85,247,0.12)]",
@@ -778,7 +778,7 @@ function StepStrategy({
               onClick={() => onSelect(s.id)}
               className={`w-full p-3 rounded-md border text-left transition-all ${
                 selectedId === s.id
-                  ? "border-[#00e5a0] bg-[rgba(0,229,160,0.06)]"
+                  ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
                   : "border-dark hover:border-dark-2"
               }`}
             >
@@ -793,7 +793,7 @@ function StepStrategy({
                     {s.type.replace("core_", "")}
                   </span>
                   {s.is_live_enabled && (
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm bg-[rgba(0,229,160,0.12)] text-[#00e5a0]">
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm bg-[rgba(255,215,0,0.12)] text-[#FFD700]">
                       LIVE
                     </span>
                   )}

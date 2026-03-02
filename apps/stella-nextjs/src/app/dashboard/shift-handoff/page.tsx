@@ -344,12 +344,12 @@ export default function ShiftHandoffPage() {
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5a7090]">Dashboard</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">Shift Handoff</span>
+            <span className="text-[#FFD700]">Shift Handoff</span>
           </div>
 
           {/* Sub-navigation */}
           <div className="flex gap-4 border-b border-dark">
-            <span className="px-1 pb-2 text-xs font-semibold text-[#00e5a0] border-b-2 border-[#00e5a0] cursor-default">
+            <span className="px-1 pb-2 text-xs font-semibold text-[#FFD700] border-b-2 border-[#FFD700] cursor-default">
               Current Shift
             </span>
             <Link
@@ -372,7 +372,7 @@ export default function ShiftHandoffPage() {
               <button
                 onClick={handleStartShift}
                 disabled={starting}
-                className="px-4 py-2 rounded bg-[#00e5a0] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#00ffb2] transition-all whitespace-nowrap disabled:opacity-50"
+                className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all whitespace-nowrap disabled:opacity-50"
               >
                 {starting ? 'Starting...' : 'Start Shift'}
               </button>
@@ -389,12 +389,12 @@ export default function ShiftHandoffPage() {
 
           {/* Shift ended success */}
           {shiftEnded && (
-            <div className="text-xs text-[#00e5a0] bg-[rgba(0,229,160,0.08)] border border-[rgba(0,229,160,0.2)] rounded-sm px-3 py-3 text-center">
+            <div className="text-xs text-[#FFD700] bg-[rgba(255,215,0,0.08)] border border-[rgba(255,215,0,0.2)] rounded-sm px-3 py-3 text-center">
               <p className="font-bold uppercase tracking-wider mb-1">Shift Handed Off Successfully</p>
               <p className="text-[#8fa3b8]">Your shift has been submitted. The next operator can start their shift.</p>
               <button
                 onClick={() => { setShiftEnded(false); setHandoffNotes(""); setShiftLogs([]); setWatchList([]); }}
-                className="mt-2 px-4 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all"
+                className="mt-2 px-4 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all"
               >
                 Start New Shift
               </button>
@@ -470,7 +470,7 @@ export default function ShiftHandoffPage() {
                 {currentShift && (
                   <button
                     onClick={() => setShowLogForm(!showLogForm)}
-                    className="px-2.5 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[rgba(0,229,160,0.12)] text-[#00e5a0] hover:bg-[rgba(0,229,160,0.2)] transition-all"
+                    className="px-2.5 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[rgba(255,215,0,0.12)] text-[#FFD700] hover:bg-[rgba(255,215,0,0.2)] transition-all"
                   >
                     + Log Activity
                   </button>
@@ -510,7 +510,7 @@ export default function ShiftHandoffPage() {
                   <button
                     onClick={handleLogActivity}
                     disabled={loggingActivity || !logAction.trim()}
-                    className="px-4 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50"
+                    className="px-4 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50"
                   >
                     {loggingActivity ? 'Logging...' : 'Log'}
                   </button>
@@ -619,7 +619,7 @@ export default function ShiftHandoffPage() {
                 <button
                   onClick={handleSubmitHandoff}
                   disabled={submitting || !currentShift || !receivedBy}
-                  className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? 'Submitting...' : 'Submit Handoff'}
                 </button>
@@ -753,7 +753,7 @@ function PriorityBadge({ priority }: { priority: string }) {
     ? "bg-[rgba(255,71,87,0.12)] text-[#ff4757]"
     : priority === "warning"
     ? "bg-[rgba(245,166,35,0.12)] text-[#f5a623]"
-    : "bg-[rgba(0,229,160,0.12)] text-[#00e5a0]";
+    : "bg-[rgba(255,215,0,0.12)] text-[#FFD700]";
 
   return (
     <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${cls}`}>

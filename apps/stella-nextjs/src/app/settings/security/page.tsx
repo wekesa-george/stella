@@ -4,7 +4,7 @@ import { useState } from "react";
 
 const ADMIN_USERS = [
   { id: 1, name: "George Wekesa", email: "george@stella.io", role: "Platform Admin", twoFA: true, lastLogin: "Just now", color: "#3d9df3", initials: "GW", sessions: 1 },
-  { id: 2, name: "Amara Nwosu", email: "amara@stella.io", role: "Compliance Officer", twoFA: true, lastLogin: "2h ago", color: "#00e5a0", initials: "AN", sessions: 1 },
+  { id: 2, name: "Amara Nwosu", email: "amara@stella.io", role: "Compliance Officer", twoFA: true, lastLogin: "2h ago", color: "#FFD700", initials: "AN", sessions: 1 },
   { id: 3, name: "David Kiptoo", email: "david@stella.io", role: "Read Only", twoFA: false, lastLogin: "1d ago", color: "#f5a623", initials: "DK", sessions: 0 },
   { id: 4, name: "Fatima Al-Rashid", email: "fatima@stella.io", role: "Compliance Officer", twoFA: true, lastLogin: "3h ago", color: "#a78bfa", initials: "FA", sessions: 1 },
 ];
@@ -58,7 +58,7 @@ export default function SecurityPage() {
           <div className="font-mono text-[10px] uppercase tracking-wider text-[#8fa3b8]">
             Admin Users <span className="font-mono text-[9px] text-[#5a7090] font-normal ml-1.5">{users.length} users</span>
           </div>
-          <button className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all">
+          <button className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all">
             + Invite Admin
           </button>
         </div>
@@ -246,7 +246,7 @@ export default function SecurityPage() {
                 onChange={(e) => setIpInput(e.target.value)}
               />
               <button
-                className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all"
+                className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all"
                 onClick={() => {
                   if (ipInput.trim()) {
                     setIpList((l) => [...l, ipInput.trim()]);
@@ -269,7 +269,7 @@ export default function SecurityPage() {
               </button>
               <button
                 onClick={handleSave}
-                className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all"
+                className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all"
               >
                 Save Changes
               </button>
@@ -319,12 +319,12 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="opacity-0 w-0 h-0" />
       <span
         className={`absolute inset-0 rounded-full border transition-all duration-200 ${
-          checked ? "bg-[rgba(0,229,160,0.10)] border-[rgba(0,229,160,0.4)]" : "bg-[#1a2230] border-[#253550]"
+          checked ? "bg-[rgba(255,215,0,0.10)] border-[rgba(255,215,0,0.4)]" : "bg-[#1a2230] border-[#253550]"
         }`}
       >
         <span
           className={`absolute h-3.5 w-3.5 rounded-full transition-all duration-200 left-0.5 top-0.5 ${
-            checked ? "translate-x-4 bg-[#00e5a0]" : "translate-x-0 bg-[#5a7090]"
+            checked ? "translate-x-4 bg-[#FFD700]" : "translate-x-0 bg-[#5a7090]"
           }`}
         />
       </span>

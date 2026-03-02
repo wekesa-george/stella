@@ -101,7 +101,7 @@ export default function StrategiesPage() {
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5a7090]">Dashboard</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">Strategies</span>
+            <span className="text-[#FFD700]">Strategies</span>
           </div>
 
           {/* Page Header */}
@@ -114,7 +114,7 @@ export default function StrategiesPage() {
             </div>
             <button
               onClick={() => setCreateModalOpen(true)}
-              className="px-4 py-2 rounded bg-[#00e5a0] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#00ffb2] transition-all whitespace-nowrap"
+              className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all whitespace-nowrap"
             >
               + Create Strategy
             </button>

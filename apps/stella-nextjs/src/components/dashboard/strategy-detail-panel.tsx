@@ -187,7 +187,7 @@ export function StrategyDetailPanel({ strategy, onClose, onUpdate }: StrategyDet
           {!editing && (
             <button
               onClick={() => setEditing(true)}
-              className="px-3 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[rgba(0,229,160,0.12)] text-[#00e5a0] hover:bg-[rgba(0,229,160,0.2)] transition-all"
+              className="px-3 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider bg-[rgba(255,215,0,0.12)] text-[#FFD700] hover:bg-[rgba(255,215,0,0.2)] transition-all"
             >
               Edit
             </button>
@@ -384,7 +384,7 @@ export function StrategyDetailPanel({ strategy, onClose, onUpdate }: StrategyDet
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#00e5a0] text-black hover:bg-[#00ffb2] transition-all disabled:opacity-50"
+            className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>
@@ -428,7 +428,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-center gap-2 cursor-pointer">
-      <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} className="accent-[#00e5a0]" />
+      <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} className="accent-[#FFD700]" />
       <span className="text-[10px] text-[#8fa3b8]">{label}</span>
     </label>
   );

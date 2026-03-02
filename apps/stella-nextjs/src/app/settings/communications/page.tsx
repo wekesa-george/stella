@@ -84,7 +84,7 @@ export default function CommunicationsPage() {
                   key={t.key}
                   className={`bg-[#131920] border rounded-sm p-2.5 cursor-pointer transition-all ${
                     selectedTemplate === t.key
-                      ? "border-[rgba(0,229,160,0.35)]"
+                      ? "border-[rgba(255,215,0,0.35)]"
                       : "border-[#1e2d40] hover:border-[#253550]"
                   }`}
                   onClick={() => setSelectedTemplate(t.key)}
@@ -127,7 +127,7 @@ If you have questions, contact us at ${b.supportEmail}.
                 <button className="px-3 py-1.5 rounded border border-[#1e2d40] bg-transparent text-[#8fa3b8] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#1a2230] hover:text-[#e8edf3] hover:border-[#253550] transition-all">
                   Send Test Email
                 </button>
-                <button className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all">
+                <button className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all">
                   Save Template
                 </button>
               </div>

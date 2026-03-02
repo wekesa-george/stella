@@ -74,7 +74,7 @@ export default function BacktestDetailPage({ params }: { params: Promise<{ id: s
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
         <div className="max-w-7xl mx-auto text-center py-16">
           <p className="text-sm text-[#ff4757] mb-4">{error || "Backtest not found"}</p>
-          <Link href="/backtesting" className="text-xs text-[#00e5a0] hover:underline">
+          <Link href="/backtesting" className="text-xs text-[#FFD700] hover:underline">
             Back to Backtesting
           </Link>
         </div>
@@ -95,7 +95,7 @@ export default function BacktestDetailPage({ params }: { params: Promise<{ id: s
         <div className="flex items-center gap-2 text-xs">
           <Link href="/backtesting" className="text-[#5a7090] hover:text-foreground transition-colors">Backtesting</Link>
           <span className="text-[#5a7090]">/</span>
-          <span className="text-[#00e5a0]">{run.trading_pair} {run.timeframe}</span>
+          <span className="text-[#FFD700]">{run.trading_pair} {run.timeframe}</span>
         </div>
 
         {/* Header */}

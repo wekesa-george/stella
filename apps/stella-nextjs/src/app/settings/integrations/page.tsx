@@ -62,7 +62,7 @@ export default function IntegrationsPage() {
                     className={`px-3 py-1.5 rounded border font-mono text-[9px] font-semibold uppercase tracking-wide flex items-center justify-center transition-all ${
                       connected
                         ? "border-[#1e2d40] bg-transparent text-[#8fa3b8] hover:bg-[#1a2230] hover:text-[#e8edf3]"
-                        : "bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] hover:bg-[#00e5a0] hover:text-black"
+                        : "bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] hover:bg-[#FFD700] hover:text-black"
                     }`}
                   >
                     {connected ? "Configure" : "Connect"}
@@ -78,7 +78,7 @@ export default function IntegrationsPage() {
       <div className="bg-[#0d1117] border border-[#1e2d40] rounded overflow-hidden">
         <div className="px-4 py-3 border-b border-[#1e2d40] flex items-center justify-between">
           <div className="font-mono text-[10px] uppercase tracking-wider text-[#8fa3b8]">Outbound Webhooks</div>
-          <button className="px-3 py-1.5 rounded border bg-[rgba(0,229,160,0.10)] text-[#00e5a0] border-[rgba(0,229,160,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#00e5a0] hover:text-black transition-all">
+          <button className="px-3 py-1.5 rounded border bg-[rgba(255,215,0,0.10)] text-[#FFD700] border-[rgba(255,215,0,0.3)] font-mono text-[9px] font-semibold uppercase tracking-wide hover:bg-[#FFD700] hover:text-black transition-all">
             + Add Webhook
           </button>
         </div>

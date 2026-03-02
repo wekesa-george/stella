@@ -174,7 +174,7 @@ export default function BotFleetPage() {
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5a7090]">Dashboard</span>
             <span className="text-[#5a7090]">/</span>
-            <span className="text-[#00e5a0]">Bot Fleet</span>
+            <span className="text-[#FFD700]">Bot Fleet</span>
           </div>
 
           {/* Page Header */}
@@ -187,7 +187,7 @@ export default function BotFleetPage() {
             </div>
             <button
               onClick={() => router.push("/dashboard/bot-fleet/new-bot")}
-              className="px-4 py-2 rounded bg-[#00e5a0] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#00ffb2] transition-all whitespace-nowrap"
+              className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all whitespace-nowrap"
             >
               + Deploy New Bot
             </button>

@@ -150,7 +150,7 @@ export default function TradingTab({ botId, bot, logEvents, positions, onClosePo
           {isLoadingChart ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#00e5a0] mx-auto" />
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#FFD700] mx-auto" />
                 <p className="mt-4 text-[#8fa3b8] text-xs">Loading chart data...</p>
               </div>
             </div>
@@ -161,7 +161,7 @@ export default function TradingTab({ botId, bot, logEvents, positions, onClosePo
                 <p className="text-[#8fa3b8] text-sm">No chart data available</p>
                 <button
                   onClick={() => loadChartData(activeTimeframe)}
-                  className="mt-4 px-4 py-2 rounded-sm bg-[#00e5a0] text-black text-xs font-bold uppercase hover:bg-[#00ffb2] transition-all"
+                  className="mt-4 px-4 py-2 rounded-sm bg-[#FFD700] text-black text-xs font-bold uppercase hover:bg-[#FFE44D] transition-all"
                 >
                   Retry
                 </button>
@@ -287,7 +287,7 @@ export default function TradingTab({ botId, bot, logEvents, positions, onClosePo
               className={`w-full sm:w-auto sm:col-span-2 lg:col-span-1 px-5 py-1.5 rounded-sm text-[11px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
                 orderSubmitting || !newOrder.size || bot?.status !== "running"
                   ? "bg-dark-2 text-[#5a7090] cursor-not-allowed"
-                  : "bg-[#00e5a0] text-black hover:bg-[#00ffb2]"
+                  : "bg-[#FFD700] text-black hover:bg-[#FFE44D]"
               }`}
             >
               {orderSubmitting ? "Submitting..." : "Submit Order"}
