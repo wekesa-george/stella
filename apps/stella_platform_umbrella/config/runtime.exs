@@ -37,7 +37,7 @@ if config_env() == :prod do
   # Allow WebSocket connections from the admin UI and any subdomains
   allowed_origins =
     case System.get_env("WS_ALLOWED_ORIGINS") do
-      nil -> ["//*.stella.praetocloud.com", "//localhost"]
+      nil -> ["//*.stella.praetocloud.com", "//*.stella-1.com", "//localhost"]
       origins -> String.split(origins, ",", trim: true)
     end
 
