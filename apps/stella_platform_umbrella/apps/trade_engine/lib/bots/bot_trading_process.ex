@@ -25,9 +25,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   @price_update_interval_ms 3_000
   @candle_poll_interval_ms 60_000
 
-  # Legacy defaults — used only when no strategy module is resolved
+  # Legacy defaults — used only when no strategy config override exists
   @max_hold_minutes 5
   @min_notional 10.0
+  @candle_buffer_size_default 25
 
   # ========================================================================
   # CLIENT API
@@ -85,6 +86,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           user_id: bot.user_id,
           credential_id: bot.credential_id,
           strategy_id: bot.strategy_id,
+          market_type: Map.get(bot, :market_type, "spot"),
           trading_pairs: bot.trading_pairs,
           config: merged_config,
           strategy_module: strategy_module,
@@ -101,6 +103,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           winning_trades: 0,
           losing_trades: 0,
           total_realized_pnl: 0.0,
+          # Capital
+          allocated_capital: bot.allocated_capital || 0.0,
           # Derived from merged config
           max_positions: Map.get(merged_config, "max_positions", 3)
         }
@@ -156,6 +160,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       bot_id: state.bot_id,
       credential_id: state.credential_id,
       strategy_id: state.strategy_id,
+      market_type: state.market_type,
       position_id: Ecto.UUID.generate(),
       manual: true
     ]
@@ -276,10 +281,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     end)
   end
 
-  @candle_buffer_size 25
-
   defp poll_candles_for_pair(pair, state) do
-    case Executor.get_bars(state.credential_id, pair, "5Min", @candle_buffer_size) do
+    candle_buffer_size = get_strategy_param(state.config, "candle_buffer_size", @candle_buffer_size_default)
+    case Executor.get_bars(state.credential_id, pair, "5Min", candle_buffer_size, market_type: state.market_type) do
       {:ok, bars} when is_list(bars) and length(bars) > 0 ->
         # Get the second-to-last bar (most recently closed candle)
         # The last bar may still be forming
@@ -423,13 +427,22 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       {:error, :no_balance}
     else
       # Normalize symbol to Binance format for tier check (tier lists use "BTCUSDT" format)
-      tier_symbol = signal.symbol |> String.replace("/", "") |> String.upcase()
+      base_pair = signal.symbol |> String.split(":") |> List.first()
+      tier_symbol = base_pair |> String.replace("/", "") |> String.upcase()
+      tier_symbol = tier_symbol |> String.split("_") |> List.first()
       tier_symbol = if String.ends_with?(tier_symbol, "USDT"), do: tier_symbol, else: tier_symbol <> "T"
 
-      if not AssetTierManager.is_allowed?(tier_symbol, balance) do
+      # Use DB-backed tier check via adapter code (falls back to hardcoded if no DB config)
+      config = AssetTierManager.get_config_by_code("binance")
+      allowed = AssetTierManager.is_allowed_by_code?(tier_symbol, balance, "binance")
+      Logger.info("[BotTrading] Tier check: symbol=#{tier_symbol} balance=$#{Float.round(balance, 2)} allowed=#{allowed} | thresholds=#{inspect(config.tier_thresholds)} | tier_assets=#{inspect(Map.values(config.tier_assets) |> List.flatten() |> Enum.member?(tier_symbol))}")
+
+      if not allowed do
+        account_tier = AssetTierManager.get_account_tier_by_code(balance, "binance")
+        Logger.warning("[BotTrading] ❌ ASSET BLOCKED: #{tier_symbol} | balance=$#{Float.round(balance, 2)} account_tier=#{account_tier} | allocated_capital=#{state.allocated_capital} | bot=#{state.bot_id}")
         {:error, :asset_not_in_tier}
       else
-        case Executor.get_price(state.credential_id, signal.symbol) do
+        case Executor.get_price(state.credential_id, signal.symbol, market_type: state.market_type) do
           {:ok, price} ->
             current_price = Decimal.to_float(price)
             execute_with_strategy(signal, state, strategy, context, current_price)
@@ -441,13 +454,21 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   defp execute_with_strategy(signal, state, strategy, context, current_price) do
-    max_hold = Map.get(state.config, "max_hold_minutes", @max_hold_minutes)
+    # Read from strategy config JSONB with fallback to module attributes
+    max_hold = get_strategy_param(state.config, "max_hold_minutes", @max_hold_minutes)
+    min_notional = get_strategy_param(state.config, "min_notional", @min_notional)
+
+    # Binance futures requires minimum $100 notional
+    effective_min_notional = if state.market_type in ["usds_futures", "coinm_futures"],
+      do: max(min_notional, 100.0),
+      else: min_notional
 
     # Delegate position sizing to strategy module
     case strategy.calculate_position_size(signal, context) do
       {:ok, quantity, position_value} ->
         notional = quantity * current_price
-        if notional < @min_notional do
+        if notional < effective_min_notional do
+          Logger.warning("[BotTrading] Notional too low: $#{Float.round(notional, 2)} < $#{effective_min_notional} min for #{signal.symbol}")
           {:error, :notional_too_low}
         else
           # Delegate stop loss to strategy module
@@ -463,6 +484,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             bot_id: state.bot_id,
             credential_id: state.credential_id,
             strategy_id: state.strategy_id,
+            market_type: state.market_type,
             position_id: position_id,
             confidence: signal.confidence,
             peak_price: impulse_target,
@@ -580,6 +602,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       bot_id: pos.bot_id,
       credential_id: pos.credential_id,
       strategy_id: pos.strategy_id,
+      market_type: state.market_type,
       position_id: pos.id
     ]
 
@@ -638,7 +661,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     symbols = state.positions |> Map.values() |> Enum.map(& &1.symbol) |> Enum.uniq()
 
     new_cache = Enum.reduce(symbols, state.price_cache, fn sym, cache ->
-      case Executor.get_price(state.credential_id, sym) do
+      case Executor.get_price(state.credential_id, sym, market_type: state.market_type) do
         {:ok, price} -> Map.put(cache, sym, Decimal.to_float(price))
         _ -> cache
       end
@@ -656,11 +679,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   defp get_balance(state) do
     if VirtualBalanceManager.running?() do
       case VirtualBalanceManager.get_available_balance(state.user_id) do
-        {:ok, vb} -> vb
-        _ -> 100.0
+        {:ok, vb} when vb > 0 -> vb
+        _ -> state.allocated_capital || 100.0
       end
     else
-      100.0
+      state.allocated_capital || 100.0
     end
   end
 
@@ -673,6 +696,24 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     class_module = Map.get(bot, :class_module) || Map.get(bot, :strategy_type)
     StrategyBehaviour.resolve_module(class_module)
   end
+
+  # Read a parameter from strategy config JSONB, falling back to a default.
+  # This is the core mechanism for making hardcoded params DB-configurable:
+  # the admin saves values into strategy.strategies.config JSONB, and this
+  # function reads them at runtime with compile-time @attr as fallback.
+  defp get_strategy_param(config, key, default) when is_map(config) do
+    case Map.get(config, key) do
+      nil -> default
+      val when is_binary(val) ->
+        case Float.parse(val) do
+          {num, ""} -> num
+          _ -> default
+        end
+      val -> val
+    end
+  end
+
+  defp get_strategy_param(_, _, default), do: default
 
   defp get_signal_target(signal) do
     cond do

@@ -201,7 +201,7 @@ defmodule TradeEngine.Bots.BotRegistry do
   end
 
   @doc "Get all bots enriched for dashboard display"
-  def get_all_bots_dashboard do
+  def get_all_bots_dashboard(filters \\ %{}) do
     sys = get_system_metrics()
     bots = list_bots()
 
@@ -263,10 +263,37 @@ defmodule TradeEngine.Bots.BotRegistry do
       })
     end)
 
+    # Apply filters
+    filtered = enriched
+    |> maybe_filter(:status, filters["status"])
+    |> maybe_filter(:exchange, filters["exchange"])
+    |> maybe_filter(:strategy_type, filters["strategy_type"])
+    |> maybe_filter(:user_id, filters["user_id"])
+    |> maybe_search(filters["search"])
+    |> maybe_filter_owner_type(filters["owner_type"])
+    |> maybe_filter_range(:active_capital, filters["equity_min"], filters["equity_max"])
+    |> maybe_filter_range(:total_pnl, filters["pnl_min"], filters["pnl_max"])
+    |> maybe_filter_pnl_preset(filters["pnl_preset"])
+    |> maybe_filter_min(:uptime_seconds, filters["uptime_min"])
+
+    # Total before pagination
+    total_count = length(filtered)
+
+    # Apply sorting
+    sorted = apply_sort(filtered, filters["sort_by"], filters["sort_dir"])
+
+    # Apply pagination
+    page = max((filters["page"] || 1), 1)
+    per_page = min(max((filters["per_page"] || 50), 1), 200)
+    paginated = sorted |> Enum.drop((page - 1) * per_page) |> Enum.take(per_page)
+
     {:ok, %{
-      bots: enriched,
+      bots: paginated,
       system: sys,
-      total_bots: length(enriched),
+      total_count: total_count,
+      page: page,
+      per_page: per_page,
+      total_pages: ceil(total_count / per_page),
       running_bots: Enum.count(enriched, & &1.status == "running"),
       total_pnl: Enum.reduce(enriched, 0.0, & &1.total_pnl + &2)
     }}
@@ -678,6 +705,7 @@ defmodule TradeEngine.Bots.BotRegistry do
       service_account_id: bot.service_account_id,
       strategy_id: bot.strategy_id,
       credential_id: bot.credential_id,
+      market_type: bot.market_type || "spot",
       config: bot.config || %{},
       risk_overrides: bot.risk_overrides || %{},
       status: bot.status,
@@ -846,7 +874,7 @@ defmodule TradeEngine.Bots.BotRegistry do
       equity = runtime.allocated_capital + runtime.total_pnl
       EquitySnapshot.insert_snapshot(%{
         bot_id: runtime.id,
-        user_id: runtime.user_id,
+        user_id: runtime.user_id || runtime.service_account_id,
         total_equity_usd: Decimal.from_float(equity + 0.0),
         available_balance_usd: Decimal.from_float(runtime.active_capital + 0.0),
         unrealized_pnl_usd: Decimal.new(0),
@@ -924,6 +952,90 @@ defmodule TradeEngine.Bots.BotRegistry do
     end
   rescue
     _ -> %{}
+  end
+
+  # ── Filtering & Sorting helpers ──────────────────────────────────────────
+
+  defp maybe_filter(bots, _field, nil), do: bots
+  defp maybe_filter(bots, _field, ""), do: bots
+  defp maybe_filter(bots, field, value) do
+    Enum.filter(bots, fn bot ->
+      bot_val = Map.get(bot, field)
+      is_binary(bot_val) and is_binary(value) and
+        String.downcase(bot_val) == String.downcase(value)
+    end)
+  end
+
+  defp maybe_filter_owner_type(bots, nil), do: bots
+  defp maybe_filter_owner_type(bots, ""), do: bots
+  defp maybe_filter_owner_type(bots, "user") do
+    Enum.filter(bots, fn bot -> bot[:user_id] != nil end)
+  end
+  defp maybe_filter_owner_type(bots, "service_account") do
+    Enum.filter(bots, fn bot -> bot[:service_account_id] != nil end)
+  end
+  defp maybe_filter_owner_type(bots, _), do: bots
+
+  defp maybe_filter_range(bots, _field, nil, nil), do: bots
+  defp maybe_filter_range(bots, field, min_val, max_val) do
+    Enum.filter(bots, fn bot ->
+      val = Map.get(bot, field) || 0.0
+      above_min = if min_val, do: val >= min_val, else: true
+      below_max = if max_val, do: val <= max_val, else: true
+      above_min and below_max
+    end)
+  end
+
+  defp maybe_filter_pnl_preset(bots, nil), do: bots
+  defp maybe_filter_pnl_preset(bots, ""), do: bots
+  defp maybe_filter_pnl_preset(bots, "profitable") do
+    Enum.filter(bots, fn bot -> (bot[:total_pnl] || 0.0) > 0 end)
+  end
+  defp maybe_filter_pnl_preset(bots, "losing") do
+    Enum.filter(bots, fn bot -> (bot[:total_pnl] || 0.0) < 0 end)
+  end
+  defp maybe_filter_pnl_preset(bots, "breakeven") do
+    Enum.filter(bots, fn bot -> (bot[:total_pnl] || 0.0) == 0.0 end)
+  end
+  defp maybe_filter_pnl_preset(bots, _), do: bots
+
+  defp maybe_filter_min(bots, _field, nil), do: bots
+  defp maybe_filter_min(bots, field, min_val) when is_number(min_val) do
+    Enum.filter(bots, fn bot -> (Map.get(bot, field) || 0) >= min_val end)
+  end
+  defp maybe_filter_min(bots, _, _), do: bots
+
+  defp maybe_search(bots, nil), do: bots
+  defp maybe_search(bots, ""), do: bots
+  defp maybe_search(bots, query) do
+    q = String.downcase(query)
+    Enum.filter(bots, fn bot ->
+      name = (bot[:name] || "") |> to_string() |> String.downcase()
+      id = (bot[:id] || "") |> to_string() |> String.downcase()
+      String.contains?(name, q) or String.contains?(id, q)
+    end)
+  end
+
+  defp apply_sort(bots, nil, _dir), do: bots
+  defp apply_sort(bots, "", _dir), do: bots
+  defp apply_sort(bots, sort_by, sort_dir) do
+    field = case sort_by do
+      "pnl" -> :total_pnl
+      "equity" -> :active_capital
+      "status" -> :status
+      "name" -> :name
+      "uptime" -> :uptime_seconds
+      "win_rate" -> :win_rate
+      "trades" -> :total_trades
+      _ -> nil
+    end
+
+    if field do
+      sorted = Enum.sort_by(bots, &(Map.get(&1, field) || 0), &<=/2)
+      if sort_dir == "desc", do: Enum.reverse(sorted), else: sorted
+    else
+      bots
+    end
   end
 
   defp format_duration(seconds) when is_integer(seconds) do

@@ -43,7 +43,7 @@ defmodule TradeEngine.Exchanges.Binance.Config do
 
   @mainnet_rest "https://api.binance.com"
   @mainnet_ws "wss://stream.binance.com:9443/ws"
-  
+
   @testnet_rest "https://testnet.binance.vision/api"
   @testnet_ws "wss://stream.testnet.binance.vision/ws"
 
@@ -113,4 +113,5 @@ defmodule TradeEngine.Exchanges.Binance.Config do
   Check if using testnet.
   """
   def testnet?(%__MODULE__{testnet: t}), do: t
+
 end

@@ -37,26 +37,21 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
   @pubsub TradeEngine.PubSub
 
   # ========================================================================
-  # PHYSICS-BASED CONFIGURATION
+  # PHYSICS-BASED CONFIGURATION (compile-time defaults)
+  # Runtime overrides come from strategy.strategies.config JSONB
   # ========================================================================
 
-  # Entry thresholds (from physics model)
-  @min_momentum 0.001             # v₀ > 0.001
-  @min_trajectory_angle 18.0      # θ > 18°
-  @min_kinetic_energy 0.3         # E_k > 0.3
-  @min_confidence 55              # Signal confidence threshold
-
-  # Exit thresholds (physics-derived)
-  @velocity_reversal_threshold -0.001  # v(t) < -0.001 = momentum exhausted
-  @energy_exhaustion_threshold 0.2     # E_k < 0.2 = oversold
-  @max_hold_time_multiplier 1.2        # Exit at 1.2x t_peak
-
-  # Risk management
-  @risk_percent_per_trade 0.02    # 2% risk per position
+  @min_momentum 0.001
+  @min_trajectory_angle 18.0
+  @min_kinetic_energy 0.3
+  @min_confidence 55
+  @velocity_reversal_threshold -0.001
+  @energy_exhaustion_threshold 0.2
+  @max_hold_time_multiplier 1.2
+  @risk_percent_per_trade 0.02
   @max_positions_per_user 5
   @min_account_balance 100.0
 
-  # Execution intervals
   @signal_check_interval_ms 5_000
   @exit_check_interval_ms 3_000
   @broadcast_stats_interval_ms 10_000
@@ -230,10 +225,12 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
 
   defp process_signal(signal, state) do
     %{type: signal_type, confidence: confidence, physics: physics} = signal
+    config = get_strategy_config()
+    min_conf = get_param(config, "min_confidence", @min_confidence)
 
     case signal_type do
       :bullish_lift ->
-        if confidence >= @min_confidence do
+        if confidence >= min_conf do
           Logger.info("""
           ✅ BULLISH ENTRY SIGNAL
           ═════════════════════════════════════════
@@ -295,9 +292,12 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
 
   defp create_physics_position(user, account, signal) do
     %{physics: physics, entry_price: entry_price, type: signal_type} = signal
-    
+    config = get_strategy_config()
+    risk_pct = get_param(config, "risk_percent_per_trade", @risk_percent_per_trade)
+    hold_mult = get_param(config, "max_hold_time_multiplier", @max_hold_time_multiplier)
+
     balance = Decimal.to_float(account.available_balance)
-    position_size = RiskManagement.calculate_position_size(balance, physics, @risk_percent_per_trade)
+    position_size = RiskManagement.calculate_position_size(balance, physics, risk_pct)
     quantity = position_size / entry_price
 
     position = %{
@@ -320,7 +320,7 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
         trajectory_angle: physics.trajectory_angle,
         kinetic_energy: physics.kinetic_energy,
         energy_state: physics.energy_state,
-        max_hold_time: physics.peak_time * @max_hold_time_multiplier
+        max_hold_time: physics.peak_time * hold_mult
       },
       
       # RISK MANAGEMENT
@@ -366,14 +366,17 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
     pnl_pct = (current_price - entry_price) / entry_price
 
     physics = position.physics
+    config = get_strategy_config()
+    vel_threshold = get_param(config, "velocity_reversal_threshold", @velocity_reversal_threshold)
+    energy_threshold = get_param(config, "energy_exhaustion_threshold", @energy_exhaustion_threshold)
 
     cond do
       # Rule 1: Velocity reversal v(t) < 0
-      physics.momentum < @velocity_reversal_threshold and pnl_pct > -0.01 ->
+      physics.momentum < vel_threshold and pnl_pct > -0.01 ->
         true
 
-      # Rule 2: Energy exhaustion E_k < 0.2
-      physics.kinetic_energy < @energy_exhaustion_threshold and 
+      # Rule 2: Energy exhaustion
+      physics.kinetic_energy < energy_threshold and
       time_held >= physics.peak_time * 0.8 ->
         true
 
@@ -422,12 +425,15 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
     pnl_pct = (current_price - entry_price) / entry_price
 
     physics = position.physics
+    config = get_strategy_config()
+    vel_threshold = get_param(config, "velocity_reversal_threshold", @velocity_reversal_threshold)
+    energy_threshold = get_param(config, "energy_exhaustion_threshold", @energy_exhaustion_threshold)
 
     cond do
       pnl_pct >= 0.05 -> :take_profit
       pnl_pct <= -0.02 -> :stop_loss
-      physics.momentum < @velocity_reversal_threshold and pnl_pct > -0.01 -> :velocity_reversal
-      physics.kinetic_energy < @energy_exhaustion_threshold -> :energy_exhaustion
+      physics.momentum < vel_threshold and pnl_pct > -0.01 -> :velocity_reversal
+      physics.kinetic_energy < energy_threshold -> :energy_exhaustion
       time_held >= physics.max_hold_time -> :physics_timeout
       physics.momentum < 0.0005 and pnl_pct > 0.02 -> :peak_zone
       true -> :manual
@@ -457,11 +463,14 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
   end
 
   defp can_open_position?(user, positions) do
+    config = get_strategy_config()
+    max_pos = get_param(config, "max_positions_per_user", @max_positions_per_user)
+
     user_open_count = positions
       |> Map.values()
       |> Enum.count(&(&1.user_id == user.id and &1.status == :open))
 
-    user_open_count < @max_positions_per_user
+    user_open_count < max_pos
   end
 
   defp get_eligible_users do
@@ -524,4 +533,41 @@ defmodule TradeEngine.Orchestrator.PhysicsSignalTrader do
   defp broadcast_position_closed(position) do
     Phoenix.PubSub.broadcast(@pubsub, "physics:positions", {:position_closed, position})
   end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STRATEGY CONFIG READER (DB-backed with fallback)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  defp get_strategy_config do
+    alias SysAdmin.Strategies.Strategy
+    try do
+      case Repo.one(
+        from(s in Strategy,
+          where: s.status == "active" and s.type == "core_momentum",
+          select: s.config,
+          limit: 1
+        )
+      ) do
+        nil -> %{}
+        config when is_map(config) -> config
+        _ -> %{}
+      end
+    rescue
+      _ -> %{}
+    end
+  end
+
+  defp get_param(config, key, default) when is_map(config) do
+    case Map.get(config, key) do
+      nil -> default
+      val when is_binary(val) ->
+        case Float.parse(val) do
+          {num, ""} -> num
+          _ -> default
+        end
+      val -> val
+    end
+  end
+
+  defp get_param(_, _, default), do: default
 end

@@ -33,10 +33,10 @@ defmodule TradeEngine.Exchanges.ExchangeAdapter do
   @callback close_short(symbol, quantity, entry_price :: number(), credentials, opts) ::
               {:ok, map()} | {:error, term()}
 
-  @callback get_price(symbol, credentials) ::
+  @callback get_price(symbol, credentials, opts) ::
               {:ok, Decimal.t()} | {:error, term()}
 
-  @callback get_bars(symbol, timeframe :: String.t(), limit :: pos_integer(), credentials) ::
+  @callback get_bars(symbol, timeframe :: String.t(), limit :: pos_integer(), credentials, opts) ::
               {:ok, [map()]} | {:error, term()}
 
   @callback get_account(credentials) ::

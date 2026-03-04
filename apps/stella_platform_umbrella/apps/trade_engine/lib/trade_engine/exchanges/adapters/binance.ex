@@ -24,10 +24,21 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   # ========================================================================
 
   @impl true
-  def execute_long(symbol, quantity, credentials, _opts \\ []) do
+  def execute_long(symbol, quantity, credentials, opts \\ []) do
     trading_symbol = normalize_symbol(symbol, :trading)
-    qty_str = format_quantity(trading_symbol, quantity)
-    Logger.info("Binance SPOT BUY: #{trading_symbol} qty=#{qty_str}")
+    market_type = opts[:market_type] || "spot"
+    qty_str = format_quantity(trading_symbol, quantity, market_type: market_type)
+
+    {label, url} = case market_type do
+      "usds_futures" ->
+        {"USDS-M FUTURES BUY", usds_futures_order_url(credentials)}
+      "coinm_futures" ->
+        {"COIN-M FUTURES BUY", coinm_futures_order_url(credentials)}
+      _ ->
+        {"SPOT BUY", spot_url(credentials) <> "/v3/order"}
+    end
+
+    Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
     params = %{
       "symbol" => trading_symbol,
@@ -36,7 +47,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "quantity" => qty_str
     }
 
-    case signed_request(:post, spot_url(credentials) <> "/v3/order", params, credentials) do
+    case signed_request(:post, url, params, credentials) do
       {:ok, order} ->
         {:ok, %{
           order_id: order["orderId"],
@@ -51,28 +62,20 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   end
 
   @impl true
-  def execute_short(symbol, quantity, credentials, _opts \\ []) do
+  def execute_short(symbol, quantity, credentials, opts \\ []) do
     trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = opts[:market_type] || "spot"
 
-    if Map.get(credentials, :simulate_shorts, true) do
-      Logger.info("Binance SIMULATED SHORT: #{trading_symbol} qty=#{quantity}")
+    # Futures market types use real short orders; spot uses simulation (or spot SELL)
+    if market_type in ["usds_futures", "coinm_futures"] do
+      qty_str = format_quantity(trading_symbol, quantity, market_type: market_type)
 
-      case get_price(symbol, credentials) do
-        {:ok, price} ->
-          current_price = Decimal.to_float(price)
-          {:ok, %{
-            order_id: "SIM_SHORT_#{:erlang.system_time(:millisecond)}",
-            executed_qty: quantity,
-            executed_price: current_price,
-            status: "simulated"
-          }}
-
-        error ->
-          error
+      {label, url} = case market_type do
+        "usds_futures" -> {"USDS-M FUTURES SHORT", usds_futures_order_url(credentials)}
+        "coinm_futures" -> {"COIN-M FUTURES SHORT", coinm_futures_order_url(credentials)}
       end
-    else
-      qty_str = format_quantity(trading_symbol, quantity)
-      Logger.info("Binance FUTURES SHORT: #{trading_symbol} qty=#{qty_str}")
+
+      Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
       params = %{
         "symbol" => trading_symbol,
@@ -81,7 +84,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "quantity" => qty_str
       }
 
-      case signed_request(:post, futures_url(credentials) <> "/v1/order", params, credentials) do
+      case signed_request(:post, url, params, credentials) do
         {:ok, order} ->
           {:ok, %{
             order_id: order["orderId"],
@@ -93,14 +96,67 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         error ->
           error
       end
+    else
+      # Spot: simulate shorts (default) or execute as spot SELL
+      if Map.get(credentials, :simulate_shorts, true) do
+        Logger.info("Binance SIMULATED SHORT: #{trading_symbol} qty=#{quantity}")
+
+        case get_price(symbol, credentials) do
+          {:ok, price} ->
+            current_price = Decimal.to_float(price)
+            {:ok, %{
+              order_id: "SIM_SHORT_#{:erlang.system_time(:millisecond)}",
+              executed_qty: quantity,
+              executed_price: current_price,
+              status: "simulated"
+            }}
+
+          error ->
+            error
+        end
+      else
+        qty_str = format_quantity(trading_symbol, quantity)
+        Logger.info("Binance SPOT SELL (short): #{trading_symbol} qty=#{qty_str}")
+
+        params = %{
+          "symbol" => trading_symbol,
+          "side" => "SELL",
+          "type" => "MARKET",
+          "quantity" => qty_str
+        }
+
+        case signed_request(:post, spot_url(credentials) <> "/v3/order", params, credentials) do
+          {:ok, order} ->
+            {:ok, %{
+              order_id: order["orderId"],
+              executed_qty: extract_executed_qty(order),
+              executed_price: extract_executed_price(order),
+              status: order["status"]
+            }}
+
+          error ->
+            error
+        end
+      end
     end
   end
 
   @impl true
-  def close_long(symbol, quantity, entry_price, credentials, _opts \\ []) do
+  def close_long(symbol, quantity, entry_price, credentials, opts \\ []) do
     trading_symbol = normalize_symbol(symbol, :trading)
-    qty_str = format_quantity(trading_symbol, quantity)
-    Logger.info("Binance SPOT SELL (close long): #{trading_symbol} qty=#{qty_str}")
+    market_type = opts[:market_type] || "spot"
+    qty_str = format_quantity(trading_symbol, quantity, market_type: market_type)
+
+    {label, url} = case market_type do
+      "usds_futures" ->
+        {"USDS-M FUTURES SELL (close long)", usds_futures_order_url(credentials)}
+      "coinm_futures" ->
+        {"COIN-M FUTURES SELL (close long)", coinm_futures_order_url(credentials)}
+      _ ->
+        {"SPOT SELL (close long)", spot_url(credentials) <> "/v3/order"}
+    end
+
+    Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
     params = %{
       "symbol" => trading_symbol,
@@ -109,7 +165,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "quantity" => qty_str
     }
 
-    case signed_request(:post, spot_url(credentials) <> "/v3/order", params, credentials) do
+    case signed_request(:post, url, params, credentials) do
       {:ok, order} ->
         executed_price = extract_executed_price(order)
         executed_qty = extract_executed_qty(order)
@@ -131,33 +187,20 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   end
 
   @impl true
-  def close_short(symbol, quantity, entry_price, credentials, _opts \\ []) do
+  def close_short(symbol, quantity, entry_price, credentials, opts \\ []) do
     trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = opts[:market_type] || "spot"
 
-    if Map.get(credentials, :simulate_shorts, true) do
-      Logger.info("Binance SIMULATED SHORT COVER: #{trading_symbol} qty=#{quantity}")
+    # Futures market types use real cover orders
+    if market_type in ["usds_futures", "coinm_futures"] do
+      qty_str = format_quantity(trading_symbol, quantity, market_type: market_type)
 
-      case get_price(symbol, credentials) do
-        {:ok, price} ->
-          current_price = Decimal.to_float(price)
-          pnl = (entry_price - current_price) * quantity
-          pnl_pct = if entry_price > 0, do: ((entry_price - current_price) / entry_price) * 100, else: 0.0
-
-          {:ok, %{
-            order_id: "SIM_COVER_#{:erlang.system_time(:millisecond)}",
-            executed_qty: quantity,
-            executed_price: current_price,
-            pnl: pnl,
-            pnl_percent: pnl_pct,
-            status: "simulated"
-          }}
-
-        error ->
-          error
+      {label, url} = case market_type do
+        "usds_futures" -> {"USDS-M FUTURES BUY (close short)", usds_futures_order_url(credentials)}
+        "coinm_futures" -> {"COIN-M FUTURES BUY (close short)", coinm_futures_order_url(credentials)}
       end
-    else
-      qty_str = format_quantity(trading_symbol, quantity)
-      Logger.info("Binance FUTURES COVER: #{trading_symbol} qty=#{qty_str}")
+
+      Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
       params = %{
         "symbol" => trading_symbol,
@@ -166,7 +209,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "quantity" => qty_str
       }
 
-      case signed_request(:post, futures_url(credentials) <> "/v1/order", params, credentials) do
+      case signed_request(:post, url, params, credentials) do
         {:ok, order} ->
           executed_price = extract_executed_price(order)
           executed_qty = extract_executed_qty(order)
@@ -185,6 +228,60 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         error ->
           error
       end
+    else
+      # Spot: simulated short cover or real spot BUY
+      if Map.get(credentials, :simulate_shorts, true) do
+        Logger.info("Binance SIMULATED SHORT COVER: #{trading_symbol} qty=#{quantity}")
+
+        case get_price(symbol, credentials) do
+          {:ok, price} ->
+            current_price = Decimal.to_float(price)
+            pnl = (entry_price - current_price) * quantity
+            pnl_pct = if entry_price > 0, do: ((entry_price - current_price) / entry_price) * 100, else: 0.0
+
+            {:ok, %{
+              order_id: "SIM_COVER_#{:erlang.system_time(:millisecond)}",
+              executed_qty: quantity,
+              executed_price: current_price,
+              pnl: pnl,
+              pnl_percent: pnl_pct,
+              status: "simulated"
+            }}
+
+          error ->
+            error
+        end
+      else
+        qty_str = format_quantity(trading_symbol, quantity)
+        Logger.info("Binance SPOT BUY (close short): #{trading_symbol} qty=#{qty_str}")
+
+        params = %{
+          "symbol" => trading_symbol,
+          "side" => "BUY",
+          "type" => "MARKET",
+          "quantity" => qty_str
+        }
+
+        case signed_request(:post, spot_url(credentials) <> "/v3/order", params, credentials) do
+          {:ok, order} ->
+            executed_price = extract_executed_price(order)
+            executed_qty = extract_executed_qty(order)
+            pnl = (entry_price - executed_price) * executed_qty
+            pnl_pct = if entry_price > 0, do: ((entry_price - executed_price) / entry_price) * 100, else: 0.0
+
+            {:ok, %{
+              order_id: order["orderId"],
+              executed_qty: executed_qty,
+              executed_price: executed_price,
+              pnl: pnl,
+              pnl_percent: pnl_pct,
+              status: order["status"]
+            }}
+
+          error ->
+            error
+        end
+      end
     end
   end
 
@@ -193,15 +290,25 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   # ========================================================================
 
   @impl true
-  def get_price(symbol, _credentials) do
+  def get_price(symbol, credentials, opts \\ []) do
     trading_symbol = normalize_symbol(symbol, :trading)
-    # Use production Binance for price (faster, more reliable)
-    url = "https://api.binance.com/api/v3/ticker/price?symbol=#{trading_symbol}"
+    market_type = if is_list(opts), do: Keyword.get(opts, :market_type), else: nil
+
+    url = case resolve_api_type(symbol, market_type) do
+      :coinm_futures ->
+        coinm_base = Map.get(credentials, :coinm_futures_base_url) || resolve_futures_base_url(credentials)
+        "#{coinm_base}/v1/ticker/price?symbol=#{trading_symbol}"
+      :usds_futures ->
+        "#{resolve_futures_base_url(credentials)}/v1/ticker/price?symbol=#{trading_symbol}"
+      _ ->
+        "#{spot_url(credentials)}/v3/ticker/price?symbol=#{trading_symbol}"
+    end
 
     case HTTPoison.get(url, [], timeout: 5_000, recv_timeout: 5_000) do
       {:ok, %{status_code: 200, body: body}} ->
         case Jason.decode(body) do
           {:ok, %{"price" => p}} -> {:ok, Decimal.new(p)}
+          {:ok, [%{"price" => p} | _]} -> {:ok, Decimal.new(p)}
           _ -> {:error, :decode_error}
         end
 
@@ -214,11 +321,20 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   end
 
   @impl true
-  def get_bars(symbol, timeframe, limit, _credentials) do
+  def get_bars(symbol, timeframe, limit, credentials, opts \\ []) do
     trading_symbol = normalize_symbol(symbol, :trading)
     interval = normalize_timeframe(timeframe)
+    market_type = Keyword.get(opts, :market_type)
 
-    url = "https://api.binance.com/api/v3/klines?symbol=#{trading_symbol}&interval=#{interval}&limit=#{limit}"
+    url = case resolve_api_type(symbol, market_type) do
+      :coinm_futures ->
+        coinm_base = Map.get(credentials, :coinm_futures_base_url) || resolve_futures_base_url(credentials)
+        "#{coinm_base}/v1/klines?symbol=#{trading_symbol}&interval=#{interval}&limit=#{limit}"
+      :usds_futures ->
+        "#{resolve_futures_base_url(credentials)}/v1/klines?symbol=#{trading_symbol}&interval=#{interval}&limit=#{limit}"
+      _ ->
+        "#{spot_url(credentials)}/v3/klines?symbol=#{trading_symbol}&interval=#{interval}&limit=#{limit}"
+    end
 
     case HTTPoison.get(url, [], timeout: 5_000, recv_timeout: 5_000) do
       {:ok, %{status_code: 200, body: body}} ->
@@ -270,14 +386,55 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
   @impl true
   def normalize_symbol(symbol, _purpose) do
-    normalized = symbol |> String.replace("/", "") |> String.upcase()
+    normalized = strip_ccxt_suffix(symbol) |> String.replace("/", "") |> String.upcase()
 
     cond do
+      # Delivery futures: "BTCUSDT_260327" — already has quote + expiry, leave as-is
+      String.match?(normalized, ~r/_\d+$/) -> normalized
       String.ends_with?(normalized, "USDT") -> normalized
       String.ends_with?(normalized, "USDC") -> normalized
       String.ends_with?(normalized, "BUSD") -> normalized
       String.ends_with?(normalized, "USD") -> normalized <> "T"
       true -> normalized <> "USDT"
+    end
+  end
+
+  @doc "Returns true if the symbol represents a futures contract (perpetual or delivery)"
+  def futures_symbol?(symbol) do
+    String.contains?(symbol, ":") or String.match?(normalize_symbol(symbol, :trading), ~r/_\d+$/)
+  end
+
+  # Resolve which API endpoint to use. Prefers explicit market_type from opts,
+  # falls back to guessing from symbol format for backward compatibility.
+  defp resolve_api_type(_symbol, "usds_futures"), do: :usds_futures
+  defp resolve_api_type(_symbol, "coinm_futures"), do: :coinm_futures
+  defp resolve_api_type(_symbol, "spot"), do: :spot
+  defp resolve_api_type(symbol, _) do
+    trading = normalize_symbol(symbol, :trading)
+    cond do
+      String.match?(trading, ~r/_\d+$/) -> :coinm_futures
+      String.contains?(symbol, ":") -> :usds_futures
+      true -> :spot
+    end
+  end
+
+  # Strip CCXT unified format suffixes:
+  #   "BTC/USDT:USDT-260327" -> "BTC/USDT" with expiry "_260327"
+  #   "BTC/USDT:USDT"        -> "BTC/USDT" (perpetual, no expiry)
+  #   "BTC/USDT"             -> "BTC/USDT" (spot, unchanged)
+  defp strip_ccxt_suffix(symbol) do
+    case String.split(symbol, ":") do
+      [base_quote, settle_part] ->
+        case String.split(settle_part, "-") do
+          [_settle, expiry] ->
+            # Quarterly delivery: append _EXPIRY (Binance format)
+            base_quote <> "_" <> expiry
+          [_settle] ->
+            # Perpetual swap: just use base/quote
+            base_quote
+        end
+      [_spot] ->
+        symbol
     end
   end
 
@@ -331,8 +488,22 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
   defp spot_url(credentials), do: credentials.base_url
 
-  defp futures_url(credentials) do
-    Map.get(credentials, :futures_base_url, "https://testnet.binancefuture.com/fapi")
+  defp resolve_futures_base_url(credentials) do
+    Map.get(credentials, :usds_futures_base_url) ||
+      Map.get(credentials, :futures_base_url) ||
+      Logger.warning("Binance: no futures_base_url configured in credentials") || ""
+  end
+
+  defp usds_futures_order_url(credentials) do
+    base = resolve_futures_base_url(credentials)
+    base <> "/v1/order"
+  end
+
+  defp coinm_futures_order_url(credentials) do
+    base = Map.get(credentials, :coinm_futures_base_url) ||
+      Map.get(credentials, :futures_base_url) ||
+      Logger.warning("Binance: no coinm_futures_base_url configured in credentials") || ""
+    base <> "/v1/order"
   end
 
   defp extract_executed_price(order) do
@@ -374,13 +545,21 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
     end
   end
 
-  defp format_quantity(symbol, quantity) do
-    precision = get_quantity_precision(symbol)
+  defp format_quantity(symbol, quantity, opts \\ []) do
+    precision = get_quantity_precision(symbol, opts)
     :erlang.float_to_binary(quantity * 1.0, decimals: precision)
   end
 
-  defp get_quantity_precision(symbol) do
+  # Binance futures use different step sizes than spot
+  # BTCUSDT futures: stepSize=0.001 (3 decimals), spot: stepSize=0.00001 (5 decimals)
+  # ETHUSDT futures: stepSize=0.001 (3 decimals), spot: stepSize=0.0001 (4 decimals)
+  defp get_quantity_precision(symbol, opts \\ []) do
+    market_type = Keyword.get(opts, :market_type)
+    is_futures = market_type in ["usds_futures", "coinm_futures"]
+
     cond do
+      String.starts_with?(symbol, "BTC") and is_futures -> 3
+      String.starts_with?(symbol, "ETH") and is_futures -> 3
       String.starts_with?(symbol, "BTC") -> 5
       String.starts_with?(symbol, "ETH") -> 4
       true -> 3

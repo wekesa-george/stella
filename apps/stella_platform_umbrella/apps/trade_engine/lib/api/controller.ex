@@ -123,7 +123,25 @@ defmodule TradeEngine.API.Controller do
   end
 
   get "/api/bots" do
-    json_response(conn, API.list_bots())
+    filters = %{}
+    |> maybe_put("status", conn.query_params["status"])
+    |> maybe_put("exchange", conn.query_params["exchange"])
+    |> maybe_put("strategy_type", conn.query_params["strategy_type"])
+    |> maybe_put("user_id", conn.query_params["user_id"])
+    |> maybe_put("search", conn.query_params["search"])
+    |> maybe_put("owner_type", conn.query_params["owner_type"])
+    |> maybe_put("pnl_preset", conn.query_params["pnl_preset"])
+    |> maybe_put("sort_by", conn.query_params["sort_by"])
+    |> maybe_put("sort_dir", conn.query_params["sort_dir"])
+    |> maybe_put_int("page", conn.query_params["page"])
+    |> maybe_put_int("per_page", conn.query_params["per_page"])
+    |> maybe_put_float("equity_min", conn.query_params["equity_min"])
+    |> maybe_put_float("equity_max", conn.query_params["equity_max"])
+    |> maybe_put_float("pnl_min", conn.query_params["pnl_min"])
+    |> maybe_put_float("pnl_max", conn.query_params["pnl_max"])
+    |> maybe_put_int("uptime_min", conn.query_params["uptime_min"])
+
+    json_response(conn, API.list_bots(filters))
   end
 
   get "/api/bots/user/:user_id" do
@@ -740,6 +758,28 @@ defmodule TradeEngine.API.Controller do
     case TradeEngine.Exchanges.HealthMonitor.get_health(:all) do
       {:error, _} -> json_response(conn, {:ok, %{exchanges: [], message: "Health data not yet available"}})
       exchanges -> json_response(conn, {:ok, %{exchanges: exchanges}})
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, val), do: Map.put(map, key, val)
+
+  defp maybe_put_int(map, _key, nil), do: map
+  defp maybe_put_int(map, _key, ""), do: map
+  defp maybe_put_int(map, key, val) do
+    case Integer.parse(val) do
+      {n, _} -> Map.put(map, key, n)
+      :error -> map
+    end
+  end
+
+  defp maybe_put_float(map, _key, nil), do: map
+  defp maybe_put_float(map, _key, ""), do: map
+  defp maybe_put_float(map, key, val) do
+    case Float.parse(val) do
+      {n, _} -> Map.put(map, key, n)
+      :error -> map
     end
   end
 

@@ -67,17 +67,17 @@ defmodule TradeEngine.Exchanges.Executor do
     end
   end
 
-  @doc "Get current price for a symbol"
-  def get_price(credential_id, symbol) do
+  @doc "Get current price for a symbol. Pass market_type: in opts for correct endpoint routing."
+  def get_price(credential_id, symbol, opts \\ []) do
     with {:ok, adapter, creds} <- resolve(credential_id) do
-      adapter.get_price(symbol, creds)
+      adapter.get_price(symbol, creds, opts)
     end
   end
 
-  @doc "Get historical bars/candles"
-  def get_bars(credential_id, symbol, timeframe, limit) do
+  @doc "Get historical bars/candles. Pass market_type: in opts for correct endpoint routing."
+  def get_bars(credential_id, symbol, timeframe, limit, opts \\ []) do
     with {:ok, adapter, creds} <- resolve(credential_id) do
-      adapter.get_bars(symbol, timeframe, limit, creds)
+      adapter.get_bars(symbol, timeframe, limit, creds, opts)
     end
   end
 
@@ -172,6 +172,10 @@ defmodule TradeEngine.Exchanges.Executor do
         adapter_base_url: a.base_url,
         adapter_sandbox_base_url: a.sandbox_base_url,
         adapter_ws_url: a.ws_url,
+        adapter_futures_base_url: fragment("?.futures_base_url", a),
+        adapter_futures_sandbox_base_url: fragment("?.futures_sandbox_base_url", a),
+        adapter_futures_ws_url: fragment("?.futures_ws_url", a),
+        adapter_futures_sandbox_ws_url: fragment("?.futures_sandbox_ws_url", a),
         adapter_config: a.config,
         platform_api_key: fragment("?->>'platform_api_key'", a.config),
         platform_api_secret: fragment("?->>'platform_api_secret'", a.config),
@@ -212,6 +216,12 @@ defmodule TradeEngine.Exchanges.Executor do
           row.adapter_base_url
         end
 
+        futures_base_url = if row.is_sandbox do
+          row.adapter_futures_sandbox_base_url || row.adapter_futures_base_url
+        else
+          row.adapter_futures_base_url
+        end
+
         # Resolve API credentials:
         # 1. Per-credential encrypted keys (user_auth)
         # 2. Platform-level keys from adapter config (platform_auth)
@@ -223,6 +233,9 @@ defmodule TradeEngine.Exchanges.Executor do
           secret_key: secret_key,
           base_url: base_url || ""
         }
+
+        # Add futures_base_url from adapter if available
+        creds = if futures_base_url, do: Map.put(creds, :futures_base_url, futures_base_url), else: creds
 
         # Add adapter-specific fields from config_overrides
         creds = merge_overrides(creds, row.config_overrides || %{}, adapter_code)
@@ -254,6 +267,8 @@ defmodule TradeEngine.Exchanges.Executor do
   defp merge_overrides(creds, overrides, "binance" <> _) do
     creds
     |> maybe_put(:futures_base_url, overrides["futures_base_url"])
+    |> maybe_put(:usds_futures_base_url, overrides["usds_futures_base_url"])
+    |> maybe_put(:coinm_futures_base_url, overrides["coinm_futures_base_url"])
     |> maybe_put(:simulate_shorts, Map.get(overrides, "simulate_shorts", true))
   end
 

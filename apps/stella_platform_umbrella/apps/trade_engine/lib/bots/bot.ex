@@ -42,6 +42,9 @@ defmodule TradeEngine.Bots.Bot do
     field :last_heartbeat, :utc_datetime, source: :last_heartbeat_at
     field :last_trade_at, :utc_datetime
 
+    # Market type: spot | usds_futures | coinm_futures | margin
+    field :market_type, :string, default: "spot"
+
     # New DB fields
     field :config, :map
     field :risk_overrides, :map
@@ -78,6 +81,7 @@ defmodule TradeEngine.Bots.Bot do
   end
 
   @valid_statuses ~w(initializing running paused stopping stopped error circuit_broken maintenance)
+  @valid_market_types ~w(spot usds_futures coinm_futures margin)
 
   @cast_fields [
     :name, :status,
@@ -87,6 +91,7 @@ defmodule TradeEngine.Bots.Bot do
     :last_error, :error_count,
     :started_at, :stopped_at, :last_heartbeat, :last_trade_at,
     :user_id, :strategy_id, :service_account_id,
+    :market_type,
     :config, :risk_overrides, :metadata, :elixir_node, :elixir_pid, :init_step
   ]
 
@@ -96,6 +101,7 @@ defmodule TradeEngine.Bots.Bot do
     |> validate_required([:name])
     |> validate_has_owner()
     |> validate_inclusion(:status, @valid_statuses)
+    |> validate_inclusion(:market_type, @valid_market_types)
     |> validate_length(:name, min: 1, max: 100)
     |> unique_constraint([:user_id, :name])
   end
@@ -106,8 +112,10 @@ defmodule TradeEngine.Bots.Bot do
     |> cast(attrs, @cast_fields)
     |> validate_required([:name, :user_id, :credential_id, :trading_pairs])
     |> validate_inclusion(:status, @valid_statuses)
+    |> validate_inclusion(:market_type, @valid_market_types)
     |> validate_length(:name, min: 1, max: 100)
     |> validate_length(:trading_pairs, min: 1, message: "must have at least one trading pair")
+    |> validate_trading_pairs_match_market_type()
     |> unique_constraint([:user_id, :name])
     |> foreign_key_constraint(:credential_id)
     |> foreign_key_constraint(:strategy_id)
@@ -120,8 +128,10 @@ defmodule TradeEngine.Bots.Bot do
     |> cast(attrs, @cast_fields)
     |> validate_required([:name, :service_account_id, :trading_pairs])
     |> validate_inclusion(:status, @valid_statuses)
+    |> validate_inclusion(:market_type, @valid_market_types)
     |> validate_length(:name, min: 1, max: 100)
     |> validate_length(:trading_pairs, min: 1, message: "must have at least one trading pair")
+    |> validate_trading_pairs_match_market_type()
     |> foreign_key_constraint(:service_account_id)
     |> foreign_key_constraint(:credential_id)
     |> foreign_key_constraint(:strategy_id)
@@ -136,6 +146,51 @@ defmodule TradeEngine.Bots.Bot do
       add_error(changeset, :user_id, "either user_id or service_account_id must be present")
     else
       changeset
+    end
+  end
+
+  # Validates that trading pairs are compatible with the bot's market_type.
+  # Catches mismatches like coin-margined symbols (BTC/USD:BTC-*) on usds_futures bots.
+  defp validate_trading_pairs_match_market_type(changeset) do
+    market_type = get_field(changeset, :market_type) || "spot"
+    pairs = get_field(changeset, :trading_pairs) || []
+
+    Enum.reduce(pairs, changeset, fn pair, cs ->
+      case classify_pair(pair) do
+        :coinm_delivery when market_type in ["spot", "usds_futures"] ->
+          add_error(cs, :trading_pairs,
+            "#{pair} is a coin-margined delivery symbol, incompatible with #{market_type}. Use market_type 'coinm_futures' or change the pair")
+
+        :usds_delivery when market_type in ["spot", "coinm_futures"] ->
+          add_error(cs, :trading_pairs,
+            "#{pair} is a USDT-margined delivery symbol, incompatible with #{market_type}. Use market_type 'usds_futures' or change the pair")
+
+        :perpetual_swap when market_type == "spot" ->
+          add_error(cs, :trading_pairs,
+            "#{pair} is a perpetual swap symbol, incompatible with spot. Use market_type 'usds_futures' or 'coinm_futures'")
+
+        _ -> cs
+      end
+    end)
+  end
+
+  # Classifies a CCXT-format trading pair into its market category
+  defp classify_pair(pair) do
+    case String.split(pair, ":") do
+      [_base_quote, settle_part] ->
+        case String.split(settle_part, "-") do
+          [settle, _expiry] ->
+            # Delivery contract: "BTC/USD:BTC-260327" or "BTC/USDT:USDT-260327"
+            if settle in ["USDT", "USDC", "BUSD"], do: :usds_delivery, else: :coinm_delivery
+
+          [settle] ->
+            # Perpetual swap: "BTC/USDT:USDT" or "BTC/USD:BTC"
+            if settle in ["USDT", "USDC", "BUSD"], do: :perpetual_swap, else: :perpetual_swap
+        end
+
+      [single] ->
+        # Spot or simple symbol: "BTCUSDT", "BTC/USDT"
+        if String.contains?(single, "_"), do: :delivery_native, else: :spot
     end
   end
 

@@ -40,32 +40,21 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   @pubsub TradeEngine.PubSub
 
   # ════════════════════════════════════════════════════════════════════════════
-  # IMPULSE SCALPING CONFIGURATION
+  # IMPULSE SCALPING CONFIGURATION (compile-time defaults)
+  # These are fallbacks — runtime values come from strategy.strategies.config JSONB
   # ════════════════════════════════════════════════════════════════════════════
-  
-  # Confidence thresholds (LOWERED for small accounts)
-  @min_confidence_long 55       # Allow more signals
-  @min_confidence_short 60      # Slightly higher for shorts
-  
-  # Position management
-  @max_positions_per_user 3     # Fewer positions, more focus
+
+  @min_confidence_long 55
+  @min_confidence_short 60
+  @max_positions_per_user 3
   @max_users_per_signal 10
   @max_positions_to_check 20
-  
-  # ════════════════════════════════════════════════════════════════════════════
-  # 🎯 IMPULSE SCALPING PARAMETERS (Optimized for $100 accounts)
-  # ════════════════════════════════════════════════════════════════════════════
-  
-  @target_profit_usd 0.50       # Goal: $0.50 per trade (more realistic for small accounts)
-  @min_impulse_pct 0.001        # Minimum 0.1% move (was 0.2% - too restrictive!)
-  @max_hold_minutes 5           # EXIT after 5 minutes (impulse capture)
-  @golden_ratio 0.618           # φ for physics-aligned stop loss
-  
-  # Binance constraints
-  @min_notional 10.0            # Minimum order value
-  @min_trade_value 12.0         # Safety margin above MIN_NOTIONAL
-  
-  # System flags
+  @target_profit_usd 0.50
+  @min_impulse_pct 0.001
+  @max_hold_minutes 5
+  @golden_ratio 0.618
+  @min_notional 10.0
+  @min_trade_value 12.0
   @execute_on_exchange true
   @use_asset_tiers true
   @use_virtual_balance true
@@ -355,16 +344,18 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   # ════════════════════════════════════════════════════════════════════════════
 
   defp should_trade?(signal) do
-    # Check confidence
+    config = get_strategy_config()
+    min_conf_long = get_param(config, "min_confidence_long", @min_confidence_long)
+    min_conf_short = get_param(config, "min_confidence_short", @min_confidence_short)
+
     confidence_ok = case signal.direction do
-      :long -> signal.confidence >= @min_confidence_long
-      :short -> signal.confidence >= @min_confidence_short
+      :long -> signal.confidence >= min_conf_long
+      :short -> signal.confidence >= min_conf_short
       _ -> false
     end
-    
-    # Check impulse size (P1 - P0)
+
     impulse_ok = has_tradeable_impulse?(signal)
-    
+
     confidence_ok and impulse_ok
   end
 
@@ -373,14 +364,15 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   """
   defp has_tradeable_impulse?(signal) do
     entry = to_float(signal.entry_price)
-    
-    # P1 = target (direction-aware)
+    config = get_strategy_config()
+    min_impulse = get_param(config, "min_impulse_pct", @min_impulse_pct)
+
     p1 = get_impulse_target(signal)
-    
+
     if entry && p1 && entry > 0 do
       impulse_pct = abs(p1 - entry) / entry
-      
-      if impulse_pct >= @min_impulse_pct do
+
+      if impulse_pct >= min_impulse do
         # Check direction alignment
         direction_ok = case signal.direction do
           :long -> p1 > entry
@@ -476,13 +468,17 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
 
   defp execute_impulse_trade(user, account, signal, state) do
     balance = get_user_balance(user, account)
-    
+    config = get_strategy_config()
+    use_tiers = get_param(config, "use_asset_tiers", @use_asset_tiers)
+
     if balance <= 0 do
       {:error, :no_balance}
     else
-      # Check asset tier
-      if @use_asset_tiers and not AssetTierManager.is_allowed?(signal.symbol, balance) do
-        Logger.debug("🚫 #{signal.symbol} blocked for balance $#{Float.round(balance, 0)}")
+      tier_symbol = signal.symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase() |> String.split("_") |> List.first()
+      tier_symbol = if String.ends_with?(tier_symbol, "USDT"), do: tier_symbol, else: tier_symbol <> "T"
+      if use_tiers and not AssetTierManager.is_allowed_by_code?(tier_symbol, balance, "binance") do
+        account_tier = AssetTierManager.get_account_tier_by_code(balance, "binance")
+        Logger.warning("[SignalTrader] ❌ ASSET BLOCKED: #{tier_symbol} | balance=$#{Float.round(balance, 2)} account_tier=#{account_tier} | user=#{inspect(user)}")
         {:error, :asset_not_in_tier}
       else
         case get_price(signal.symbol) do
@@ -496,40 +492,35 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   end
 
   defp execute_with_impulse_sizing(user, account, signal, state, balance, current_price) do
+    config = get_strategy_config()
+    target_profit = get_param(config, "target_profit_usd", @target_profit_usd)
+    min_notional = get_param(config, "min_notional", @min_notional)
+    min_trade_val = get_param(config, "min_trade_value", @min_trade_value)
+    golden_ratio = get_param(config, "golden_ratio", @golden_ratio)
+    max_hold = get_param(config, "max_hold_minutes", @max_hold_minutes)
+    execute_on_exch = get_param(config, "execute_on_exchange", @execute_on_exchange)
+    use_vb = get_param(config, "use_virtual_balance", @use_virtual_balance)
+
     # Get impulse target (P1)
     p1 = get_impulse_target(signal) || current_price
     entry = current_price
-    
-    # Calculate impulse size
+
     impulse_size = abs(p1 - entry)
     impulse_pct = if entry > 0, do: impulse_size / entry, else: 0
-    
-    # ════════════════════════════════════════════════════════════════
-    # 🎯 IMPULSE-BASED POSITION SIZING
-    # Goal: Make $1 per trade
-    # Position size = target_profit / expected_move_per_unit
-    # ════════════════════════════════════════════════════════════════
-    
-    # Calculate position size to achieve $1 profit
-    ideal_quantity = if impulse_size > 0 do
-      @target_profit_usd / impulse_size
-    else
-      0
-    end
-    
+
+    # Impulse-based position sizing: position = target_profit / impulse_size
+    ideal_quantity = if impulse_size > 0, do: target_profit / impulse_size, else: 0
+
     ideal_position_value = ideal_quantity * entry
-    
-    # Apply balance constraints
-    max_position_value = balance * 0.15  # Max 15% per trade for small accounts
+
+    max_position_value = balance * 0.15
     position_value = min(ideal_position_value, max_position_value)
-    position_value = max(position_value, @min_trade_value)  # At least min notional
-    
-    # Final quantity
+    position_value = max(position_value, min_trade_val)
+
     quantity = position_value / entry
-    
-    # Check notional
+
     notional = quantity * entry
-    if notional < @min_notional do
+    if notional < min_notional do
       Logger.debug("⚠️ Notional $#{Float.round(notional, 2)} below minimum")
       {:error, :notional_too_low}
     else
@@ -539,15 +530,15 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
       # ════════════════════════════════════════════════════════════════
       
       stop_loss = case signal.direction do
-        :long -> entry - (impulse_size * @golden_ratio)
-        :short -> entry + (impulse_size * @golden_ratio)
+        :long -> entry - (impulse_size * golden_ratio)
+        :short -> entry + (impulse_size * golden_ratio)
         _ -> entry
       end
-      
+
       position_id = Ecto.UUID.generate()
-      
+
       # Reserve virtual balance
-      use_vb = @use_virtual_balance and VirtualBalanceManager.running?()
+      use_vb = use_vb and VirtualBalanceManager.running?()
       vb_reserved = if use_vb do
         case VirtualBalanceManager.reserve_for_position(user.id, position_id, position_value) do
           {:ok, _} -> true
@@ -558,7 +549,7 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
       end
       
       # Execute on exchange
-      exchange_result = if @execute_on_exchange do
+      exchange_result = if execute_on_exch do
         case signal.direction do
           :long ->
             Logger.info("🟢 IMPULSE BUY: #{signal.symbol} qty=#{Float.round(quantity, 6)} | Target: $#{Float.round(p1, 4)} (+#{Float.round(impulse_pct * 100, 2)}%)")
@@ -568,18 +559,18 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
               trading_account_id: account.id,
               confidence: signal.confidence,
               peak_price: p1,
-              peak_time: @max_hold_minutes
+              peak_time: max_hold
             )
-          
+
           :short ->
-            Logger.info("🔴 IMPULSE SHORT: #{signal.symbol} qty=#{Float.round(quantity, 6)} | Target: $#{Float.round(p1, 4)} (-#{Float.round(impulse_pct * 100, 2)}%)")
+            Logger.info("IMPULSE SHORT: #{signal.symbol} qty=#{Float.round(quantity, 6)} | Target: $#{Float.round(p1, 4)} (-#{Float.round(impulse_pct * 100, 2)}%)")
             TestnetExecutor.execute_short(signal.symbol, quantity,
               user_id: user.id,
               position_id: position_id,
               trading_account_id: account.id,
               confidence: signal.confidence,
               peak_price: p1,
-              peak_time: @max_hold_minutes
+              peak_time: max_hold
             )
           
           _ ->
@@ -611,7 +602,7 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
             entry_time: DateTime.utc_now(),
             opened_at: DateTime.utc_now(),
             # Exit after 5 minutes max
-            target_exit_time: DateTime.add(DateTime.utc_now(), @max_hold_minutes * 60, :second),
+            target_exit_time: DateTime.add(DateTime.utc_now(), trunc(max_hold) * 60, :second),
             status: :open,
             exit_reason: nil,
             exit_time: nil,
@@ -641,18 +632,23 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   end
 
   defp can_open?(user, signal, state) do
-    user_positions = state.positions 
-      |> Map.values() 
+    config = get_strategy_config()
+    max_pos = get_param(config, "max_positions_per_user", @max_positions_per_user)
+
+    user_positions = state.positions
+      |> Map.values()
       |> Enum.filter(& &1.user_id == user.id)
-    
+
     count = length(user_positions)
     has_symbol = Enum.any?(user_positions, & &1.symbol == signal.symbol)
-    
-    count < @max_positions_per_user and not has_symbol
+
+    count < max_pos and not has_symbol
   end
 
   defp get_user_balance(user, account) do
-    if @use_virtual_balance and VirtualBalanceManager.running?() do
+    config = get_strategy_config()
+    use_vb = get_param(config, "use_virtual_balance", @use_virtual_balance)
+    if use_vb and VirtualBalanceManager.running?() do
       case VirtualBalanceManager.get_available_balance(user.id) do
         {:ok, vb} -> vb
         _ -> Decimal.to_float(account.available_balance)
@@ -663,7 +659,9 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   end
 
   defp get_eligible_users do
-    if @use_virtual_balance and VirtualBalanceManager.running?() do
+    config = get_strategy_config()
+    use_vb = get_param(config, "use_virtual_balance", @use_virtual_balance)
+    if use_vb and VirtualBalanceManager.running?() do
       case VirtualBalanceManager.get_all_users() do
         {:ok, users} when length(users) > 0 ->
           users
@@ -789,9 +787,11 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   defp close_position(pos, state) do
     exit_price = Map.get(state.price_cache, pos.symbol, pos.current_price)
     entry = pos.entry_price
-    
+    config = get_strategy_config()
+    execute_on_exch = get_param(config, "execute_on_exchange", @execute_on_exchange)
+
     # Execute close on exchange
-    exchange_result = if @execute_on_exchange do
+    exchange_result = if execute_on_exch do
       case pos.direction do
         :long ->
           TestnetExecutor.close_long(pos.symbol, pos.quantity, entry,
@@ -822,10 +822,12 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
     
     pnl_pct = if entry > 0, do: (pnl / (entry * pos.quantity)) * 100, else: 0.0
     is_win = pnl >= 0
-    hit_dollar_target = pnl >= @target_profit_usd * 0.8  # 80% of target counts
-    
+    target_profit = get_param(config, "target_profit_usd", @target_profit_usd)
+    use_vb = get_param(config, "use_virtual_balance", @use_virtual_balance)
+    hit_dollar_target = pnl >= target_profit * 0.8
+
     # Update virtual balance
-    if @use_virtual_balance and Map.get(pos, :virtual_balance_user, false) do
+    if use_vb and Map.get(pos, :virtual_balance_user, false) do
       principal = Map.get(pos, :position_value, entry * pos.quantity)
       VirtualBalanceManager.close_position(pos.user_id, pos.id, principal, pnl)
     end
@@ -936,6 +938,53 @@ defmodule TradeEngine.Orchestrator.SignalTrader do
   rescue
     _ -> {:error, :exception}
   end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STRATEGY CONFIG READER
+  # Reads runtime overrides from strategy.strategies.config JSONB.
+  # Falls back to compile-time @attr defaults.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  defp get_strategy_config do
+    # Load active strategy config from DB (cached in ETS by the schema module)
+    case load_active_strategy_config() do
+      %{} = config when map_size(config) > 0 -> config
+      _ -> %{}
+    end
+  end
+
+  defp load_active_strategy_config do
+    alias SysAdmin.Strategies.Strategy
+    try do
+      case Repo.one(
+        from(s in Strategy,
+          where: s.status == "active" and s.type == "core_momentum",
+          select: s.config,
+          limit: 1
+        )
+      ) do
+        nil -> %{}
+        config when is_map(config) -> config
+        _ -> %{}
+      end
+    rescue
+      _ -> %{}
+    end
+  end
+
+  defp get_param(config, key, default) when is_map(config) do
+    case Map.get(config, key) do
+      nil -> default
+      val when is_binary(val) ->
+        case Float.parse(val) do
+          {num, ""} -> num
+          _ -> default
+        end
+      val -> val
+    end
+  end
+
+  defp get_param(_, _, default), do: default
 
   defp to_float(nil), do: nil
   defp to_float(%Decimal{} = d), do: Decimal.to_float(d)

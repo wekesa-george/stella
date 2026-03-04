@@ -15,7 +15,7 @@ defmodule TradeEngine.Trading.EquitySnapshot do
   @foreign_key_type :binary_id
 
   schema "equity_snapshots" do
-    field :user_id, :string
+    field :user_id, :binary_id
     field :total_equity_usd, :decimal
     field :available_balance_usd, :decimal
     field :unrealized_pnl_usd, :decimal
@@ -40,7 +40,7 @@ defmodule TradeEngine.Trading.EquitySnapshot do
   def changeset(snapshot, attrs) do
     snapshot
     |> cast(attrs, @cast_fields)
-    |> validate_required([:bot_id, :total_equity_usd, :snapshot_source, :snapshot_at])
+    |> validate_required([:bot_id, :user_id, :total_equity_usd, :snapshot_source, :snapshot_at])
   end
 
   @doc "Insert a new equity snapshot row."

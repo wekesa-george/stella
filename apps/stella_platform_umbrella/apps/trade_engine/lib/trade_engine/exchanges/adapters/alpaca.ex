@@ -119,7 +119,7 @@ defmodule TradeEngine.Exchanges.Adapters.Alpaca do
   # ========================================================================
 
   @impl true
-  def get_price(symbol, credentials) do
+  def get_price(symbol, credentials, _opts \\ []) do
     data_symbol = normalize_symbol(symbol, :data)
 
     query = URI.encode_query(%{"symbols" => data_symbol})
@@ -141,7 +141,7 @@ defmodule TradeEngine.Exchanges.Adapters.Alpaca do
   end
 
   @impl true
-  def get_bars(symbol, timeframe, limit, credentials) do
+  def get_bars(symbol, timeframe, limit, credentials, _opts \\ []) do
     data_symbol = normalize_symbol(symbol, :data)
 
     query = URI.encode_query(%{

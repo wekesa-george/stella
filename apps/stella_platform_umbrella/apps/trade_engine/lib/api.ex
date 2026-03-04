@@ -123,8 +123,8 @@ defmodule TradeEngine.API do
     end
   end
 
-  @doc "List all bots with dashboard data"
-  def list_bots, do: BotRegistry.get_all_bots_dashboard()
+  @doc "List all bots with dashboard data (accepts optional filter map)"
+  def list_bots(filters \\ %{}), do: BotRegistry.get_all_bots_dashboard(filters)
 
   @doc "List bots for a specific user"
   def list_user_bots(user_id) do
@@ -208,7 +208,12 @@ defmodule TradeEngine.API do
 
   def delete_bot(bot_id) do
     case TradeEngine.Bots.get_bot(bot_id) do
-      {:ok, %{status: status} = bot} when status in ["stopped", "initializing"] ->
+      {:ok, %{status: status} = bot} when status in ["stopped", "initializing", "error"] ->
+        # Clean up all FK-referencing records before deleting the bot
+        for table <- ~w(equity_snapshots positions orders monitoring_alerts bot_logs bot_state_transitions) do
+          Repo.query!("DELETE FROM trading.#{table} WHERE bot_id = $1::uuid", [Ecto.UUID.dump!(bot_id)])
+        end
+
         case TradeEngine.Bots.delete_bot(bot) do
           {:ok, _} = result ->
             BotRegistry.deregister_bot(bot_id)

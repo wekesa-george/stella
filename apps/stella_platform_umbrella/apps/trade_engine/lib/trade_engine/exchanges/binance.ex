@@ -350,9 +350,24 @@ defmodule TradeEngine.Exchanges.Binance do
   """
   def normalize_symbol(symbol) do
     symbol
+    |> strip_ccxt_suffix()
     |> String.replace("/", "")
-    |> String.replace("-", "")
     |> String.upcase()
+  end
+
+  # Strip CCXT unified format suffixes:
+  #   "BTC/USDT:USDT-260327" -> "BTC/USDT_260327" (quarterly delivery)
+  #   "BTC/USDT:USDT"        -> "BTC/USDT" (perpetual swap)
+  #   "BTC/USDT"             -> "BTC/USDT" (spot, unchanged)
+  defp strip_ccxt_suffix(symbol) do
+    case String.split(symbol, ":") do
+      [base_quote, settle_part] ->
+        case String.split(settle_part, "-") do
+          [_settle, expiry] -> base_quote <> "_" <> expiry
+          [_settle] -> base_quote
+        end
+      [_spot] -> symbol
+    end
   end
 
   @doc """

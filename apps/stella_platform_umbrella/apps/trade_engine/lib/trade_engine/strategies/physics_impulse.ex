@@ -128,14 +128,18 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
       impulse_target = get_impulse_target(signal)
       impulse_size = if impulse_target, do: abs(impulse_target - entry), else: 0
 
+      # Ensure min_notional is at least 100 for futures compatibility
+      effective_min_notional = max(min_notional, 100.0)
+      effective_min_trade = max(min_trade, effective_min_notional)
+
       ideal_qty = if impulse_size > 0, do: target_profit / impulse_size, else: 0
       ideal_value = ideal_qty * entry
       max_value = balance * max_pct
-      position_value = ideal_value |> min(max_value) |> max(min_trade)
+      position_value = ideal_value |> min(max_value) |> max(effective_min_trade)
       quantity = position_value / entry
       notional = quantity * entry
 
-      if notional < min_notional do
+      if notional < effective_min_notional or position_value > balance do
         {:error, :notional_too_low}
       else
         {:ok, quantity, position_value}
