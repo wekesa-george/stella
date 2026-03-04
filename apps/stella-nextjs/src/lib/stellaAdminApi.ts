@@ -84,6 +84,7 @@ export async function createAdminUser(body: {
   firstName: string;
   lastName: string;
   phone?: string;
+  password?: string;
   roleIds?: string[];
 }) {
   return request('/admin/admin-users/invite', {
