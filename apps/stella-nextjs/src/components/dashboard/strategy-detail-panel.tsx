@@ -49,6 +49,28 @@ export function StrategyDetailPanel({ strategy, onClose, onUpdate }: StrategyDet
   const [exchanges, setExchanges] = useState<string[]>(strategy.supported_exchanges || []);
   const [exchangeInput, setExchangeInput] = useState("");
 
+  // Structured config fields (read from / write to config JSONB)
+  const cfg = strategy.config || {};
+  const [minConfLong, setMinConfLong] = useState(String(cfg.min_confidence_long ?? ""));
+  const [minConfShort, setMinConfShort] = useState(String(cfg.min_confidence_short ?? ""));
+  const [targetProfitUsd, setTargetProfitUsd] = useState(String(cfg.target_profit_usd ?? ""));
+  const [minImpulsePct, setMinImpulsePct] = useState(String(cfg.min_impulse_pct ?? ""));
+  const [maxHoldMinutes, setMaxHoldMinutes] = useState(String(cfg.max_hold_minutes ?? ""));
+  const [minNotional, setMinNotional] = useState(String(cfg.min_notional ?? ""));
+  const [minMomentum, setMinMomentum] = useState(String(cfg.min_momentum ?? ""));
+  const [minTrajectoryAngle, setMinTrajectoryAngle] = useState(String(cfg.min_trajectory_angle ?? ""));
+  const [minKineticEnergy, setMinKineticEnergy] = useState(String(cfg.min_kinetic_energy ?? ""));
+  const [velReversalThreshold, setVelReversalThreshold] = useState(String(cfg.velocity_reversal_threshold ?? ""));
+  const [energyExhaustionThreshold, setEnergyExhaustionThreshold] = useState(String(cfg.energy_exhaustion_threshold ?? ""));
+  const [maxHoldTimeMultiplier, setMaxHoldTimeMultiplier] = useState(String(cfg.max_hold_time_multiplier ?? ""));
+  const [riskPercentPerTrade, setRiskPercentPerTrade] = useState(String(cfg.risk_percent_per_trade ?? ""));
+  const [executeOnExchange, setExecuteOnExchange] = useState<boolean>(cfg.execute_on_exchange ?? true);
+  const [useAssetTiers, setUseAssetTiers] = useState<boolean>(cfg.use_asset_tiers ?? true);
+  const [useVirtualBalance, setUseVirtualBalance] = useState<boolean>(cfg.use_virtual_balance ?? true);
+  const [cfgMaxPositions, setCfgMaxPositions] = useState(String(cfg.max_positions_per_user ?? ""));
+  const [minAccountBalance, setMinAccountBalance] = useState(String(cfg.min_account_balance ?? ""));
+  const [showRawJson, setShowRawJson] = useState(false);
+
   // JSON fields
   const [configJson, setConfigJson] = useState(JSON.stringify(strategy.config || {}, null, 2));
   const [entryJson, setEntryJson] = useState(JSON.stringify(strategy.entry_conditions || {}, null, 2));
@@ -71,6 +93,26 @@ export function StrategyDetailPanel({ strategy, onClose, onUpdate }: StrategyDet
     setMaxPositionSizePct(String(strategy.max_position_size_pct ?? ""));
     setPairs(strategy.supported_pairs || []);
     setExchanges(strategy.supported_exchanges || []);
+    const c = strategy.config || {};
+    setMinConfLong(String(c.min_confidence_long ?? ""));
+    setMinConfShort(String(c.min_confidence_short ?? ""));
+    setTargetProfitUsd(String(c.target_profit_usd ?? ""));
+    setMinImpulsePct(String(c.min_impulse_pct ?? ""));
+    setMaxHoldMinutes(String(c.max_hold_minutes ?? ""));
+    setMinNotional(String(c.min_notional ?? ""));
+    setMinMomentum(String(c.min_momentum ?? ""));
+    setMinTrajectoryAngle(String(c.min_trajectory_angle ?? ""));
+    setMinKineticEnergy(String(c.min_kinetic_energy ?? ""));
+    setVelReversalThreshold(String(c.velocity_reversal_threshold ?? ""));
+    setEnergyExhaustionThreshold(String(c.energy_exhaustion_threshold ?? ""));
+    setMaxHoldTimeMultiplier(String(c.max_hold_time_multiplier ?? ""));
+    setRiskPercentPerTrade(String(c.risk_percent_per_trade ?? ""));
+    setExecuteOnExchange(c.execute_on_exchange ?? true);
+    setUseAssetTiers(c.use_asset_tiers ?? true);
+    setUseVirtualBalance(c.use_virtual_balance ?? true);
+    setCfgMaxPositions(String(c.max_positions_per_user ?? ""));
+    setMinAccountBalance(String(c.min_account_balance ?? ""));
+    setShowRawJson(false);
     setConfigJson(JSON.stringify(strategy.config || {}, null, 2));
     setEntryJson(JSON.stringify(strategy.entry_conditions || {}, null, 2));
     setExitJson(JSON.stringify(strategy.exit_conditions || {}, null, 2));
@@ -99,8 +141,37 @@ export function StrategyDetailPanel({ strategy, onClose, onUpdate }: StrategyDet
       return;
     }
 
-    const config = parseJsonSafe(configJson);
-    if (config === null) { setError("Invalid JSON in config"); return; }
+    // Build config from structured fields (or raw JSON if in raw mode)
+    let config: Record<string, any> | null;
+    if (showRawJson) {
+      config = parseJsonSafe(configJson);
+      if (config === null) { setError("Invalid JSON in config"); return; }
+    } else {
+      const existing = parseJsonSafe(configJson) || {};
+      config = { ...existing };
+      // Signal params
+      if (minConfLong) config.min_confidence_long = Number(minConfLong);
+      if (minConfShort) config.min_confidence_short = Number(minConfShort);
+      if (targetProfitUsd) config.target_profit_usd = Number(targetProfitUsd);
+      if (minImpulsePct) config.min_impulse_pct = Number(minImpulsePct);
+      if (maxHoldMinutes) config.max_hold_minutes = Number(maxHoldMinutes);
+      if (minNotional) config.min_notional = Number(minNotional);
+      // Physics params
+      if (minMomentum) config.min_momentum = Number(minMomentum);
+      if (minTrajectoryAngle) config.min_trajectory_angle = Number(minTrajectoryAngle);
+      if (minKineticEnergy) config.min_kinetic_energy = Number(minKineticEnergy);
+      if (velReversalThreshold) config.velocity_reversal_threshold = Number(velReversalThreshold);
+      if (energyExhaustionThreshold) config.energy_exhaustion_threshold = Number(energyExhaustionThreshold);
+      if (maxHoldTimeMultiplier) config.max_hold_time_multiplier = Number(maxHoldTimeMultiplier);
+      if (riskPercentPerTrade) config.risk_percent_per_trade = Number(riskPercentPerTrade);
+      // Feature toggles
+      config.execute_on_exchange = executeOnExchange;
+      config.use_asset_tiers = useAssetTiers;
+      config.use_virtual_balance = useVirtualBalance;
+      // Position limits
+      if (cfgMaxPositions) config.max_positions_per_user = Number(cfgMaxPositions);
+      if (minAccountBalance) config.min_account_balance = Number(minAccountBalance);
+    }
     const entry = parseJsonSafe(entryJson);
     if (entry === null) { setError("Invalid JSON in entry conditions"); return; }
     const exit = parseJsonSafe(exitJson);
@@ -310,14 +381,77 @@ export function StrategyDetailPanel({ strategy, onClose, onUpdate }: StrategyDet
           )}
         </Section>
 
-        {/* Config */}
-        <Section title="Config">
+        {/* Config — Structured Fields */}
+        <Section title="Trading Parameters">
           {editing ? (
-            <textarea value={configJson} onChange={(e) => setConfigJson(e.target.value)} rows={6} className={cn(inputClass, "font-mono resize-none")} />
+            <div className="space-y-3">
+              {/* Signal Parameters */}
+              <div className="text-[8px] text-[#5a7090] font-bold uppercase tracking-widest pt-1">Signal Parameters</div>
+              <div className="grid grid-cols-3 gap-2">
+                <Field label="Min Conf Long"><input value={minConfLong} onChange={(e) => setMinConfLong(e.target.value)} type="number" placeholder="55" className={cn(inputClass, "font-mono")} /></Field>
+                <Field label="Min Conf Short"><input value={minConfShort} onChange={(e) => setMinConfShort(e.target.value)} type="number" placeholder="60" className={cn(inputClass, "font-mono")} /></Field>
+                <Field label="Target Profit $"><input value={targetProfitUsd} onChange={(e) => setTargetProfitUsd(e.target.value)} type="number" step="0.1" placeholder="0.50" className={cn(inputClass, "font-mono")} /></Field>
+                <Field label="Min Impulse %"><input value={minImpulsePct} onChange={(e) => setMinImpulsePct(e.target.value)} type="number" step="0.001" placeholder="0.001" className={cn(inputClass, "font-mono")} /></Field>
+                <Field label="Max Hold Min"><input value={maxHoldMinutes} onChange={(e) => setMaxHoldMinutes(e.target.value)} type="number" placeholder="5" className={cn(inputClass, "font-mono")} /></Field>
+                <Field label="Min Notional $"><input value={minNotional} onChange={(e) => setMinNotional(e.target.value)} type="number" placeholder="10" className={cn(inputClass, "font-mono")} /></Field>
+              </div>
+
+              {/* Physics (show for core_momentum) */}
+              {(type === "core_momentum" || type === "custom_config") && (
+                <>
+                  <div className="text-[8px] text-[#5a7090] font-bold uppercase tracking-widest pt-2">Physics Parameters</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field label="Min Momentum"><input value={minMomentum} onChange={(e) => setMinMomentum(e.target.value)} type="number" step="0.001" placeholder="0.001" className={cn(inputClass, "font-mono")} /></Field>
+                    <Field label="Min Angle"><input value={minTrajectoryAngle} onChange={(e) => setMinTrajectoryAngle(e.target.value)} type="number" placeholder="18" className={cn(inputClass, "font-mono")} /></Field>
+                    <Field label="Min Energy"><input value={minKineticEnergy} onChange={(e) => setMinKineticEnergy(e.target.value)} type="number" step="0.1" placeholder="0.3" className={cn(inputClass, "font-mono")} /></Field>
+                    <Field label="Vel Reversal"><input value={velReversalThreshold} onChange={(e) => setVelReversalThreshold(e.target.value)} type="number" step="0.001" placeholder="-0.001" className={cn(inputClass, "font-mono")} /></Field>
+                    <Field label="Energy Exhaust"><input value={energyExhaustionThreshold} onChange={(e) => setEnergyExhaustionThreshold(e.target.value)} type="number" step="0.1" placeholder="0.2" className={cn(inputClass, "font-mono")} /></Field>
+                    <Field label="Hold Mult"><input value={maxHoldTimeMultiplier} onChange={(e) => setMaxHoldTimeMultiplier(e.target.value)} type="number" step="0.1" placeholder="1.2" className={cn(inputClass, "font-mono")} /></Field>
+                    <Field label="Risk %/Trade"><input value={riskPercentPerTrade} onChange={(e) => setRiskPercentPerTrade(e.target.value)} type="number" step="0.01" placeholder="0.02" className={cn(inputClass, "font-mono")} /></Field>
+                  </div>
+                </>
+              )}
+
+              {/* Feature Toggles */}
+              <div className="text-[8px] text-[#5a7090] font-bold uppercase tracking-widest pt-2">Feature Toggles</div>
+              <div className="grid grid-cols-3 gap-x-4 gap-y-2">
+                <Toggle label="Execute on Exchange" checked={executeOnExchange} onChange={setExecuteOnExchange} />
+                <Toggle label="Use Asset Tiers" checked={useAssetTiers} onChange={setUseAssetTiers} />
+                <Toggle label="Use Virtual Balance" checked={useVirtualBalance} onChange={setUseVirtualBalance} />
+              </div>
+
+              {/* Position Limits */}
+              <div className="text-[8px] text-[#5a7090] font-bold uppercase tracking-widest pt-2">Position Limits</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Max Positions/User"><input value={cfgMaxPositions} onChange={(e) => setCfgMaxPositions(e.target.value)} type="number" placeholder="3" className={cn(inputClass, "font-mono")} /></Field>
+                <Field label="Min Balance $"><input value={minAccountBalance} onChange={(e) => setMinAccountBalance(e.target.value)} type="number" placeholder="100" className={cn(inputClass, "font-mono")} /></Field>
+              </div>
+
+              {/* Raw JSON Toggle */}
+              <button
+                onClick={() => setShowRawJson(!showRawJson)}
+                className="text-[8px] font-bold uppercase tracking-widest text-[#5a7090] hover:text-[#e8edf3] transition-colors pt-1"
+              >
+                {showRawJson ? "- Hide" : "+ Show"} Raw JSON
+              </button>
+              {showRawJson && (
+                <textarea value={configJson} onChange={(e) => setConfigJson(e.target.value)} rows={6} className={cn(inputClass, "font-mono resize-none")} />
+              )}
+            </div>
           ) : (
-            <pre className="text-[10px] text-[#8fa3b8] font-mono bg-[#0d1117] rounded-sm p-2.5 overflow-x-auto max-h-48 whitespace-pre-wrap">
-              {JSON.stringify(strategy.config || {}, null, 2)}
-            </pre>
+            <div className="space-y-2">
+              {cfg.min_confidence_long != null && <InfoRow label="Min Conf Long" value={String(cfg.min_confidence_long)} />}
+              {cfg.min_confidence_short != null && <InfoRow label="Min Conf Short" value={String(cfg.min_confidence_short)} />}
+              {cfg.target_profit_usd != null && <InfoRow label="Target Profit" value={`$${cfg.target_profit_usd}`} />}
+              {cfg.max_hold_minutes != null && <InfoRow label="Max Hold" value={`${cfg.max_hold_minutes}m`} />}
+              {cfg.max_positions_per_user != null && <InfoRow label="Max Positions" value={String(cfg.max_positions_per_user)} />}
+              {cfg.execute_on_exchange != null && <InfoRow label="Exchange Exec" value={cfg.execute_on_exchange ? "ON" : "OFF"} />}
+              {cfg.use_asset_tiers != null && <InfoRow label="Asset Tiers" value={cfg.use_asset_tiers ? "ON" : "OFF"} />}
+              {Object.keys(cfg).length === 0 && <span className="text-[10px] text-[#5a7090]">No config overrides (using defaults)</span>}
+              <pre className="text-[10px] text-[#8fa3b8] font-mono bg-[#0d1117] rounded-sm p-2.5 overflow-x-auto max-h-32 whitespace-pre-wrap mt-2">
+                {JSON.stringify(strategy.config || {}, null, 2)}
+              </pre>
+            </div>
           )}
         </Section>
 

@@ -1,65 +1,169 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { BotCard } from "@/components/dashboard/bot-card";
-import { AlertSidebar } from "@/components/dashboard/alert-sidebar";
-import { listBots, stopBot, pauseBot, startBot, deleteBot } from "@/lib/tradingEngineApi";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { listBots, stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve } from "@/lib/tradingEngineApi";
+import type { BotListFilters } from "@/lib/tradingEngineApi";
 import { getAlerts, acknowledgeAlert as ackAlertApi } from "@/lib/stellaAdminApi";
 import { useBotChannel, useAlertChannel } from "@/hooks/usePhoenixChannel";
 import { mapApiBotToUiBot, mapApiAlertToUiAlert, mapWsAlertToUiAlert } from "@/lib/api/mappers";
 import type { Bot, Alert } from "@/lib/types/dashboard";
-import { Search } from "lucide-react";
+import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye, Play, Pause, Square, Trash2, LayoutGrid, TableProperties } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { BotGridSkeleton } from "@/components/ui/skeleton";
+
+import { AreaChart, Area, LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+
+const STATUS_COLORS: Record<string, { dot: string; bg: string; text: string }> = {
+  running: { dot: "bg-[#00e5a0]", bg: "bg-[rgba(0,229,160,0.12)]", text: "text-[#00e5a0]" },
+  paused: { dot: "bg-[#f5a623]", bg: "bg-[rgba(245,166,35,0.12)]", text: "text-[#f5a623]" },
+  maintenance: { dot: "bg-[#f5a623]", bg: "bg-[rgba(245,166,35,0.12)]", text: "text-[#f5a623]" },
+  stopped: { dot: "bg-[#5a7090]", bg: "bg-[rgba(90,112,144,0.12)]", text: "text-[#5a7090]" },
+  error: { dot: "bg-[#ff4757]", bg: "bg-[rgba(255,71,87,0.12)]", text: "text-[#ff4757]" },
+  circuit_broken: { dot: "bg-[#ff4757]", bg: "bg-[rgba(255,71,87,0.12)]", text: "text-[#ff4757]" },
+  initializing: { dot: "bg-[#3d9df3]", bg: "bg-[rgba(61,157,243,0.12)]", text: "text-[#3d9df3]" },
+  stopping: { dot: "bg-[#3d9df3]", bg: "bg-[rgba(61,157,243,0.12)]", text: "text-[#3d9df3]" },
+};
+
+function getStatusStyle(status: string) {
+  return STATUS_COLORS[status] ?? STATUS_COLORS.stopped;
+}
 
 export default function BotFleetPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [selectedBot, setSelectedBot] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterExchange, setFilterExchange] = useState<string>("all");
+  const [filterStrategy, setFilterStrategy] = useState<string>("all");
   const [filterUser, setFilterUser] = useState<string>("all");
+  const [filterOwnerType, setFilterOwnerType] = useState<string>("all");
+  const [filterPnl, setFilterPnl] = useState<string>("all");
+  const [filterEquity, setFilterEquity] = useState<string>("all");
+  const [filterUptime, setFilterUptime] = useState<string>("all");
+  const [allExchanges, setAllExchanges] = useState<string[]>([]);
+  const [allStrategies, setAllStrategies] = useState<string[]>([]);
   const [killModal, setKillModal] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [runningBots, setRunningBots] = useState(0);
+  const [totalPnl, setTotalPnl] = useState(0);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [botEquityCurves, setBotEquityCurves] = useState<Record<string, { t: number; value: number }[]>>({});
+  const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const router = useRouter();
 
-  // Real-time WS hooks
   const { bots: wsBots } = useBotChannel();
   const { alerts: wsAlerts } = useAlertChannel();
 
-  // Load initial data from APIs
+  // Debounce search input
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery]);
+
+  // Fetch bots with server-side filters
+  const fetchBots = useCallback(async (showFullLoading = false) => {
+    if (showFullLoading) setLoading(true);
+    else setFetching(true);
+
+    try {
+      const filters: BotListFilters = {
+        page,
+        per_page: perPage,
+      };
+      if (filterStatus !== "all") filters.status = filterStatus;
+      if (filterExchange !== "all") filters.exchange = filterExchange;
+      if (filterStrategy !== "all") filters.strategy_type = filterStrategy;
+      if (filterUser !== "all") filters.user_id = filterUser;
+      if (filterOwnerType !== "all") filters.owner_type = filterOwnerType as 'user' | 'service_account';
+      if (debouncedSearch) filters.search = debouncedSearch;
+
+      // P&L filter
+      if (filterPnl === "profitable") filters.pnl_preset = "profitable";
+      else if (filterPnl === "losing") filters.pnl_preset = "losing";
+      else if (filterPnl === "breakeven") filters.pnl_preset = "breakeven";
+
+      // Equity range presets
+      if (filterEquity === "0-1k") { filters.equity_min = 0; filters.equity_max = 1000; }
+      else if (filterEquity === "1k-10k") { filters.equity_min = 1000; filters.equity_max = 10000; }
+      else if (filterEquity === "10k-50k") { filters.equity_min = 10000; filters.equity_max = 50000; }
+      else if (filterEquity === "50k+") { filters.equity_min = 50000; }
+
+      // Uptime presets (in seconds)
+      if (filterUptime === "1h") filters.uptime_min = 3600;
+      else if (filterUptime === "24h") filters.uptime_min = 86400;
+      else if (filterUptime === "7d") filters.uptime_min = 604800;
+      else if (filterUptime === "30d") filters.uptime_min = 2592000;
+
+      const result = await listBots(filters);
+      const raw = result.data as any;
+      const botsArr = Array.isArray(raw)
+        ? raw
+        : raw?.bots && Array.isArray(raw.bots)
+          ? raw.bots
+          : null;
+      if (botsArr) setBots(botsArr.map(mapApiBotToUiBot));
+      if (raw?.total_count !== undefined) setTotalCount(raw.total_count);
+      if (raw?.total_pages !== undefined) setTotalPages(raw.total_pages);
+      if (raw?.running_bots !== undefined) setRunningBots(raw.running_bots);
+      if (raw?.total_pnl !== undefined) setTotalPnl(raw.total_pnl);
+    } catch {
+      // API failed
+    } finally {
+      setLoading(false);
+      setFetching(false);
+    }
+  }, [page, perPage, filterStatus, filterExchange, filterStrategy, filterUser, filterOwnerType, filterPnl, filterEquity, filterUptime, debouncedSearch]);
+
+  // Initial load + re-fetch on filter/page change
+  useEffect(() => {
+    const isInitial = loading;
+    fetchBots(isInitial);
+  }, [fetchBots]);
+
+  // Load alerts + filter options once
   useEffect(() => {
     (async () => {
       try {
-        const [botsResult, alertsResult] = await Promise.all([
-          listBots(),
+        const [alertsResult, allBotsResult] = await Promise.all([
           getAlerts({ limit: 20 }),
+          listBots({ per_page: 200 }),
         ]);
-
-        // listBots returns { bots: [...], system: {...} } or a flat array
-        const raw = botsResult.data as any;
-        const botsArr = Array.isArray(raw)
-          ? raw
-          : raw?.bots && Array.isArray(raw.bots)
-            ? raw.bots
-            : null;
-        if (botsArr) {
-          setBots(botsArr.map(mapApiBotToUiBot));
-        }
-
-        if (alertsResult.data && Array.isArray(alertsResult.data)) {
+        if (alertsResult.data && Array.isArray(alertsResult.data))
           setAlerts(alertsResult.data.map(mapApiAlertToUiAlert));
-        }
+
+        // Extract unique filter values from full bot list
+        const allRaw = allBotsResult.data as any;
+        const allBotsArr = Array.isArray(allRaw)
+          ? allRaw
+          : allRaw?.bots && Array.isArray(allRaw.bots)
+            ? allRaw.bots
+            : [];
+        const exchanges = [...new Set(allBotsArr.map((b: any) => b.exchange).filter(Boolean))] as string[];
+        const strategies = [...new Set(allBotsArr.map((b: any) => b.strategy_type).filter(Boolean))] as string[];
+        setAllExchanges(exchanges.sort());
+        setAllStrategies(strategies.sort());
       } catch {
-        // API failed — lists stay empty
-      } finally {
-        setLoading(false);
+        // ignore
       }
     })();
   }, []);
 
-  // Overlay WS bot updates
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [filterStatus, filterExchange, filterStrategy, filterUser, filterOwnerType, filterPnl, filterEquity, filterUptime]);
+
   useEffect(() => {
     if (wsBots.length > 0) {
       setBots((prev) => {
@@ -68,7 +172,6 @@ export default function BotFleetPage() {
           const idx = updated.findIndex((b) => b.id === wsBot.id);
           const mapped = mapApiBotToUiBot(wsBot as any);
           if (idx >= 0) {
-            // Merge: keep fields WS doesn't provide
             updated[idx] = { ...updated[idx], ...mapped, user: updated[idx].user || mapped.user };
           } else {
             updated.push(mapped);
@@ -79,7 +182,6 @@ export default function BotFleetPage() {
     }
   }, [wsBots]);
 
-  // Prepend WS alerts
   useEffect(() => {
     if (wsAlerts.length > 0) {
       const latest = wsAlerts[0];
@@ -91,18 +193,17 @@ export default function BotFleetPage() {
     }
   }, [wsAlerts]);
 
-  // Derive unique users from bots for filter dropdown
   const botUsers = [...new Set(bots.map((b) => b.user).filter(Boolean))];
+  const unackedCount = alerts.filter((a) => !a.acked).length;
 
   const handleAck = async (id: number | string) => {
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, acked: true } : a))
-    );
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acked: true } : a)));
     await ackAlertApi(String(id)).catch(console.error);
   };
 
   const handleKill = (botId: string) => {
     setKillModal(botId);
+
   };
 
   const confirmKill = async () => {
@@ -116,48 +217,140 @@ export default function BotFleetPage() {
   const handleStart = async (botId: string) => {
     setBots((prev) => prev.map((b) => b.id === botId ? { ...b, status: 'initializing' } : b));
     await startBot(botId).catch(console.error);
+
   };
 
   const handlePause = async (botId: string) => {
     await pauseBot(botId).catch(console.error);
     setBots((prev) => prev.map((b) => b.id === botId ? { ...b, status: 'paused' } : b));
+
   };
 
   const handleResume = async (botId: string) => {
     await startBot(botId).catch(console.error);
     setBots((prev) => prev.map((b) => b.id === botId ? { ...b, status: 'running' } : b));
+
   };
 
   const handleDelete = (botId: string) => {
     setDeleteModal(botId);
+
   };
 
   const confirmDelete = async () => {
     if (deleteModal) {
-      const result = await deleteBot(deleteModal).catch(console.error);
-      if (result && !result.error) {
+      const result = await deleteBot(deleteModal).catch((err: Error) => {
+        console.error("Delete bot error:", err);
+        alert(`Failed to delete bot: ${err.message}`);
+        return null;
+      });
+      if (result && result.error) {
+        alert(`Failed to delete bot: ${result.error}`);
+      } else if (result && !result.error) {
         setBots((prev) => prev.filter((b) => b.id !== deleteModal));
+        setTotalCount((c) => c - 1);
       }
       setDeleteModal(null);
     }
   };
 
-  // Filter bots
-  const filteredBots = bots.filter((bot) => {
-    const matchesSearch =
-      bot.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      bot.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      bot.user.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = filterStatus === "all" || bot.status === filterStatus;
-    const matchesUser = filterUser === "all" || bot.user === filterUser;
-    return matchesSearch && matchesStatus && matchesUser;
-  });
+  // Fleet equity metrics (from current page bots — fleet-wide stats come from API)
+  const fleetMetrics = useMemo(() => {
+    const totalEquity = bots.reduce((sum, b) => sum + b.equity, 0);
+    const fleetPnl = totalPnl;
+    const totalPnlPct = totalEquity > 0 ? (fleetPnl / (totalEquity - fleetPnl || 1)) * 100 : 0;
+    const runningEquity = bots.filter((b) => b.status === "running").reduce((sum, b) => sum + b.equity, 0);
+    const topPerformers = [...bots].sort((a, b) => b.pnl - a.pnl).slice(0, 5);
+    return { totalEquity, totalPnl: fleetPnl, totalPnlPct, runningEquity, runningBots, topPerformers };
+  }, [bots, totalPnl, runningBots]);
+
+  // Fetch real equity curves for visible bots
+  useEffect(() => {
+    if (bots.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const curveMap: Record<string, { t: number; value: number }[]> = {};
+      const fetches = bots.map(async (bot) => {
+        try {
+          const res = await getBotEquityCurve(bot.id);
+          const raw = res.data as any;
+          const snapshots = Array.isArray(raw) ? raw : [];
+          if (snapshots.length > 0) {
+            curveMap[bot.id] = snapshots.map((s: any) => ({
+              t: new Date(s.snapshot_at ?? s.created_at ?? 0).getTime(),
+              value: Number(s.total_equity_usd ?? s.equity ?? 0),
+            }));
+          }
+        } catch {
+          // skip — no equity data for this bot
+        }
+      });
+      await Promise.all(fetches);
+      if (!cancelled) setBotEquityCurves(curveMap);
+    })();
+    return () => { cancelled = true; };
+  }, [bots]);
+
+  // Per-bot sparkline data — real equity curves, fallback to single-point from current equity
+  const botSparklines = useMemo(() => {
+    const map: Record<string, { t: number; value: number }[]> = {};
+    for (const bot of bots) {
+      if (botEquityCurves[bot.id] && botEquityCurves[bot.id].length > 1) {
+        map[bot.id] = botEquityCurves[bot.id];
+      } else {
+        // Fallback: show a flat line at current equity so the cell isn't empty
+        const now = Date.now();
+        map[bot.id] = [
+          { t: now - 3600000, value: bot.equity },
+          { t: now, value: bot.equity },
+        ];
+      }
+    }
+    return map;
+  }, [bots, botEquityCurves]);
+
+  // Fleet equity curve — aggregate all bot curves by timestamp
+  const fleetEquityCurve = useMemo(() => {
+    const allCurves = Object.values(botEquityCurves).filter((c) => c.length > 1);
+    if (allCurves.length === 0) {
+      // Fallback: single-point from current totals
+      const totalEquity = bots.reduce((sum, b) => sum + b.equity, 0);
+      if (totalEquity === 0) return [];
+      const now = Date.now();
+      return [
+        { t: now - 3600000, value: totalEquity },
+        { t: now, value: totalEquity },
+      ];
+    }
+
+    // Collect all unique timestamps across all bots, sorted
+    const tsSet = new Set<number>();
+    for (const curve of allCurves) {
+      for (const pt of curve) tsSet.add(pt.t);
+    }
+    const timestamps = [...tsSet].sort((a, b) => a - b);
+
+    // For each timestamp, sum the equity across all bots (carry-forward last known value)
+    return timestamps.map((ts) => {
+      let total = 0;
+      for (const curve of allCurves) {
+        // Find latest point <= ts
+        let val = 0;
+        for (const pt of curve) {
+          if (pt.t <= ts) val = pt.value;
+          else break;
+        }
+        total += val;
+      }
+      return { t: ts, value: total };
+    });
+  }, [bots, botEquityCurves]);
 
   if (loading) {
     return (
       <div className="flex h-full">
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
-          <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+          <div className="max-w-full mx-auto space-y-4 sm:space-y-6">
             <BotGridSkeleton count={12} />
           </div>
         </div>
@@ -168,8 +361,8 @@ export default function BotFleetPage() {
   return (
     <div className="flex h-full">
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
-        <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 min-w-0">
+        <div className="space-y-3">
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[#5a7090]">Dashboard</span>
@@ -178,96 +371,733 @@ export default function BotFleetPage() {
           </div>
 
           {/* Page Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-1">Bot Fleet</h1>
-              <p className="text-xs sm:text-sm text-[#8fa3b8]">
-                Manage and monitor all trading bots ({filteredBots.length} of {bots.length} shown)
+              <h1 className="text-lg font-bold text-foreground">Bot Fleet</h1>
+              <p className="text-[11px] text-[#8fa3b8]">
+                {bots.length} of {totalCount} bots shown
+                {fetching && <span className="ml-2 text-[#3d9df3]">updating…</span>}
               </p>
             </div>
-            <button
-              onClick={() => router.push("/dashboard/bot-fleet/new-bot")}
-              className="px-4 py-2 rounded bg-[#FFD700] text-black text-xs font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all whitespace-nowrap"
-            >
-              + Deploy New Bot
-            </button>
+            <div className="flex items-center gap-2">
+              {/* View Toggle */}
+              <div className="flex rounded border border-dark overflow-hidden">
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={cn(
+                    "p-1.5 transition-colors",
+                    viewMode === "grid"
+                      ? "bg-[rgba(255,215,0,0.1)] text-[#FFD700]"
+                      : "bg-dark-elevated text-[#5a7090] hover:text-[#8fa3b8]"
+                  )}
+                  title="Grid view"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setViewMode("table")}
+                  className={cn(
+                    "p-1.5 border-l border-dark transition-colors",
+                    viewMode === "table"
+                      ? "bg-[rgba(255,215,0,0.1)] text-[#FFD700]"
+                      : "bg-dark-elevated text-[#5a7090] hover:text-[#8fa3b8]"
+                  )}
+                  title="Table view"
+                >
+                  <TableProperties className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {/* Alerts Toggle */}
+              <button
+                onClick={() => setAlertsOpen(!alertsOpen)}
+                className={cn(
+                  "relative p-2 rounded border transition-all",
+                  alertsOpen
+                    ? "bg-[rgba(255,215,0,0.08)] border-[rgba(255,215,0,0.3)] text-[#FFD700]"
+                    : "bg-dark-elevated border-dark text-[#8fa3b8] hover:text-foreground hover:border-dark-2"
+                )}
+              >
+                <Bell className="h-4 w-4" />
+                {unackedCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-[#ff4757] text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
+                    {unackedCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => router.push("/dashboard/bot-fleet/new-bot")}
+                className="px-3 py-1.5 rounded bg-[#FFD700] text-black text-[10px] font-bold uppercase tracking-wider hover:bg-[#FFE44D] transition-all whitespace-nowrap"
+              >
+                + Deploy Bot
+              </button>
+            </div>
           </div>
 
           {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8fa3b8]" />
-              <input
-                type="text"
-                placeholder="Search bots by ID, name, or user..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-dark-elevated border border-dark rounded text-sm text-foreground placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
-              />
+          <div className="space-y-2">
+            {/* Row 1: Search + primary filters */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1 relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#8fa3b8]" />
+                <input
+                  type="text"
+                  placeholder="Search bots by name or ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 bg-dark-elevated border border-dark rounded text-xs text-foreground placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="px-2 py-1.5 bg-dark-elevated border border-dark rounded text-xs text-foreground focus:outline-none focus:border-dark-2"
+                >
+                  <option value="all">All Status</option>
+                  <option value="running">Running</option>
+                  <option value="paused">Paused</option>
+                  <option value="stopped">Stopped</option>
+                  <option value="initializing">Initializing</option>
+                  <option value="error">Error</option>
+                  <option value="circuit_broken">Circuit Broken</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="stopping">Stopping</option>
+                </select>
+                <select
+                  value={filterExchange}
+                  onChange={(e) => setFilterExchange(e.target.value)}
+                  className="px-2 py-1.5 bg-dark-elevated border border-dark rounded text-xs text-foreground focus:outline-none focus:border-dark-2"
+                >
+                  <option value="all">All Exchanges</option>
+                  {allExchanges.map((ex) => (
+                    <option key={ex} value={ex}>{ex}</option>
+                  ))}
+                </select>
+                <select
+                  value={filterStrategy}
+                  onChange={(e) => setFilterStrategy(e.target.value)}
+                  className="px-2 py-1.5 bg-dark-elevated border border-dark rounded text-xs text-foreground focus:outline-none focus:border-dark-2"
+                >
+                  <option value="all">All Strategies</option>
+                  {allStrategies.map((st) => (
+                    <option key={st} value={st}>{st.replace(/^core_/, "").replace(/_/g, " ")}</option>
+                  ))}
+                </select>
+                <select
+                  value={filterUser}
+                  onChange={(e) => setFilterUser(e.target.value)}
+                  className="px-2 py-1.5 bg-dark-elevated border border-dark rounded text-xs text-foreground focus:outline-none focus:border-dark-2"
+                >
+                  <option value="all">All Users</option>
+                  {botUsers.map((user) => (
+                    <option key={user} value={user}>{user}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="flex gap-2 sm:gap-3">
-              {/* Status Filter */}
+            {/* Row 2: Advanced filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] text-[#5a7090] uppercase tracking-wider font-medium">Filters:</span>
               <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="flex-1 sm:flex-none px-3 py-2 bg-dark-elevated border border-dark rounded text-sm text-foreground focus:outline-none focus:border-dark-2"
+                value={filterOwnerType}
+                onChange={(e) => setFilterOwnerType(e.target.value)}
+                className="px-2 py-1 bg-dark-elevated border border-dark rounded text-[11px] text-foreground focus:outline-none focus:border-dark-2"
               >
-                <option value="all">All Status</option>
-                <option value="running">Running</option>
-                <option value="paused">Paused</option>
-                <option value="stopped">Stopped</option>
-                <option value="initializing">Initializing</option>
-                <option value="error">Error</option>
-                <option value="circuit_broken">Circuit Broken</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="stopping">Stopping</option>
+                <option value="all">All Owner Types</option>
+                <option value="user">User-owned</option>
+                <option value="service_account">Service Account</option>
               </select>
-
-              {/* User Filter */}
               <select
-                value={filterUser}
-                onChange={(e) => setFilterUser(e.target.value)}
-                className="flex-1 sm:flex-none px-3 py-2 bg-dark-elevated border border-dark rounded text-sm text-foreground focus:outline-none focus:border-dark-2"
+                value={filterPnl}
+                onChange={(e) => setFilterPnl(e.target.value)}
+                className="px-2 py-1 bg-dark-elevated border border-dark rounded text-[11px] text-foreground focus:outline-none focus:border-dark-2"
               >
-                <option value="all">All Users</option>
-                {botUsers.map((user) => (
-                  <option key={user} value={user}>
-                    {user}
-                  </option>
+                <option value="all">All P&L</option>
+                <option value="profitable">Profitable (P&L &gt; 0)</option>
+                <option value="losing">Losing (P&L &lt; 0)</option>
+                <option value="breakeven">Breakeven (P&L = 0)</option>
+              </select>
+              <select
+                value={filterEquity}
+                onChange={(e) => setFilterEquity(e.target.value)}
+                className="px-2 py-1 bg-dark-elevated border border-dark rounded text-[11px] text-foreground focus:outline-none focus:border-dark-2"
+              >
+                <option value="all">All Equity</option>
+                <option value="0-1k">$0 – $1K</option>
+                <option value="1k-10k">$1K – $10K</option>
+                <option value="10k-50k">$10K – $50K</option>
+                <option value="50k+">$50K+</option>
+              </select>
+              <select
+                value={filterUptime}
+                onChange={(e) => setFilterUptime(e.target.value)}
+                className="px-2 py-1 bg-dark-elevated border border-dark rounded text-[11px] text-foreground focus:outline-none focus:border-dark-2"
+              >
+                <option value="all">Any Uptime</option>
+                <option value="1h">1h+</option>
+                <option value="24h">24h+</option>
+                <option value="7d">7d+</option>
+                <option value="30d">30d+</option>
+              </select>
+              {/* Clear all filters */}
+              {(filterStatus !== "all" || filterExchange !== "all" || filterStrategy !== "all" || filterUser !== "all" || filterOwnerType !== "all" || filterPnl !== "all" || filterEquity !== "all" || filterUptime !== "all" || searchQuery) && (
+                <button
+                  onClick={() => {
+                    setFilterStatus("all"); setFilterExchange("all"); setFilterStrategy("all");
+                    setFilterUser("all"); setFilterOwnerType("all"); setFilterPnl("all");
+                    setFilterEquity("all"); setFilterUptime("all"); setSearchQuery("");
+                  }}
+                  className="px-2 py-1 rounded border border-[rgba(255,71,87,0.3)] bg-[rgba(255,71,87,0.06)] text-[10px] text-[#ff4757] font-medium hover:bg-[rgba(255,71,87,0.12)] transition-colors"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Equity Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-2.5">
+            {/* Fleet Equity Chart */}
+            <div className="lg:col-span-2 bg-dark-elevated border border-dark rounded-md p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">Fleet Equity</span>
+                <span className="text-xs font-bold text-foreground font-mono">
+                  ${fleetMetrics.totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="h-[100px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={fleetEquityCurve}>
+                    <defs>
+                      <linearGradient id="fleetEquityGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={fleetMetrics.totalPnl >= 0 ? "#00e5a0" : "#ff4757"} stopOpacity={0.2} />
+                        <stop offset="100%" stopColor={fleetMetrics.totalPnl >= 0 ? "#00e5a0" : "#ff4757"} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <YAxis domain={["dataMin", "dataMax"]} hide />
+                    <Tooltip
+                      contentStyle={{ background: "#0d1520", border: "1px solid #1e2d40", borderRadius: 6, fontSize: 11 }}
+                      labelStyle={{ display: "none" }}
+                      formatter={(v: number) => [`$${v.toLocaleString()}`, "Equity"]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke={fleetMetrics.totalPnl >= 0 ? "#00e5a0" : "#ff4757"}
+                      strokeWidth={1.5}
+                      fill="url(#fleetEquityGrad)"
+                      dot={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Fleet P&L card */}
+            <div className="bg-dark-elevated border border-dark rounded-md p-3 flex flex-col justify-between">
+              <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">Fleet P&L</span>
+              <div>
+                <div className={cn("text-xl font-bold font-mono", fleetMetrics.totalPnl >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                  {fleetMetrics.totalPnl >= 0 ? "+" : ""}${fleetMetrics.totalPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </div>
+                <div className={cn("text-[11px] font-mono flex items-center gap-1", fleetMetrics.totalPnlPct >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                  {fleetMetrics.totalPnlPct >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  {fleetMetrics.totalPnlPct >= 0 ? "+" : ""}{fleetMetrics.totalPnlPct.toFixed(2)}%
+                </div>
+              </div>
+              <div className="flex justify-between text-[10px] mt-2">
+                <div>
+                  <div className="text-[#5a7090]">Running</div>
+                  <div className="text-foreground font-bold font-mono">{fleetMetrics.runningBots}</div>
+                </div>
+                <div>
+                  <div className="text-[#5a7090]">Active Equity</div>
+                  <div className="text-foreground font-bold font-mono">${(fleetMetrics.runningEquity / 1000).toFixed(1)}k</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Top Performers mini chart */}
+            <div className="bg-dark-elevated border border-dark rounded-md p-3">
+              <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">Top Performers</span>
+              <div className="mt-1.5 space-y-1.5">
+                {fleetMetrics.topPerformers.map((bot) => (
+                  <div key={bot.id} className="flex items-center gap-2">
+                    <div className="w-16 h-5 shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={botSparklines[bot.id] || []}>
+                          <Line type="monotone" dataKey="value" stroke={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"} strokeWidth={1} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <span className="text-[10px] text-[#8fa3b8] truncate flex-1">{bot.name || bot.id.slice(0, 8)}</span>
+                    <span className={cn("text-[10px] font-bold font-mono", bot.pnl >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                      {bot.pnl >= 0 ? "+" : ""}${bot.pnl.toLocaleString()}
+                    </span>
+                  </div>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 
-          {/* Bot Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
-            {filteredBots.map((bot) => (
-              <BotCard
-                key={bot.id}
-                bot={bot}
-                onKill={handleKill}
-                onPause={handlePause}
-                onResume={handleResume}
-                onStart={handleStart}
-                onDelete={handleDelete}
-                onSelect={setSelectedBot}
-                selected={selectedBot === bot.id}
-              />
-            ))}
-          </div>
+          {/* Grid View */}
+          {viewMode === "grid" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+              {bots.map((bot) => {
+                const s = getStatusStyle(bot.status);
+                const sparkData = botSparklines[bot.id] || [];
+                const isTransitioning = bot.status === "initializing" || bot.status === "stopping";
+                const isStopped = bot.status === "stopped" || bot.status === "error";
+                const isPaused = bot.status === "paused";
+                const isRunning = bot.status === "running" || bot.status === "circuit_broken" || bot.status === "maintenance";
 
-          {filteredBots.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-[#8fa3b8]">No bots match your filters</p>
+                return (
+                  <div
+                    key={bot.id}
+                    className="bg-dark-elevated border border-dark rounded-md p-3 hover:border-dark-2 transition-all group cursor-pointer"
+                    onClick={() => router.push(`/dashboard/bot/${bot.id}`)}
+                  >
+                    {/* Header: name + status */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-foreground truncate">{bot.name || bot.id.slice(0, 8)}</div>
+                        <div className="font-mono text-[9px] text-[#5a7090]">{bot.id.slice(0, 8)}…</div>
+                      </div>
+                      <span className={cn("inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm shrink-0", s.bg, s.text)}>
+                        <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />
+                        {bot.status === "initializing" && bot.initStep ? "INIT" : bot.status.replace("_", " ")}
+                      </span>
+                    </div>
+
+                    {/* Sparkline */}
+                    <div className="h-[40px] mb-2">
+                      {sparkData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={sparkData}>
+                            <defs>
+                              <linearGradient id={`grid-spark-${bot.id}`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"} stopOpacity={0.25} />
+                                <stop offset="100%" stopColor={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"} stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <Area
+                              type="monotone"
+                              dataKey="value"
+                              stroke={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"}
+                              strokeWidth={1.2}
+                              fill={`url(#grid-spark-${bot.id})`}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[9px] text-[#5a7090]">—</div>
+                      )}
+                    </div>
+
+                    {/* Strategy + Exchange + Market Type */}
+                    <div className="flex items-center justify-between text-[10px] mb-2">
+                      <span className="text-[#8fa3b8] truncate">{bot.strategy}</span>
+                      <div className="flex items-center gap-1 shrink-0 ml-1">
+                        {bot.marketType && bot.marketType !== "spot" && (
+                          <span className="px-1 py-0.5 rounded text-[8px] font-semibold uppercase bg-[rgba(61,157,243,0.15)] text-[#3d9df3]">
+                            {bot.marketType.replace("_", " ")}
+                          </span>
+                        )}
+                        <span className="text-[#5a7090]">{bot.exchange} / <span className="text-foreground">{bot.pair}</span></span>
+                      </div>
+                    </div>
+
+                    {/* P&L + Equity row */}
+                    <div className="flex items-end justify-between mb-2">
+                      <div>
+                        <div className="text-[9px] text-[#5a7090] uppercase tracking-wider">P&L</div>
+                        <div className={cn("text-sm font-bold font-mono", bot.pnl >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                          {bot.pnl >= 0 ? "+" : ""}${bot.pnl.toLocaleString()}
+                        </div>
+                        <div className={cn("text-[10px] font-mono", bot.pnlPct >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                          {bot.pnlPct >= 0 ? "+" : ""}{bot.pnlPct}%
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[9px] text-[#5a7090] uppercase tracking-wider">Equity</div>
+                        <div className="text-sm font-bold font-mono text-foreground">${bot.equity.toLocaleString()}</div>
+                      </div>
+                    </div>
+
+                    {/* Stats row */}
+                    <div className="grid grid-cols-4 gap-1 text-center text-[9px] mb-2 py-1.5 border-t border-dark">
+                      <div>
+                        <div className="text-[#5a7090]">Open</div>
+                        <div className="font-mono text-foreground font-medium">{bot.openPositions}</div>
+                      </div>
+                      <div>
+                        <div className="text-[#5a7090]">Trades</div>
+                        <div className="font-mono text-foreground font-medium">{bot.trades}</div>
+                      </div>
+                      <div>
+                        <div className="text-[#5a7090]">Win%</div>
+                        <div className="font-mono text-foreground font-medium">{bot.winRate}%</div>
+                      </div>
+                      <div>
+                        <div className="text-[#5a7090]">Uptime</div>
+                        <div className="font-mono text-foreground font-medium text-[8px]">{bot.uptime}</div>
+                      </div>
+                    </div>
+
+                    {/* User + Actions */}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-dark">
+                      <span className="text-[10px] text-[#5a7090] truncate max-w-[80px]">{bot.user}</span>
+                      <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => router.push(`/dashboard/bot/${bot.id}`)}
+                          title="Inspect"
+                          className="p-1 rounded text-[#5a7090] hover:text-[#FFD700] hover:bg-[rgba(255,215,0,0.08)] transition-colors"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </button>
+                        {(isStopped || isPaused) && (
+                          <button
+                            onClick={() => isPaused ? handleResume(bot.id) : handleStart(bot.id)}
+                            title={isPaused ? "Resume" : "Start"}
+                            className="p-1 rounded text-[#5a7090] hover:text-[#00e5a0] hover:bg-[rgba(0,229,160,0.08)] transition-colors"
+                          >
+                            <Play className="h-3 w-3" />
+                          </button>
+                        )}
+                        {isRunning && (
+                          <button
+                            onClick={() => handlePause(bot.id)}
+                            title="Pause"
+                            className="p-1 rounded text-[#5a7090] hover:text-[#f5a623] hover:bg-[rgba(245,166,35,0.08)] transition-colors"
+                          >
+                            <Pause className="h-3 w-3" />
+                          </button>
+                        )}
+                        {(isRunning || isPaused) && (
+                          <button
+                            onClick={() => handleKill(bot.id)}
+                            title="Stop"
+                            className="p-1 rounded text-[#5a7090] hover:text-[#ff4757] hover:bg-[rgba(255,71,87,0.08)] transition-colors"
+                          >
+                            <Square className="h-3 w-3" />
+                          </button>
+                        )}
+                        {isTransitioning && (
+                          <span className="px-1 text-[8px] text-[#3d9df3] font-mono">
+                            {bot.status === "initializing" ? "starting…" : "stopping…"}
+                          </span>
+                        )}
+                        {isStopped && (
+                          <button
+                            onClick={() => handleDelete(bot.id)}
+                            title="Delete"
+                            className="p-1 rounded text-[#5a7090] hover:text-[#ff4757] hover:bg-[rgba(255,71,87,0.08)] transition-colors"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {bots.length === 0 && (
+                <div className="col-span-full text-center py-8">
+                  <p className="text-xs text-[#8fa3b8]">No bots match your filters</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Table View */}
+          {viewMode === "table" && (
+          <div className="border border-dark rounded-md overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-dark-elevated border-b border-dark text-[10px] text-[#5a7090] uppercase tracking-wider">
+                    <th className="text-left py-2 px-3 font-medium">Bot</th>
+                    <th className="text-left py-2 px-3 font-medium">Status</th>
+                    <th className="text-center py-2 px-3 font-medium">Chart</th>
+                    <th className="text-left py-2 px-3 font-medium">Strategy</th>
+                    <th className="text-left py-2 px-3 font-medium">Exchange / Pair</th>
+                    <th className="text-left py-2 px-3 font-medium">User</th>
+                    <th className="text-right py-2 px-3 font-medium">P&L</th>
+                    <th className="text-right py-2 px-3 font-medium">Equity</th>
+                    <th className="text-center py-2 px-3 font-medium">Open</th>
+                    <th className="text-center py-2 px-3 font-medium">Trades</th>
+                    <th className="text-center py-2 px-3 font-medium">Win%</th>
+                    <th className="text-right py-2 px-3 font-medium">Uptime</th>
+                    <th className="text-center py-2 px-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bots.map((bot) => {
+                    const s = getStatusStyle(bot.status);
+                    const sparkData = botSparklines[bot.id] || [];
+                    const isTransitioning = bot.status === "initializing" || bot.status === "stopping";
+                    const isStopped = bot.status === "stopped" || bot.status === "error";
+                    const isPaused = bot.status === "paused";
+                    const isRunning = bot.status === "running" || bot.status === "circuit_broken" || bot.status === "maintenance";
+
+                    return (
+                      <tr
+                        key={bot.id}
+                        className="border-b border-dark hover:bg-dark-elevated transition-colors group"
+                      >
+                        {/* Bot name + id */}
+                        <td className="py-2 px-3">
+                          <div className="font-semibold text-foreground truncate max-w-[140px]">{bot.name || bot.id.slice(0, 8)}</div>
+                          <div className="font-mono text-[10px] text-[#5a7090]">{bot.id.slice(0, 8)}…</div>
+                        </td>
+                        {/* Status */}
+                        <td className="py-2 px-3">
+                          <span className={cn("inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm", s.bg, s.text)}>
+                            <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />
+                            {bot.status === "initializing" && bot.initStep
+                              ? `INIT`
+                              : bot.status.replace("_", " ")}
+                          </span>
+                        </td>
+                        {/* Mini sparkline chart */}
+                        <td className="py-2 px-1">
+                          <div className="w-[80px] h-[28px] mx-auto">
+                            {sparkData.length > 0 ? (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={sparkData}>
+                                  <defs>
+                                    <linearGradient id={`spark-${bot.id}`} x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"} stopOpacity={0.25} />
+                                      <stop offset="100%" stopColor={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"} stopOpacity={0} />
+                                    </linearGradient>
+                                  </defs>
+                                  <Area
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke={bot.pnl >= 0 ? "#00e5a0" : "#ff4757"}
+                                    strokeWidth={1.2}
+                                    fill={`url(#spark-${bot.id})`}
+                                    dot={false}
+                                    isAnimationActive={false}
+                                  />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[9px] text-[#5a7090]">—</div>
+                            )}
+                          </div>
+                        </td>
+                        {/* Strategy */}
+                        <td className="py-2 px-3 text-[#8fa3b8] truncate max-w-[120px]">{bot.strategy}</td>
+                        {/* Exchange / Pair / Market Type */}
+                        <td className="py-2 px-3">
+                          <span className="text-[#8fa3b8]">{bot.exchange}</span>
+                          <span className="text-[#5a7090] mx-1">/</span>
+                          <span className="text-foreground font-medium">{bot.pair}</span>
+                          {bot.marketType && bot.marketType !== "spot" && (
+                            <span className="ml-1.5 px-1 py-0.5 rounded text-[8px] font-semibold uppercase bg-[rgba(61,157,243,0.15)] text-[#3d9df3]">
+                              {bot.marketType.replace("_", " ")}
+                            </span>
+                          )}
+                        </td>
+                        {/* User */}
+                        <td className="py-2 px-3 text-[#8fa3b8] truncate max-w-[100px]">{bot.user}</td>
+                        {/* P&L */}
+                        <td className="py-2 px-3 text-right font-mono">
+                          <span className={cn("font-semibold", bot.pnl >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                            {bot.pnl >= 0 ? "+" : ""}${bot.pnl.toLocaleString()}
+                          </span>
+                          <div className={cn("text-[10px]", bot.pnlPct >= 0 ? "text-[#00e5a0]" : "text-[#ff4757]")}>
+                            {bot.pnlPct >= 0 ? "+" : ""}{bot.pnlPct}%
+                          </div>
+                        </td>
+                        {/* Equity */}
+                        <td className="py-2 px-3 text-right font-mono text-foreground">
+                          ${bot.equity.toLocaleString()}
+                        </td>
+                        {/* Open positions */}
+                        <td className="py-2 px-3 text-center font-mono text-foreground">{bot.openPositions}</td>
+                        {/* Trades */}
+                        <td className="py-2 px-3 text-center font-mono text-foreground">{bot.trades}</td>
+                        {/* Win rate */}
+                        <td className="py-2 px-3 text-center font-mono text-foreground">{bot.winRate}%</td>
+                        {/* Uptime */}
+                        <td className="py-2 px-3 text-right text-[#8fa3b8] font-mono">{bot.uptime}</td>
+                        {/* Actions — separate buttons */}
+                        <td className="py-2 px-2">
+                          <div className="flex items-center justify-center gap-1">
+                            {/* Inspect */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/bot/${bot.id}`); }}
+                              title="Inspect"
+                              className="p-1 rounded text-[#8fa3b8] hover:text-[#FFD700] hover:bg-[rgba(255,215,0,0.08)] transition-colors"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </button>
+
+                            {/* Start / Resume */}
+                            {(isStopped || isPaused) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); isPaused ? handleResume(bot.id) : handleStart(bot.id); }}
+                                title={isPaused ? "Resume" : "Start"}
+                                className="p-1 rounded text-[#8fa3b8] hover:text-[#00e5a0] hover:bg-[rgba(0,229,160,0.08)] transition-colors"
+                              >
+                                <Play className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
+                            {/* Pause */}
+                            {isRunning && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handlePause(bot.id); }}
+                                title="Pause"
+                                className="p-1 rounded text-[#8fa3b8] hover:text-[#f5a623] hover:bg-[rgba(245,166,35,0.08)] transition-colors"
+                              >
+                                <Pause className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
+                            {/* Stop */}
+                            {(isRunning || isPaused) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleKill(bot.id); }}
+                                title="Stop"
+                                className="p-1 rounded text-[#8fa3b8] hover:text-[#ff4757] hover:bg-[rgba(255,71,87,0.08)] transition-colors"
+                              >
+                                <Square className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
+                            {/* Transitioning indicator */}
+                            {isTransitioning && (
+                              <span className="px-1.5 py-0.5 text-[9px] text-[#3d9df3] font-mono">
+                                {bot.status === "initializing" ? "starting…" : "stopping…"}
+                              </span>
+                            )}
+
+                            {/* Delete (only when stopped/error) */}
+                            {isStopped && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDelete(bot.id); }}
+                                title="Delete"
+                                className="p-1 rounded text-[#8fa3b8] hover:text-[#ff4757] hover:bg-[rgba(255,71,87,0.08)] transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {bots.length === 0 && (
+              <div className="text-center py-8">
+                <p className="text-xs text-[#8fa3b8]">No bots match your filters</p>
+              </div>
+            )}
+          </div>
+          )}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-[#5a7090]">Per page</span>
+                <select
+                  value={perPage}
+                  onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
+                  className="px-1.5 py-1 bg-dark-elevated border border-dark rounded text-[10px] text-foreground focus:outline-none"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span className="text-[10px] text-[#5a7090]">{totalCount} total</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="p-1 rounded border border-dark bg-dark-elevated text-[#8fa3b8] hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="text-[10px] text-[#8fa3b8] font-mono px-2">
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="p-1 rounded border border-dark bg-dark-elevated text-[#8fa3b8] hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Alert Sidebar */}
-      <AlertSidebar alerts={alerts} onAck={handleAck} />
+      {/* Collapsible Alerts Sidebar */}
+      {alertsOpen && (
+        <div className="w-72 border-l border-dark flex flex-col bg-card shrink-0">
+          <div className="px-3 py-2 border-b border-dark flex justify-between items-center">
+            <span className="text-[10px] font-bold text-[#8fa3b8] uppercase tracking-wider">Alerts</span>
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1.5 text-[9px] font-mono">
+                <span className="text-[#ff4757]">{alerts.filter((a) => a.sev === "critical" && !a.acked).length} CRIT</span>
+                <span className="text-[#f5a623]">{alerts.filter((a) => a.sev === "warning" && !a.acked).length} WARN</span>
+              </div>
+              <button
+                onClick={() => setAlertsOpen(false)}
+                className="text-[#5a7090] hover:text-foreground transition-colors text-xs"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {alerts.map((alert) => (
+              <div
+                key={alert.id}
+                className={cn(
+                  "px-3 py-2 border-b border-dark flex gap-2 items-start transition-all hover:bg-dark-elevated",
+                  alert.acked && "opacity-40"
+                )}
+              >
+                <div
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1",
+                    alert.sev === "critical" && "bg-[#ff4757] shadow-[0_0_6px_#ff4757]",
+                    alert.sev === "warning" && "bg-[#f5a623]",
+                    alert.sev === "info" && "bg-blue-500"
+                  )}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] text-foreground leading-tight">{alert.msg}</div>
+                  <div className="text-[9px] text-[#5a7090] font-mono mt-0.5">{alert.time}</div>
+                </div>
+                {!alert.acked && (
+                  <button
+                    onClick={() => handleAck(alert.id)}
+                    className="text-[9px] text-[#5a7090] px-1.5 py-0.5 border border-dark rounded hover:text-[#FFD700] hover:border-[#FFD700] transition-colors flex-shrink-0"
+                  >
+                    ACK
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Kill Modal */}
       {killModal && (
@@ -307,7 +1137,7 @@ export default function BotFleetPage() {
           <div className="bg-card border border-dark rounded-lg p-6 w-96 space-y-4">
             <h3 className="text-sm font-bold text-[#ff4757]">Delete Bot Permanently</h3>
             <p className="text-xs text-[#8fa3b8] leading-relaxed">
-              This will permanently delete bot <span className="font-mono text-foreground">{deleteModal}</span> and all its associated data (logs, transitions, positions).
+              This will permanently delete bot <span className="font-mono text-foreground">{deleteModal}</span> and all its associated data.
               This action cannot be undone.
             </p>
             <div className="px-3 py-2 bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded text-[10px] text-[#ff4757]">

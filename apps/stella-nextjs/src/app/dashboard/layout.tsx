@@ -13,8 +13,8 @@ const dashboardTabs = [
   { label: "Bot Fleet", href: "/dashboard/bot-fleet" },
   { label: "Strategies", href: "/dashboard/strategies" },
   { label: "Alerts", href: "/dashboard/alerts", showBadge: true },
+  { label: "Operations Log", href: "/dashboard/incidents" },
   { label: "Infrastructure", href: "/dashboard/infra" },
-  { label: "Shift Handoff", href: "/dashboard/shift-handoff" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -75,29 +75,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] sm:h-[calc(100vh-64px)]">
       {/* Top Stats Bar */}
-      <div className="bg-card border-b border-dark px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 overflow-x-auto">
-        <div className="flex items-center gap-4 sm:gap-6 min-w-max">
-          <div className="flex items-center gap-2">
-            <span className="text-[#5a7090] text-[10px] sm:text-xs font-mono uppercase tracking-wider whitespace-nowrap">Total Equity</span>
-            <span className="text-foreground font-semibold text-sm sm:text-base">
+      <div className="bg-card border-b border-dark px-2 sm:px-3 md:px-4 py-1.5 overflow-x-auto">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-max">
+          <div className="flex items-center gap-1">
+            <span className="text-[#5a7090] text-[9px] sm:text-[10px] font-mono uppercase tracking-wider whitespace-nowrap">Total Equity</span>
+            <span className="text-foreground font-bold text-xs sm:text-sm">
               {totalEquity != null ? `$${(totalEquity / 1000).toFixed(1)}k` : '$--'}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[#5a7090] text-[10px] sm:text-xs font-mono uppercase tracking-wider whitespace-nowrap">24h P&L</span>
-            <span className={`font-semibold text-sm sm:text-base ${pnl24h != null && pnl24h >= 0 ? 'text-[#00e5a0]' : pnl24h != null ? 'text-[#ff4757]' : 'text-foreground'}`}>
+          <div className="flex items-center gap-1">
+            <span className="text-[#5a7090] text-[9px] sm:text-[10px] font-mono uppercase tracking-wider whitespace-nowrap">24h P&L</span>
+            <span className={`font-bold text-xs sm:text-sm ${pnl24h != null && pnl24h >= 0 ? 'text-[#00e5a0]' : pnl24h != null ? 'text-[#ff4757]' : 'text-foreground'}`}>
               {pnl24h != null ? `${pnl24h >= 0 ? '+' : ''}$${(pnl24h / 1000).toFixed(1)}k` : '$--'}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[#5a7090] text-[10px] sm:text-xs font-mono uppercase tracking-wider whitespace-nowrap">Active Bots</span>
-            <span className="text-foreground font-semibold text-sm sm:text-base">
+          <div className="flex items-center gap-1">
+            <span className="text-[#5a7090] text-[9px] sm:text-[10px] font-mono uppercase tracking-wider whitespace-nowrap">Active Bots</span>
+            <span className="text-foreground font-bold text-xs sm:text-sm">
               {activeBots != null && totalBots != null ? `${activeBots} / ${totalBots}` : '--'}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[#5a7090] text-[10px] sm:text-xs font-mono uppercase tracking-wider whitespace-nowrap">Open Trades</span>
-            <span className="text-foreground font-semibold text-sm sm:text-base">
+          <div className="flex items-center gap-1">
+            <span className="text-[#5a7090] text-[9px] sm:text-[10px] font-mono uppercase tracking-wider whitespace-nowrap">Open Trades</span>
+            <span className="text-foreground font-bold text-xs sm:text-sm">
               {openTrades != null ? openTrades : '--'}
             </span>
           </div>

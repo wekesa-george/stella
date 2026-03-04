@@ -21,6 +21,8 @@ interface ConfigOverrides {
   ws_url?: string;
   sandbox_base_url?: string;
   sandbox_ws_url?: string;
+  futures_base_url?: string;
+  futures_sandbox_base_url?: string;
   rate_limit_orders?: number;
   rate_limit_queries?: number;
   custom_headers?: Record<string, string>;
@@ -306,6 +308,8 @@ export default function ServiceAccountsPage() {
       ws_url: "",
       sandbox_base_url: "",
       sandbox_ws_url: "",
+      futures_base_url: "",
+      futures_sandbox_base_url: "",
       rate_limit_orders: "",
       rate_limit_queries: "",
     });
@@ -329,6 +333,8 @@ export default function ServiceAccountsPage() {
       ws_url: overrides.ws_url || "",
       sandbox_base_url: overrides.sandbox_base_url || "",
       sandbox_ws_url: overrides.sandbox_ws_url || "",
+      futures_base_url: overrides.futures_base_url || "",
+      futures_sandbox_base_url: overrides.futures_sandbox_base_url || "",
       rate_limit_orders: overrides.rate_limit_orders?.toString() || "",
       rate_limit_queries: overrides.rate_limit_queries?.toString() || "",
     });
@@ -355,6 +361,8 @@ export default function ServiceAccountsPage() {
     if (credForm.ws_url.trim()) config_overrides.ws_url = credForm.ws_url.trim();
     if (credForm.sandbox_base_url.trim()) config_overrides.sandbox_base_url = credForm.sandbox_base_url.trim();
     if (credForm.sandbox_ws_url.trim()) config_overrides.sandbox_ws_url = credForm.sandbox_ws_url.trim();
+    if (credForm.futures_base_url.trim()) config_overrides.futures_base_url = credForm.futures_base_url.trim();
+    if (credForm.futures_sandbox_base_url.trim()) config_overrides.futures_sandbox_base_url = credForm.futures_sandbox_base_url.trim();
     if (credForm.rate_limit_orders.trim()) config_overrides.rate_limit_orders = parseInt(credForm.rate_limit_orders);
     if (credForm.rate_limit_queries.trim()) config_overrides.rate_limit_queries = parseInt(credForm.rate_limit_queries);
 
@@ -757,6 +765,21 @@ export default function ServiceAccountsPage() {
                         <label className="font-mono text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Sandbox WS URL</label>
                         <input value={credForm.sandbox_ws_url} onChange={(e) => setCredForm((f) => ({ ...f, sandbox_ws_url: e.target.value }))} placeholder="wss://testnet.example.com" className="w-full bg-[#131920] border border-[#1e2d40] rounded-sm px-2.5 py-1.5 text-[10px] text-[#e8edf3] placeholder:text-[#3a5068] font-mono focus:outline-none focus:border-[#253550]" />
                       </div>
+                      {(() => {
+                        const selAdapter = getAdapter(credForm.adapter_id);
+                        const sf = selAdapter?.supportsFutures ?? selAdapter?.supports_futures;
+                        if (!sf) return null;
+                        return (<>
+                          <div>
+                            <label className="font-mono text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Futures Base URL</label>
+                            <input value={credForm.futures_base_url} onChange={(e) => setCredForm((f) => ({ ...f, futures_base_url: e.target.value }))} placeholder="https://fapi.binance.com/fapi" className="w-full bg-[#131920] border border-[#1e2d40] rounded-sm px-2.5 py-1.5 text-[10px] text-[#e8edf3] placeholder:text-[#3a5068] font-mono focus:outline-none focus:border-[#253550]" />
+                          </div>
+                          <div>
+                            <label className="font-mono text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Futures Sandbox Base URL</label>
+                            <input value={credForm.futures_sandbox_base_url} onChange={(e) => setCredForm((f) => ({ ...f, futures_sandbox_base_url: e.target.value }))} placeholder="https://testnet.binancefuture.com/fapi" className="w-full bg-[#131920] border border-[#1e2d40] rounded-sm px-2.5 py-1.5 text-[10px] text-[#e8edf3] placeholder:text-[#3a5068] font-mono focus:outline-none focus:border-[#253550]" />
+                          </div>
+                        </>);
+                      })()}
                       <div>
                         <label className="font-mono text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Rate Limit Orders (/min)</label>
                         <input type="number" value={credForm.rate_limit_orders} onChange={(e) => setCredForm((f) => ({ ...f, rate_limit_orders: e.target.value }))} placeholder="Default" className="w-full bg-[#131920] border border-[#1e2d40] rounded-sm px-2.5 py-1.5 text-[10px] text-[#e8edf3] placeholder:text-[#3a5068] font-mono focus:outline-none focus:border-[#253550]" />

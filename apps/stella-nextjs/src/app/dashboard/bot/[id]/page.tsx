@@ -8,7 +8,7 @@ import {
 } from "recharts";
 import {
   getBot, getBotPositions, getBotOrders, getBotEquityCurve, getBotBars,
-  startBot, pauseBot, stopBot, deleteBot, placeManualOrder
+  startBot, pauseBot, stopBot, deleteBot, placeManualOrder, updateBot
 } from "@/lib/tradingEngineApi";
 import { useBotChannel, usePositionChannel, useOrderChannel } from "@/hooks/usePhoenixChannel";
 import { mapApiBotToUiBot } from "@/lib/api/mappers";
@@ -732,8 +732,8 @@ function ManualOrderPanel({ bot, botId }: { bot: Bot; botId: string }) {
 }
 
 // ─── TAB 1: OVERVIEW ─────────────────────────────────────────────────────────
-function TabOverview({ bot, botId, equity, positions, onClosePosition, logEvents }: {
-  bot: Bot; botId: string; equity: any[]; positions: Position[]; onClosePosition: (p: Position) => void; logEvents: any[];
+function TabOverview({ bot, botId, equity, positions, onClosePosition, logEvents, onEditCapital }: {
+  bot: Bot; botId: string; equity: any[]; positions: Position[]; onClosePosition: (p: Position) => void; logEvents: any[]; onEditCapital?: () => void;
 }) {
   const lastEquity  = equity[equity.length - 1]?.value ?? 0;
   const firstEquity = equity[0]?.value ?? 0;
@@ -763,12 +763,14 @@ function TabOverview({ bot, botId, equity, positions, onClosePosition, logEvents
           ["Strategy", bot.strategy || "--"],
           ["Pair", bot.pair || "--"],
           ["Exchange", bot.exchange || "--"],
-          ["Capital", `$${(bot.allocatedCapital ?? 0).toLocaleString()}`],
+          ["Capital", `$${(bot.allocatedCapital ?? 0).toLocaleString()}`, true],
           ["User", bot.user || "--"],
           ["Created", bot.createdAt ? new Date(bot.createdAt).toLocaleDateString() : "--"],
-        ] as [string, string][]).map(([k, v]) => (
+        ] as [string, string, boolean?][]).map(([k, v, editable]) => (
           <span key={k} style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase" }}>
-            {k}: <span style={{ color:"var(--text1)", fontWeight:500 }}>{v}</span>
+            {k}: <span style={{ color: editable ? "var(--blue)" : "var(--text1)", fontWeight:500, cursor: editable ? "pointer" : "default" }}
+              onClick={editable ? onEditCapital : undefined}
+              title={editable ? "Click to edit" : undefined}>{v}{editable && <span style={{ fontSize:7, marginLeft:3, opacity:.6 }}>&#9998;</span>}</span>
           </span>
         ))}
       </div>
@@ -1282,6 +1284,9 @@ export default function BotDetailPage() {
   const [chartMode, setChartMode] = useState<"equity" | "candles">("equity");
   const [closeModal, setCloseModal] = useState<Position | null>(null);
   const [deleteModal, setDeleteModal] = useState(false);
+  const [capitalModal, setCapitalModal] = useState(false);
+  const [capitalInput, setCapitalInput] = useState("");
+  const [capitalSaving, setCapitalSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Candlestick state
@@ -1507,6 +1512,20 @@ export default function BotDetailPage() {
     setDeleteModal(false);
   };
 
+  const handleCapitalSave = async () => {
+    const amount = parseFloat(capitalInput);
+    if (isNaN(amount) || amount < 0) return;
+    setCapitalSaving(true);
+    try {
+      const result = await updateBot(botId, { allocated_capital: amount });
+      if (result && !result.error) {
+        setBot(prev => prev ? { ...prev, allocatedCapital: amount } : prev);
+      }
+    } catch (e) { console.error("Failed to update capital:", e); }
+    setCapitalSaving(false);
+    setCapitalModal(false);
+  };
+
   const handleClosePosition = (pos: Position) => { setCloseModal(pos); };
   const confirmClose = (posId: string) => {
     wsClosePosition(posId);
@@ -1621,12 +1640,14 @@ export default function BotDetailPage() {
                 ["Strategy", bot.strategy || "--"],
                 ["Pair", bot.pair || "--"],
                 ["Exchange", bot.exchange || "--"],
-                ["Capital", `$${(bot.allocatedCapital ?? 0).toLocaleString()}`],
+                ["Capital", `$${(bot.allocatedCapital ?? 0).toLocaleString()}`, true],
                 ["User", bot.user || "--"],
                 ["Created", bot.createdAt ? new Date(bot.createdAt).toLocaleDateString() : "--"],
-              ] as [string, string][]).map(([k, v]) => (
+              ] as [string, string, boolean?][]).map(([k, v, editable]) => (
                 <span key={k} style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase" }}>
-                  {k}: <span style={{ color:"var(--text1)", fontWeight:500 }}>{v}</span>
+                  {k}: <span style={{ color: editable ? "var(--blue)" : "var(--text1)", fontWeight:500, cursor: editable ? "pointer" : "default" }}
+                    onClick={editable ? () => { setCapitalInput(String(bot.allocatedCapital ?? 0)); setCapitalModal(true); } : undefined}
+                    title={editable ? "Click to edit" : undefined}>{v}{editable && <span style={{ fontSize:7, marginLeft:3, opacity:.6 }}>&#9998;</span>}</span>
                 </span>
               ))}
             </div>
@@ -1838,6 +1859,45 @@ export default function BotDetailPage() {
       )}
       {deleteModal && (
         <DeleteBotModal bot={bot} onClose={() => setDeleteModal(false)} onConfirm={handleDeleteBot} />
+      )}
+      {capitalModal && (
+        <div className="bdp-modal-backdrop" onClick={() => setCapitalModal(false)}>
+          <div className="bdp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth:360 }}>
+            <div className="bdp-modal-hdr">
+              <span className="bdp-modal-title">Adjust Allocated Capital</span>
+              <button className="bdp-modal-close" onClick={() => setCapitalModal(false)}><IcoClose size={14} /></button>
+            </div>
+            <div className="bdp-modal-body" style={{ display:"flex", flexDirection:"column", gap:12 }}>
+              <label style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--text2)", textTransform:"uppercase", letterSpacing:".06em" }}>
+                New Capital (USD)
+              </label>
+              <input
+                type="number"
+                value={capitalInput}
+                onChange={e => setCapitalInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleCapitalSave()}
+                autoFocus
+                min={0}
+                step={100}
+                style={{
+                  background:"var(--bg0)", border:"1px solid var(--border2)", borderRadius:4,
+                  padding:"8px 12px", fontFamily:"var(--mono)", fontSize:13, color:"var(--text0)",
+                  outline:"none", width:"100%"
+                }}
+              />
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:4 }}>
+                <button onClick={() => setCapitalModal(false)}
+                  style={{ padding:"6px 14px", borderRadius:3, border:"1px solid var(--border2)", background:"var(--bg2)", color:"var(--text1)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={handleCapitalSave} disabled={capitalSaving}
+                  style={{ padding:"6px 14px", borderRadius:3, border:"none", background:"var(--blue)", color:"#fff", fontFamily:"var(--mono)", fontSize:10, fontWeight:600, cursor:"pointer", opacity: capitalSaving ? 0.6 : 1 }}>
+                  {capitalSaving ? "Saving..." : "Update"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -712,6 +712,22 @@ export async function bulkToggleTradingPairs(
   });
 }
 
+// ==================== SETTINGS: ASSET TIER CONFIG ====================
+
+export async function getAssetTierConfig(adapterId: string) {
+  return request(`/settings/exchanges/${adapterId}/asset-tiers`);
+}
+
+export async function updateAssetTierConfig(
+  adapterId: string,
+  body: Record<string, any>,
+) {
+  return request(`/settings/exchanges/${adapterId}/asset-tiers`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
 // ==================== SETTINGS: INFRASTRUCTURE ====================
 
 export async function getInfrastructureStatus() {
@@ -788,4 +804,138 @@ export async function updateAlertType(
     method: 'PUT',
     body: JSON.stringify(body),
   });
+}
+
+// ==================== INCIDENTS ====================
+
+export async function getIncidents(params?: Record<string, any>) {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return request(`/incidents${qs ? `?${qs}` : ''}`);
+}
+
+export async function getIncident(id: string) {
+  return request(`/incidents/${id}`);
+}
+
+export async function createIncident(body: Record<string, any>) {
+  return request('/incidents', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateIncident(id: string, body: Record<string, any>) {
+  return request(`/incidents/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function escalateIncident(id: string) {
+  return request(`/incidents/${id}/escalate`, { method: 'POST' });
+}
+
+export async function resolveIncident(id: string, body?: Record<string, any>) {
+  return request(`/incidents/${id}/resolve`, {
+    method: 'POST',
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+export async function countersignIncident(id: string) {
+  return request(`/incidents/${id}/countersign`, { method: 'POST' });
+}
+
+export async function createIncidentCorrection(
+  id: string,
+  body: Record<string, any>,
+) {
+  return request(`/incidents/${id}/correction`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function logNilShift(body: Record<string, any>) {
+  return request('/incidents/nil-shift', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getOpenIncidents() {
+  return request('/incidents/open');
+}
+
+export async function getKillSwitchActivations(params?: {
+  page?: number;
+  limit?: number;
+}) {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return request(`/incidents/kill-switch${qs ? `?${qs}` : ''}`);
+}
+
+export async function createKillSwitch(
+  incidentId: string,
+  body: Record<string, any>,
+) {
+  return request(`/incidents/${incidentId}/kill-switch`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getRogueBotIncidents(params?: {
+  page?: number;
+  limit?: number;
+}) {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return request(`/incidents/rogue-bot${qs ? `?${qs}` : ''}`);
+}
+
+export async function createRogueBotIncident(
+  incidentId: string,
+  body: Record<string, any>,
+) {
+  return request(`/incidents/${incidentId}/rogue-bot`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getIncidentSummary(month: string) {
+  return request(`/incidents/summary?month=${month}`);
+}
+
+export async function getShiftRegister(month: string) {
+  return request(`/incidents/shift-register?month=${month}`);
+}
+
+export async function archiveIncidentMonth(month: string) {
+  return request('/incidents/archive', {
+    method: 'POST',
+    body: JSON.stringify({ month }),
+  });
+}
+
+export async function getArchivedMonths() {
+  return request('/incidents/archived');
 }

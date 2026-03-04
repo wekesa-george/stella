@@ -95,6 +95,7 @@ export interface BotSnapshot {
   last_trade_at?: string | null;
   created_at?: string | null;
   init_step?: string | null;
+  market_type?: string;
   // Legacy field aliases (kept for backward compat)
   pnl_usd?: number;
   trade_count?: number;

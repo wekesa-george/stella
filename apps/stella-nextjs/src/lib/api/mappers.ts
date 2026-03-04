@@ -59,6 +59,7 @@ export function mapApiBotToUiBot(api: Record<string, any>): Bot {
     ram: toNum(api.ram ?? api.ram_utilization_mb ?? api.memory ?? 0),
     uptime: `${hours}h ${minutes}m`,
     initStep: api.init_step ?? api.initStep ?? null,
+    marketType: api.market_type ?? api.marketType ?? 'spot',
   };
 }
 
@@ -108,6 +109,7 @@ export function mapWsBotSnapshotToUiBot(snap: BotSnapshot): Bot {
     ram: 0,
     uptime: `${hours}h ${minutes}m`,
     initStep: snap.init_step ?? null,
+    marketType: snap.market_type ?? 'spot',
   };
 }
 

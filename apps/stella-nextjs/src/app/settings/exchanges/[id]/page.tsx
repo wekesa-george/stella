@@ -13,6 +13,8 @@ import {
   syncAdapterPairs,
   toggleTradingPair,
   bulkToggleTradingPairs,
+  getAssetTierConfig,
+  updateAssetTierConfig,
 } from "@/lib/stellaAdminApi";
 import { TokenIcon } from "@web3icons/react/dynamic";
 
@@ -43,6 +45,10 @@ interface Adapter {
   wsUrl: string | null;
   sandboxBaseUrl: string | null;
   sandboxWsUrl: string | null;
+  futuresBaseUrl: string | null;
+  futuresSandboxBaseUrl: string | null;
+  futuresWsUrl: string | null;
+  futuresSandboxWsUrl: string | null;
   supportsSpot: boolean;
   supportsMargin: boolean;
   supportsFutures: boolean;
@@ -96,13 +102,14 @@ interface PairStats {
   delisted: number;
 }
 
-type TabKey = "overview" | "connectivity" | "credentials" | "trading-pairs";
+type TabKey = "overview" | "connectivity" | "credentials" | "trading-pairs" | "asset-tiers";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "connectivity", label: "Connectivity" },
   { key: "credentials", label: "API Credentials" },
   { key: "trading-pairs", label: "Trading Pairs" },
+  { key: "asset-tiers", label: "Asset Tiers" },
 ];
 
 // ── Page ─────────────────────────────────────────────────────────
@@ -145,6 +152,10 @@ export default function ExchangeDetailPage() {
         wsUrl: a.wsUrl || "",
         sandboxBaseUrl: a.sandboxBaseUrl || "",
         sandboxWsUrl: a.sandboxWsUrl || "",
+        futuresBaseUrl: a.futuresBaseUrl || "",
+        futuresSandboxBaseUrl: a.futuresSandboxBaseUrl || "",
+        futuresWsUrl: a.futuresWsUrl || "",
+        futuresSandboxWsUrl: a.futuresSandboxWsUrl || "",
         authModel: a.authModel || "api_key",
         rateLimitOrders: a.rateLimitOrders,
         rateLimitQueries: a.rateLimitQueries,
@@ -208,6 +219,10 @@ export default function ExchangeDetailPage() {
     if (payload.wsUrl === "") payload.wsUrl = null;
     if (payload.sandboxBaseUrl === "") payload.sandboxBaseUrl = null;
     if (payload.sandboxWsUrl === "") payload.sandboxWsUrl = null;
+    if (payload.futuresBaseUrl === "") payload.futuresBaseUrl = null;
+    if (payload.futuresSandboxBaseUrl === "") payload.futuresSandboxBaseUrl = null;
+    if (payload.futuresWsUrl === "") payload.futuresWsUrl = null;
+    if (payload.futuresSandboxWsUrl === "") payload.futuresSandboxWsUrl = null;
     if (payload.minOrderSizeUsd === "") payload.minOrderSizeUsd = null;
     if (payload.maxOrderSizeUsd === "") payload.maxOrderSizeUsd = null;
     if (payload.status !== "maintenance") delete payload.maintenanceMessage;
@@ -429,6 +444,9 @@ export default function ExchangeDetailPage() {
             onLoadMore={() => setPairShowCount((p) => p + 50)}
           />
         )}
+        {activeTab === "asset-tiers" && (
+          <AssetTiersTab adapterId={id} />
+        )}
       </div>
     </div>
   );
@@ -600,6 +618,47 @@ function ConnectivityTab({
           />
         </Field>
       </div>
+
+      {/* Futures Endpoints — only shown when adapter supports futures */}
+      {(editFields.supportsFutures ?? adapter.supportsFutures) && (
+        <div>
+          <div className="font-mono text-[9px] font-semibold uppercase tracking-wider text-[#5a7090] mb-2">Futures Endpoints</div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Field label="Futures Base URL">
+              <input
+                className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[10px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
+                value={editFields.futuresBaseUrl ?? ""}
+                onChange={(e) => setField("futuresBaseUrl", e.target.value)}
+                placeholder="https://fapi.binance.com/fapi"
+              />
+            </Field>
+            <Field label="Futures Sandbox Base URL">
+              <input
+                className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[10px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
+                value={editFields.futuresSandboxBaseUrl ?? ""}
+                onChange={(e) => setField("futuresSandboxBaseUrl", e.target.value)}
+                placeholder="https://testnet.binancefuture.com/fapi"
+              />
+            </Field>
+            <Field label="Futures WS URL">
+              <input
+                className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[10px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
+                value={editFields.futuresWsUrl ?? ""}
+                onChange={(e) => setField("futuresWsUrl", e.target.value)}
+                placeholder="wss://fstream.binance.com/ws"
+              />
+            </Field>
+            <Field label="Futures Sandbox WS URL">
+              <input
+                className="bg-[#131920] border border-[#1e2d40] text-[#e8edf3] font-mono text-[10px] px-2.5 py-1.5 rounded outline-none w-full transition-all focus:border-[#253550]"
+                value={editFields.futuresSandboxWsUrl ?? ""}
+                onChange={(e) => setField("futuresSandboxWsUrl", e.target.value)}
+                placeholder="wss://stream.binancefuture.com/ws"
+              />
+            </Field>
+          </div>
+        </div>
+      )}
 
       {/* Auth Model */}
       <Field label="Auth Model">
@@ -1095,6 +1154,290 @@ function ChipRow({ label, items }: { label: string; items: string[] }) {
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Tab 5: Asset Tiers ──────────────────────────────────────────
+
+interface TierConfig {
+  id?: string;
+  adapterId?: string;
+  tier1MinBalance: number;
+  tier2MinBalance: number;
+  tier3MinBalance: number;
+  tier4MinBalance: number;
+  tier1MaxPositionPct: number;
+  tier2MaxPositionPct: number;
+  tier3MaxPositionPct: number;
+  tier4MaxPositionPct: number;
+  tier1MaxPositions: number;
+  tier2MaxPositions: number;
+  tier3MaxPositions: number;
+  tier4MaxPositions: number;
+  tier1Assets: string[];
+  tier2Assets: string[];
+  tier3Assets: string[];
+  tier4Assets: string[];
+  maxPositionPct: number;
+  confidenceMultipliers: Record<string, number>;
+}
+
+const DEFAULT_TIER_CONFIG: TierConfig = {
+  tier1MinBalance: 100, tier2MinBalance: 300, tier3MinBalance: 1500, tier4MinBalance: 7500,
+  tier1MaxPositionPct: 0.12, tier2MaxPositionPct: 0.08, tier3MaxPositionPct: 0.05, tier4MaxPositionPct: 0.03,
+  tier1MaxPositions: 3, tier2MaxPositions: 5, tier3MaxPositions: 7, tier4MaxPositions: 10,
+  tier1Assets: [], tier2Assets: [], tier3Assets: [], tier4Assets: [],
+  maxPositionPct: 0.15,
+  confidenceMultipliers: { "90": 1.3, "80": 1.15, "70": 1.0, "60": 0.85, "default": 0.7 },
+};
+
+const TIER_META = [
+  { key: "1" as const, name: "Starter", color: "#00e5a0", desc: "$100-$299" },
+  { key: "2" as const, name: "Growth", color: "#3d9df3", desc: "$300-$1,499" },
+  { key: "3" as const, name: "Established", color: "#f5a623", desc: "$1.5K-$7.5K" },
+  { key: "4" as const, name: "Advanced", color: "#a855f7", desc: "$7,500+" },
+];
+
+function AssetTiersTab({ adapterId }: { adapterId: string }) {
+  const [config, setConfig] = useState<TierConfig>(DEFAULT_TIER_CONFIG);
+  const [original, setOriginal] = useState<TierConfig>(DEFAULT_TIER_CONFIG);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [assetInputs, setAssetInputs] = useState<Record<string, string>>({ "1": "", "2": "", "3": "", "4": "" });
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const res = await getAssetTierConfig(adapterId);
+      if (res.data) {
+        const d = res.data as any;
+        const loaded: TierConfig = {
+          id: d.id,
+          adapterId: d.adapterId,
+          tier1MinBalance: Number(d.tier1MinBalance), tier2MinBalance: Number(d.tier2MinBalance),
+          tier3MinBalance: Number(d.tier3MinBalance), tier4MinBalance: Number(d.tier4MinBalance),
+          tier1MaxPositionPct: Number(d.tier1MaxPositionPct), tier2MaxPositionPct: Number(d.tier2MaxPositionPct),
+          tier3MaxPositionPct: Number(d.tier3MaxPositionPct), tier4MaxPositionPct: Number(d.tier4MaxPositionPct),
+          tier1MaxPositions: Number(d.tier1MaxPositions), tier2MaxPositions: Number(d.tier2MaxPositions),
+          tier3MaxPositions: Number(d.tier3MaxPositions), tier4MaxPositions: Number(d.tier4MaxPositions),
+          tier1Assets: d.tier1Assets || [], tier2Assets: d.tier2Assets || [],
+          tier3Assets: d.tier3Assets || [], tier4Assets: d.tier4Assets || [],
+          maxPositionPct: Number(d.maxPositionPct),
+          confidenceMultipliers: d.confidenceMultipliers || DEFAULT_TIER_CONFIG.confidenceMultipliers,
+        };
+        setConfig(loaded);
+        setOriginal(loaded);
+      }
+      setLoading(false);
+    })();
+  }, [adapterId]);
+
+  const isDirty = JSON.stringify(config) !== JSON.stringify(original);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    const res = await updateAssetTierConfig(adapterId, config);
+    if (res.error) {
+      setError(res.error);
+    } else {
+      setOriginal({ ...config });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    }
+    setSaving(false);
+  };
+
+  const handleDiscard = () => {
+    setConfig({ ...original });
+    setError(null);
+  };
+
+  const setTierField = (tier: string, field: string, value: any) => {
+    setConfig((c) => ({ ...c, [`tier${tier}${field}`]: value }));
+  };
+
+  const addAsset = (tier: string) => {
+    const val = assetInputs[tier]?.trim().toUpperCase();
+    if (!val) return;
+    const key = `tier${tier}Assets` as keyof TierConfig;
+    const current = (config[key] as string[]) || [];
+    if (!current.includes(val)) {
+      setConfig((c) => ({ ...c, [key]: [...current, val] }));
+    }
+    setAssetInputs((a) => ({ ...a, [tier]: "" }));
+  };
+
+  const removeAsset = (tier: string, symbol: string) => {
+    const key = `tier${tier}Assets` as keyof TierConfig;
+    const current = (config[key] as string[]) || [];
+    setConfig((c) => ({ ...c, [key]: current.filter((s) => s !== symbol) }));
+  };
+
+  if (loading) {
+    return <div className="py-8 text-center text-[10px] text-[#5a7090] font-mono uppercase tracking-widest">Loading tier config...</div>;
+  }
+
+  const inputCls = "w-full bg-[#0d1117] border border-[#1e2d40] rounded px-3 py-2 text-xs text-[#e8edf3] font-mono focus:outline-none focus:border-[#3d9df3]";
+
+  return (
+    <div className="space-y-6 py-4">
+      {/* Tier Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {TIER_META.map((tier) => {
+          const balKey = `tier${tier.key}MinBalance` as keyof TierConfig;
+          const pctKey = `tier${tier.key}MaxPositionPct` as keyof TierConfig;
+          const posKey = `tier${tier.key}MaxPositions` as keyof TierConfig;
+          const assetsKey = `tier${tier.key}Assets` as keyof TierConfig;
+          const assets = (config[assetsKey] as string[]) || [];
+
+          return (
+            <div key={tier.key} className="bg-[#0f1923] border border-[#1e2d40] rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: tier.color }} />
+                <span className="text-xs font-bold text-[#e8edf3] uppercase tracking-wider">
+                  Tier {tier.key}: {tier.name}
+                </span>
+                <span className="text-[9px] text-[#5a7090] font-mono ml-auto">{tier.desc}</span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Min Balance ($)</label>
+                  <input
+                    type="number"
+                    value={config[balKey] as number}
+                    onChange={(e) => setTierField(tier.key, "MinBalance", Number(e.target.value))}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Max Pos %</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={((config[pctKey] as number) * 100).toFixed(1)}
+                    onChange={(e) => setTierField(tier.key, "MaxPositionPct", Number(e.target.value) / 100)}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Max Positions</label>
+                  <input
+                    type="number"
+                    value={config[posKey] as number}
+                    onChange={(e) => setTierField(tier.key, "MaxPositions", Number(e.target.value))}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              {/* Asset list */}
+              <div>
+                <label className="text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                  Assets ({assets.length})
+                </label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    placeholder="BTCUSDT"
+                    value={assetInputs[tier.key] || ""}
+                    onChange={(e) => setAssetInputs((a) => ({ ...a, [tier.key]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAsset(tier.key); } }}
+                    className={`${inputCls} flex-1`}
+                  />
+                  <button
+                    onClick={() => addAsset(tier.key)}
+                    className="px-3 py-1.5 rounded text-[10px] font-bold bg-[#1a2230] text-[#8fa3b8] border border-[#1e2d40] hover:border-[#3d9df3]"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                  {assets.map((s) => (
+                    <span key={s} className="inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#1a2230] border border-[#1e2d40]" style={{ color: tier.color }}>
+                      {s}
+                      <button onClick={() => removeAsset(tier.key, s)} className="text-[#5a7090] hover:text-[#ff4757] leading-none">&times;</button>
+                    </span>
+                  ))}
+                  {assets.length === 0 && <span className="text-[9px] text-[#3a5068] italic">No assets</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Global Settings */}
+      <div className="bg-[#0f1923] border border-[#1e2d40] rounded-lg p-4">
+        <h3 className="text-[10px] font-bold text-[#e8edf3] uppercase tracking-wider mb-3">Global Settings</h3>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div>
+            <label className="text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">Max Position % Cap</label>
+            <input
+              type="number"
+              step="0.01"
+              value={(config.maxPositionPct * 100).toFixed(1)}
+              onChange={(e) => setConfig((c) => ({ ...c, maxPositionPct: Number(e.target.value) / 100 }))}
+              className={inputCls}
+            />
+          </div>
+          {[
+            { key: "90", label: "Conf 90%+" },
+            { key: "80", label: "Conf 80%+" },
+            { key: "70", label: "Conf 70%+" },
+            { key: "60", label: "Conf 60%+" },
+            { key: "default", label: "Default" },
+          ].map(({ key, label }) => (
+            <div key={key}>
+              <label className="text-[8px] text-[#5a7090] uppercase tracking-widest block mb-1">{label}</label>
+              <input
+                type="number"
+                step="0.05"
+                value={config.confidenceMultipliers[key] ?? 1.0}
+                onChange={(e) => setConfig((c) => ({
+                  ...c,
+                  confidenceMultipliers: { ...c.confidenceMultipliers, [key]: Number(e.target.value) },
+                }))}
+                className={inputCls}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Error / Success */}
+      {error && (
+        <div className="text-xs text-[#ff4757] bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded px-3 py-2">{error}</div>
+      )}
+      {success && (
+        <div className="text-xs text-[#00e5a0] bg-[rgba(0,229,160,0.08)] border border-[rgba(0,229,160,0.2)] rounded px-3 py-2">
+          Tier config saved successfully
+        </div>
+      )}
+
+      {/* Save / Discard */}
+      {isDirty && (
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={handleDiscard}
+            className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-[#1e2d40] hover:border-[#3d9df3] transition-all"
+          >
+            Discard
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-5 py-2 rounded text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

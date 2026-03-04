@@ -80,6 +80,7 @@ export async function createBot(config: {
   user_id: string;
   name?: string;
   strategy?: string;
+  market_type?: 'spot' | 'usds_futures' | 'coinm_futures' | 'margin';
   [key: string]: any;
 }) {
   return request('/api/bots', {
@@ -88,8 +89,34 @@ export async function createBot(config: {
   });
 }
 
-export async function listBots() {
-  return request('/api/bots');
+export interface BotListFilters {
+  status?: string;
+  exchange?: string;
+  strategy_type?: string;
+  user_id?: string;
+  search?: string;
+  owner_type?: 'user' | 'service_account';
+  equity_min?: number;
+  equity_max?: number;
+  pnl_min?: number;
+  pnl_max?: number;
+  pnl_preset?: 'profitable' | 'losing' | 'breakeven';
+  uptime_min?: number;
+  sort_by?: string;
+  sort_dir?: 'asc' | 'desc';
+  page?: number;
+  per_page?: number;
+}
+
+export async function listBots(filters?: BotListFilters) {
+  const params = new URLSearchParams();
+  if (filters) {
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== '' && v !== 'all') params.set(k, String(v));
+    });
+  }
+  const qs = params.toString();
+  return request(`/api/bots${qs ? `?${qs}` : ''}`);
 }
 
 export async function listUserBots(userId: string) {
@@ -157,6 +184,7 @@ export async function createSystemBot(config: {
 export async function deployBot(config: {
   user_id: string;
   name?: string;
+  market_type?: 'spot' | 'usds_futures' | 'coinm_futures' | 'margin';
   [key: string]: any;
 }) {
   return request('/api/bots/deploy', {

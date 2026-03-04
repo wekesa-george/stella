@@ -10,7 +10,7 @@ import {
   listUserCredentials,
   listServiceAccountCredentials,
 } from "@/lib/tradingEngineApi";
-import { getUsers, getAdapterTradingPairs } from "@/lib/stellaAdminApi";
+import { getUsers, getAdapterTradingPairs, getSettingsExchanges } from "@/lib/stellaAdminApi";
 
 import { ArrowLeft, Search, Check, AlertCircle, Loader2 } from "lucide-react";
 import { TokenIcon } from "@web3icons/react/dynamic";
@@ -64,6 +64,20 @@ interface CredentialRow {
   adapter_name?: string;
 }
 
+interface AdapterInfo {
+  id: string;
+  code: string;
+  name: string;
+  supportsSpot?: boolean;
+  supports_spot?: boolean;
+  supportsFutures?: boolean;
+  supports_futures?: boolean;
+  supportsMargin?: boolean;
+  supports_margin?: boolean;
+}
+
+type MarketType = "spot" | "usds_futures" | "coinm_futures" | "margin";
+
 // ── Constants ────────────────────────────────────────────────────
 
 const STEPS = [
@@ -105,10 +119,12 @@ export default function NewBotPage() {
   const [saLoading, setSaLoading] = useState(false);
   const [selectedSaId, setSelectedSaId] = useState("");
 
-  // Step 3 — Credential
+  // Step 3 — Credential + Market Type
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [selectedCredentialId, setSelectedCredentialId] = useState("");
+  const [adapters, setAdapters] = useState<AdapterInfo[]>([]);
+  const [marketType, setMarketType] = useState<MarketType>("spot");
 
   // Step 4 — Trading Pairs
   const [tradingPairs, setTradingPairs] = useState<TradingPairRow[]>([]);
@@ -135,8 +151,24 @@ export default function NewBotPage() {
   const selectedStrategy = strategies.find((s) => s.id === selectedStrategyId);
   const selectedUser = users.find((u) => u.id === selectedUserId);
   const selectedSa = serviceAccounts.find((sa) => sa.id === selectedSaId);
+  const selectedAdapterRaw = selectedCredential ? adapters.find((a) => a.id === selectedCredential.adapter_id) : undefined;
+  const adapterFlags = selectedAdapterRaw ? {
+    spot: selectedAdapterRaw.supportsSpot ?? selectedAdapterRaw.supports_spot ?? false,
+    futures: selectedAdapterRaw.supportsFutures ?? selectedAdapterRaw.supports_futures ?? false,
+    margin: selectedAdapterRaw.supportsMargin ?? selectedAdapterRaw.supports_margin ?? false,
+  } : null;
 
   // ── Data loading ───────────────────────────────────────────────
+
+  // Load adapters once
+  useEffect(() => {
+    getSettingsExchanges().then((res) => {
+      if (res.data) {
+        const list = Array.isArray(res.data) ? res.data : (res.data as any).items || [];
+        setAdapters(list);
+      }
+    });
+  }, []);
 
   // Load users (debounced search)
   useEffect(() => {
@@ -171,6 +203,7 @@ export default function NewBotPage() {
   useEffect(() => {
     setCredentials([]);
     setSelectedCredentialId("");
+    setMarketType("spot");
     setTradingPairs([]);
     setSelectedPair("");
 
@@ -252,7 +285,7 @@ export default function NewBotPage() {
       case 2:
         return ownerType === "user" ? !!selectedUserId : !!selectedSaId;
       case 3:
-        return !!selectedCredentialId;
+        return !!selectedCredentialId && !!marketType;
       case 4:
         return !!selectedPair;
       case 5:
@@ -290,6 +323,7 @@ export default function NewBotPage() {
         strategy_id: selectedStrategyId || undefined,
         credential_id: selectedCredentialId || undefined,
         allocated_capital: allocatedCapital ? Number(allocatedCapital) : undefined,
+        market_type: marketType,
       };
 
       let result;
@@ -561,7 +595,7 @@ export default function NewBotPage() {
                   {credentials.map((cred) => (
                     <button
                       key={cred.id}
-                      onClick={() => setSelectedCredentialId(cred.id)}
+                      onClick={() => { setSelectedCredentialId(cred.id); setMarketType("spot"); }}
                       className={`w-full p-4 rounded-md border text-left transition-all ${
                         selectedCredentialId === cred.id
                           ? "border-[#FFD700] bg-[rgba(255,215,0,0.06)]"
@@ -605,6 +639,68 @@ export default function NewBotPage() {
                   ))}
                 </div>
               )}
+
+              {/* Market Type selector — shown after credential is selected */}
+              {selectedCredentialId && adapterFlags && (
+                <div className="mt-4">
+                  <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-2">
+                    Market Type
+                  </label>
+                  <div className="flex gap-2 flex-wrap">
+                    {adapterFlags.spot && (
+                      <button
+                        onClick={() => setMarketType("spot")}
+                        className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                          marketType === "spot"
+                            ? "border-[#FFD700] bg-[rgba(255,215,0,0.1)] text-[#FFD700]"
+                            : "border-dark text-[#5a7090] hover:border-dark-2"
+                        }`}
+                      >
+                        Spot
+                      </button>
+                    )}
+                    {adapterFlags.futures && (
+                      <button
+                        onClick={() => setMarketType("usds_futures")}
+                        className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                          marketType === "usds_futures"
+                            ? "border-[#FFD700] bg-[rgba(255,215,0,0.1)] text-[#FFD700]"
+                            : "border-dark text-[#5a7090] hover:border-dark-2"
+                        }`}
+                      >
+                        USDS-M Futures
+                      </button>
+                    )}
+                    {adapterFlags.futures && (
+                      <button
+                        onClick={() => setMarketType("coinm_futures")}
+                        className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                          marketType === "coinm_futures"
+                            ? "border-[#FFD700] bg-[rgba(255,215,0,0.1)] text-[#FFD700]"
+                            : "border-dark text-[#5a7090] hover:border-dark-2"
+                        }`}
+                      >
+                        COIN-M Futures
+                      </button>
+                    )}
+                    {adapterFlags.margin && (
+                      <button
+                        onClick={() => setMarketType("margin")}
+                        className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                          marketType === "margin"
+                            ? "border-[#FFD700] bg-[rgba(255,215,0,0.1)] text-[#FFD700]"
+                            : "border-dark text-[#5a7090] hover:border-dark-2"
+                        }`}
+                      >
+                        Margin
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-[#5a7090] mt-1.5">
+                    Same API key works across all market types — select which endpoint to trade on.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -643,7 +739,22 @@ export default function NewBotPage() {
                   {filteredPairs.map((tp) => (
                     <button
                       key={tp.id}
-                      onClick={() => setSelectedPair(tp.symbol)}
+                      onClick={() => {
+                        setSelectedPair(tp.symbol);
+                        // Auto-infer market type from the pair's tag
+                        if (tp.marketType) {
+                          const mt = tp.marketType.toLowerCase();
+                          if (mt.includes("future") || mt === "usds_futures" || mt === "linear") {
+                            setMarketType("usds_futures");
+                          } else if (mt === "coinm_futures" || mt === "inverse") {
+                            setMarketType("coinm_futures");
+                          } else if (mt === "margin") {
+                            setMarketType("margin");
+                          } else if (mt === "spot") {
+                            setMarketType("spot");
+                          }
+                        }
+                      }}
                       className={`w-full px-3 py-2.5 flex items-center justify-between transition-all ${
                         selectedPair === tp.symbol
                           ? "bg-[rgba(255,215,0,0.06)]"
@@ -803,6 +914,14 @@ export default function NewBotPage() {
                       selectedCredential
                         ? `${selectedCredential.label || selectedCredential.id.slice(0, 8)} ${selectedCredential.is_sandbox ? "[sandbox]" : ""}`
                         : "—"
+                    }
+                  />
+                  <SummaryRow
+                    label="Market Type"
+                    value={
+                      marketType === "usds_futures" ? "USDS-M Futures" :
+                      marketType === "coinm_futures" ? "COIN-M Futures" :
+                      marketType === "margin" ? "Margin" : "Spot"
                     }
                   />
                   <SummaryRow
