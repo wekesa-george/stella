@@ -28,6 +28,12 @@ export class InviteAdminDto {
   @IsString()
   phone?: string;
 
+  @ApiPropertyOptional({ description: 'Password for the new user. If omitted, a temporary password is generated.' })
+  @IsOptional()
+  @IsString()
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
+  password?: string;
+
   @ApiPropertyOptional({
     description: 'Role IDs to assign on creation',
     example: ['uuid-1', 'uuid-2'],

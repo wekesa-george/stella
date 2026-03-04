@@ -334,19 +334,19 @@ export class AdminUsersService {
       await queryRunner.manager.save(adminUser);
 
       // Step 2: Create user in Logto
-      const tempPassword = this.generateTemporaryPassword();
+      const password = dto.password || this.generateTemporaryPassword();
       const logtoUser = await this.logtoManagement.createUser({
         primaryEmail: dto.email,
         username: dto.username,
         name: `${dto.firstName} ${dto.lastName}`,
-        password: tempPassword,
+        password,
         customData: { stellaAdminId: adminUser.id },
       });
       logtoUserId = logtoUser.id;
 
       // Step 3: Link accounts
       adminUser.logtoUserId = logtoUser.id;
-      adminUser.forcePasswordChange = true;
+      adminUser.forcePasswordChange = !dto.password;
       await queryRunner.manager.save(adminUser);
 
       // Step 4: Assign roles if provided
