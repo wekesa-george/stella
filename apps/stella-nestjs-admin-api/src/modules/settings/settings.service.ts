@@ -41,6 +41,8 @@ import { UpdateChannelDto } from './dto/update-channel.dto';
 import { UpdateRoutingDto } from './dto/update-routing.dto';
 import { UpdateNotificationSettingsDto } from './dto/update-notification-settings.dto';
 import { UpdateAlertTypeDto } from './dto/update-alert-type.dto';
+import { UpdateAssetTierConfigDto } from './dto/update-asset-tier-config.dto';
+import { AssetTierConfig } from './entities/asset-tier-config.entity';
 import { randomBytes } from 'crypto';
 import { CoolifyService } from '../../common/services/coolify.service';
 import { TradingPairSyncService } from './trading-pair-sync.service';
@@ -94,6 +96,8 @@ export class SettingsService {
     private readonly notifSettingsRepo: Repository<NotificationSettings>,
     @InjectRepository(AlertType)
     private readonly alertTypeRepo: Repository<AlertType>,
+    @InjectRepository(AssetTierConfig)
+    private readonly assetTierConfigRepo: Repository<AssetTierConfig>,
     private readonly coolifyService: CoolifyService,
     private readonly tradingPairSyncService: TradingPairSyncService,
   ) {}
@@ -723,6 +727,43 @@ export class SettingsService {
 
     await this.alertTypeRepo.update(id, { isEnabled: dto.isEnabled });
     return this.alertTypeRepo.findOneBy({ id });
+  }
+
+  // === Asset Tier Config ===
+
+  async getAssetTierConfig(adapterId: string) {
+    let config = await this.assetTierConfigRepo.findOneBy({ adapterId });
+
+    if (!config) {
+      // Auto-create with defaults if adapter exists
+      const adapter = await this.adapterRepo.findOneBy({ id: adapterId });
+      if (!adapter) throw new NotFoundException('Adapter not found');
+
+      config = this.assetTierConfigRepo.create({ adapterId });
+      config = await this.assetTierConfigRepo.save(config);
+    }
+
+    return config;
+  }
+
+  async updateAssetTierConfig(adapterId: string, dto: UpdateAssetTierConfigDto) {
+    let config = await this.assetTierConfigRepo.findOneBy({ adapterId });
+
+    if (!config) {
+      const adapter = await this.adapterRepo.findOneBy({ id: adapterId });
+      if (!adapter) throw new NotFoundException('Adapter not found');
+
+      config = this.assetTierConfigRepo.create({ adapterId });
+    }
+
+    // Apply all provided fields
+    Object.entries(dto).forEach(([key, value]) => {
+      if (value !== undefined) {
+        (config as any)[key] = value;
+      }
+    });
+
+    return this.assetTierConfigRepo.save(config);
   }
 
   private maskUrl(url: string): string {

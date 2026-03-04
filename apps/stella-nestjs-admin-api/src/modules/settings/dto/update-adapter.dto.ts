@@ -28,6 +28,22 @@ export class UpdateAdapterDto {
 
   @IsOptional()
   @IsString()
+  futuresBaseUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  futuresSandboxBaseUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  futuresWsUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  futuresSandboxWsUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
   authModel?: string;
 
   @IsOptional()

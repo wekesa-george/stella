@@ -25,6 +25,7 @@ import { NotificationChannel } from './entities/notification-channel.entity';
 import { NotificationRouting } from './entities/notification-routing.entity';
 import { NotificationSettings } from './entities/notification-settings.entity';
 import { AlertType } from './entities/alert-type.entity';
+import { AssetTierConfig } from './entities/asset-tier-config.entity';
 import { TradingPairSyncService } from './trading-pair-sync.service';
 
 @Module({
@@ -53,6 +54,7 @@ import { TradingPairSyncService } from './trading-pair-sync.service';
       NotificationRouting,
       NotificationSettings,
       AlertType,
+      AssetTierConfig,
     ]),
   ],
   controllers: [SettingsController],

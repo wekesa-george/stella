@@ -30,6 +30,7 @@ import { UpdateChannelDto } from './dto/update-channel.dto';
 import { UpdateRoutingDto } from './dto/update-routing.dto';
 import { UpdateNotificationSettingsDto } from './dto/update-notification-settings.dto';
 import { UpdateAlertTypeDto } from './dto/update-alert-type.dto';
+import { UpdateAssetTierConfigDto } from './dto/update-asset-tier-config.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -297,6 +298,25 @@ export class SettingsController {
     @Body() dto: BulkToggleTradingPairsDto,
   ) {
     return this.tradingPairSyncService.bulkTogglePairs(id, dto.pairIds, dto.isActive);
+  }
+
+  // === Asset Tier Config ===
+
+  @Get('exchanges/:id/asset-tiers')
+  @RequirePermissions('exchanges.view')
+  @ApiOperation({ summary: 'Get asset tier configuration for an exchange adapter' })
+  getAssetTierConfig(@Param('id') id: string) {
+    return this.settingsService.getAssetTierConfig(id);
+  }
+
+  @Put('exchanges/:id/asset-tiers')
+  @RequirePermissions('exchanges.configure')
+  @ApiOperation({ summary: 'Update asset tier configuration for an exchange adapter' })
+  updateAssetTierConfig(
+    @Param('id') id: string,
+    @Body() dto: UpdateAssetTierConfigDto,
+  ) {
+    return this.settingsService.updateAssetTierConfig(id, dto);
   }
 
   // === Settings Infrastructure ===

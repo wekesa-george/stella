@@ -60,6 +60,18 @@ export class Adapter {
   @Column('varchar', { name: 'sandbox_ws_url', length: 255, nullable: true })
   sandboxWsUrl: string | null;
 
+  @Column('varchar', { name: 'futures_base_url', length: 500, nullable: true })
+  futuresBaseUrl: string | null;
+
+  @Column('varchar', { name: 'futures_sandbox_base_url', length: 500, nullable: true })
+  futuresSandboxBaseUrl: string | null;
+
+  @Column('varchar', { name: 'futures_ws_url', length: 500, nullable: true })
+  futuresWsUrl: string | null;
+
+  @Column('varchar', { name: 'futures_sandbox_ws_url', length: 500, nullable: true })
+  futuresSandboxWsUrl: string | null;
+
   @Column('boolean', { name: 'supports_spot', default: false })
   supportsSpot: boolean;
 

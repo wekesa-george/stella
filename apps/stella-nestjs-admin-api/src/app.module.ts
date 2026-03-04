@@ -15,6 +15,7 @@ import { KycModule } from './modules/kyc/kyc.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { IncidentsModule } from './modules/incidents/incidents.module';
 
 @Module({
   controllers: [AppController],
@@ -47,6 +48,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     FinanceModule,
     SettingsModule,
     WebhooksModule,
+    IncidentsModule,
   ],
 })
 export class AppModule {}
