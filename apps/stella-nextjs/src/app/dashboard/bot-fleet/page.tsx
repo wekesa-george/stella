@@ -579,7 +579,7 @@ export default function BotFleetPage() {
                     <Tooltip
                       contentStyle={{ background: "#0d1520", border: "1px solid #1e2d40", borderRadius: 6, fontSize: 11 }}
                       labelStyle={{ display: "none" }}
-                      formatter={(v: number) => [`$${v.toLocaleString()}`, "Equity"]}
+                      formatter={(v?: number) => [`$${(v ?? 0).toLocaleString()}`, "Equity"]}
                     />
                     <Area
                       type="monotone"

@@ -136,6 +136,8 @@ export default function ServiceAccountsPage() {
     ws_url: "",
     sandbox_base_url: "",
     sandbox_ws_url: "",
+    futures_base_url: "",
+    futures_sandbox_base_url: "",
     rate_limit_orders: "",
     rate_limit_queries: "",
   });
