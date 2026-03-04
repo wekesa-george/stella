@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { Channel } from 'phoenix';
-import { joinChannel, leaveChannel, getSocketVersion, onSocketVersionChange } from '@/lib/phoenixSocket';
+import { joinChannel, leaveChannel, getSocketVersion, onSocketVersionChange, isSocketAuthenticated } from '@/lib/phoenixSocket';
 
 const LOG_PREFIX = '[usePhoenixChannel]';
 
@@ -26,6 +26,13 @@ export function usePhoenixChannel(
 
   useEffect(() => {
     if (!enabled || !topic) return;
+
+    // Don't attempt to join channels until the socket has a token.
+    // In production, anonymous connections are rejected by Phoenix.
+    if (!isSocketAuthenticated()) {
+      console.log(LOG_PREFIX, `Effect SKIP → "${topic}" (no token yet, sockVer=${sockVer})`);
+      return;
+    }
 
     console.log(LOG_PREFIX, `Effect RUN → joining "${topic}" (sockVer=${sockVer})`);
     const channel = joinChannel(topic);

@@ -16,6 +16,14 @@ export function getSocketVersion(): number {
   return socketVersion;
 }
 
+/**
+ * Whether the socket has a token and is ready to connect.
+ * In production, anonymous connections are rejected, so we must wait for the token.
+ */
+export function isSocketAuthenticated(): boolean {
+  return currentToken !== null;
+}
+
 export function onSocketVersionChange(cb: (v: number) => void): () => void {
   versionListeners.add(cb);
   return () => versionListeners.delete(cb);
