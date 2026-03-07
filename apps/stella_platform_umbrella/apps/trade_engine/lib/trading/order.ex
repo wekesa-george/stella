@@ -36,7 +36,7 @@ defmodule TradeEngine.Trading.Order do
     field :total_fees, :decimal
     field :fee_asset, :string
     field :fee_usd, :decimal
-    field :leverage, :integer
+    field :leverage, :decimal
     field :is_margin, :boolean, default: false
     field :signal_id, :binary_id
     field :submitted_at, :utc_datetime
