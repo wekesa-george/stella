@@ -9,6 +9,7 @@ import { useAlertChannel, usePlatformChannel, useBotChannel } from "@/hooks/useP
 import { mapApiAlertToUiAlert } from "@/lib/api/mappers";
 
 const dashboardTabs = [
+  { label: "Mission Critical", href: "/dashboard/mission-critical" },
   { label: "Mission Control", href: "/dashboard/mission-control" },
   { label: "Bot Fleet", href: "/dashboard/bot-fleet" },
   { label: "Strategies", href: "/dashboard/strategies" },
@@ -22,8 +23,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [unackedAlertCount, setUnackedAlertCount] = useState(0);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
-  // Hide stats bar + nav tabs on bot detail pages (full-screen mode)
+  // Hide stats bar + nav tabs on bot detail pages and mission-critical (full-screen mode)
   const isBotDetail = pathname ? /^\/dashboard\/bot\/[^/]+$/.test(pathname) : false;
+  const isMissionCritical = pathname === "/dashboard/mission-critical";
 
   // Real-time WS hooks for top stats bar
   const { alerts: wsAlerts } = useAlertChannel();
@@ -62,7 +64,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [wsAlerts]);
 
-  if (isBotDetail) {
+  if (isBotDetail || isMissionCritical) {
     return (
       <div className="flex flex-col h-screen">
         <div className="flex-1 overflow-hidden">

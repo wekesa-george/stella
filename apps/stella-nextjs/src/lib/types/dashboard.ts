@@ -68,6 +68,7 @@ export interface EtsMetrics {
 export interface DbPoolMetrics {
   poolSize: number;
   status: string;
+  latencyMs: number;
 }
 
 export interface TradeEngineMetrics {

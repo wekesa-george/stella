@@ -16,6 +16,15 @@ export const navigationConfig: MenuItem[] = [
     label: "Dashboard",
     href: "/dashboard",
     icon: "home",
+    subMenu: [
+      { label: "Mission Critical", href: "/dashboard/mission-critical", description: "Real-time operations overview" },
+      { label: "Mission Control", href: "/dashboard/mission-control", description: "Platform command center" },
+      { label: "Bot Fleet", href: "/dashboard/bot-fleet", description: "Bot management & monitoring" },
+      { label: "Strategies", href: "/dashboard/strategies", description: "Strategy configurations" },
+      { label: "Alerts", href: "/dashboard/alerts", description: "System alerts & notifications" },
+      { label: "Operations Log", href: "/dashboard/incidents", description: "Incident audit log & shifts" },
+      { label: "Infrastructure", href: "/dashboard/infra", description: "System health & metrics" },
+    ],
   },
   {
     label: "Users",

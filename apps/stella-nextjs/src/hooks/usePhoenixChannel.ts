@@ -269,13 +269,16 @@ export function usePositionChannel(botId?: string) {
 export interface OrderData {
   id: string;
   bot_id: string;
+  user_id?: string;
   symbol: string;
   side: string;
   order_type: string;
   price: string;
+  execution_price?: string;
   quantity: string;
   filled_quantity: string;
   status: string;
+  exchange_order_id?: string;
   created_at: string;
 }
 

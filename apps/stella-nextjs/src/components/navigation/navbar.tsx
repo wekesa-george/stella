@@ -63,13 +63,13 @@ export function Navbar({ user }: NavbarProps) {
               {/* Logo */}
               <Link href="/" className="flex items-center">
                 <Image
-                  src="/stf.png"
+                  src="/stella.svg"
                   alt="Stella Logo"
-                  width={65}
-                  height={30}
-                  className=""
-                  style={{ width: "auto" }}
+                  width={102}
+                  height={32}
+                  priority
                 />
+
               </Link>
 
               {/* Navigation Menu - Desktop */}

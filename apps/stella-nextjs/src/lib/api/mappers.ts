@@ -215,6 +215,7 @@ export function mapWsInfraToTradeEngineMetrics(ws: Record<string, any>): TradeEn
     dbPool: {
       poolSize: toNum(db.pool_size ?? 0),
       status: String(db.status ?? 'unknown'),
+      latencyMs: toNum(db.latency_ms ?? 0),
     },
     collectedAt: ws.collected_at ?? null,
   };

@@ -168,6 +168,44 @@ export async function getBotOrders(botId: string) {
   return request(`/api/bots/${botId}/orders`);
 }
 
+export async function getRecentOrders(limit: number = 50) {
+  return request(`/api/orders/recent?limit=${limit}`);
+}
+
+export async function getSystemAlerts(limit: number = 100) {
+  return request(`/api/phoenix/alerts?limit=${limit}`);
+}
+
+export async function getUnacknowledgedAlerts(limit: number = 100) {
+  return request(`/api/phoenix/alerts/unacknowledged?limit=${limit}`);
+}
+
+export async function acknowledgeSystemAlert(id: string) {
+  return request(`/api/phoenix/alerts/${id}/acknowledge`, { method: 'POST' });
+}
+
+export async function getIncidents(limit: number = 50) {
+  return request(`/api/incidents?limit=${limit}`);
+}
+
+export async function getOpenIncidents(limit: number = 50) {
+  return request(`/api/incidents/open?limit=${limit}`);
+}
+
+export async function resolveIncident(id: string, notes?: string) {
+  return request(`/api/incidents/${id}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ notes }),
+  });
+}
+
+export async function updateIncident(id: string, attrs: Record<string, any>) {
+  return request(`/api/incidents/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(attrs),
+  });
+}
+
 export async function createSystemBot(config: {
   service_account_id: string;
   name?: string;
@@ -219,6 +257,12 @@ export async function getBotEquityCurve(botId: string, since?: string) {
   const params = new URLSearchParams({ limit: '500' });
   if (since) params.set('since', since);
   return request(`/api/bots/${botId}/equity-curve?${params}`);
+}
+
+export async function getPlatformEquityCurve(limit: number = 200, since?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (since) params.set('since', since);
+  return request(`/api/platform/equity-curve?${params}`);
 }
 
 export async function getBotTransitions(botId: string, limit?: number) {
@@ -373,6 +417,10 @@ export async function listServiceAccountCredentials(serviceAccountId: string) {
 
 export async function getCredential(id: string) {
   return request(`/api/credentials/${id}`);
+}
+
+export async function getCredentialBalance(id: string, marketType: string = 'spot') {
+  return request(`/api/credentials/${id}/balance?market_type=${marketType}`, {}, 'gateway');
 }
 
 export async function createCredential(data: {
