@@ -43,7 +43,7 @@ defmodule TradeEngine.Orchestrator.MarginScalper do
   # For testnet/production, set environment variables:
   #   BINANCE_FUTURES_API_KEY
   #   BINANCE_FUTURES_API_SECRET
-  @execution_mode :testnet  # ⬅️ CHANGE THIS: :simulation | :testnet | :production
+  @execution_mode :production  # ⬅️ CHANGE THIS: :simulation | :testnet | :production
   
   @futures_testnet_rest "https://testnet.binancefuture.com"
   @futures_production_rest "https://fapi.binance.com"
