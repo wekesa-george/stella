@@ -2047,7 +2047,7 @@ export default function IncidentsPage() {
       <IncidentDetailSheet
         incident={selectedIncident}
         open={!!selectedIncident}
-        onClose={() => setSelectedIncident(null)}
+        onClose={() => { setSelectedIncident(null); loadData(); }}
         onCorrection={handleCorrection}
       />
       <ShiftPanelSheet
