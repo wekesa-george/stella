@@ -2,27 +2,48 @@ defmodule TradeEngine.Strategies.GridBot do
   @moduledoc """
   Grid trading strategy.
 
-  Places a grid of buy and sell orders at fixed intervals between an upper and
-  lower price boundary. Profits from price oscillation within the range.
+  Places a grid of buy and sell limit orders at fixed intervals between an upper
+  and lower price boundary. Profits from price oscillation within the range.
 
-  Config keys:
-    - upper_price: float — top of grid range
-    - lower_price: float — bottom of grid range
-    - grid_levels: integer (default 20) — number of grid lines
-    - investment_per_grid: float — USD per grid order
-    - total_investment: float — total allocated capital
-    - rebalance_on_breakout: boolean (default true)
+  ## Execution Model
+
+  Unlike signal-based strategies (PhysicsImpulse, TrendFollower), the grid bot
+  does NOT use the standard candle → signal → market order pipeline. Instead:
+
+  1. On init: calculate grid levels between lower_price and upper_price
+  2. Place buy limit orders below current price, sell limit orders above
+  3. When a buy fills → place a sell limit one grid level above (take profit)
+  4. When a sell fills → place a buy limit one grid level below (re-entry)
+  5. Repeat until stopped or price breaks out of range
+
+  ## Config keys
+    - upper_price: float — top of grid range (REQUIRED, must be > 0)
+    - lower_price: float — bottom of grid range (REQUIRED, must be > 0)
+    - grid_levels: integer (default 10) — number of grid lines
+    - grid_type: "arithmetic" | "geometric" (default "arithmetic")
+    - quantity_per_grid: float — base asset quantity per grid order
+    - total_investment: float — total allocated capital (USD)
+    - stop_loss_price: float — emergency exit below grid (optional)
+    - take_profit_price: float — close all above this price (optional)
+    - rebalance_on_breakout: boolean (default false)
+    - max_open_orders: integer (default 20) — exchange order limit
   """
 
   @behaviour TradeEngine.Strategies.Behaviour
 
+  require Logger
+
   @defaults %{
     "upper_price" => 0.0,
     "lower_price" => 0.0,
-    "grid_levels" => 20,
-    "investment_per_grid" => 100.0,
+    "grid_levels" => 10,
+    "grid_type" => "arithmetic",
+    "quantity_per_grid" => 0.0,
     "total_investment" => 2000.0,
-    "rebalance_on_breakout" => true,
+    "stop_loss_price" => nil,
+    "take_profit_price" => nil,
+    "rebalance_on_breakout" => false,
+    "max_open_orders" => 20,
     "max_positions" => 20
   }
 
@@ -33,30 +54,168 @@ defmodule TradeEngine.Strategies.GridBot do
   def default_config, do: @defaults
 
   @impl true
-  def generate_signal(_candles, _order_flow, _context) do
-    # TODO: Implement grid signal logic
-    # Grid bots don't use traditional signal generation — they maintain
-    # a grid of limit orders. Implementation will use a different execution
-    # model (place_grid_orders instead of market orders).
-    {:error, :not_implemented}
+  def generate_signal(candles, _order_flow, context) do
+    config = Map.merge(@defaults, Map.get(context, :config, %{}))
+
+    upper = config["upper_price"]
+    lower = config["lower_price"]
+
+    if upper <= 0 or lower <= 0 or upper <= lower do
+      {:error, :invalid_grid_range}
+    else
+      # Get current price from latest candle
+      latest = List.last(candles)
+      current_price = if latest, do: latest[:close] || latest.close, else: nil
+
+      if is_nil(current_price) or current_price <= 0 do
+        {:error, :no_price}
+      else
+        grid_levels = compute_grid_levels(config)
+        grid_state = analyze_grid_state(grid_levels, current_price, context)
+
+        {:ok, %{
+          direction: :grid,
+          symbol: Map.get(context, :symbol),
+          confidence: 100,
+          current_price: current_price,
+          grid_levels: grid_levels,
+          grid_state: grid_state,
+          buy_levels: grid_state.buy_levels,
+          sell_levels: grid_state.sell_levels,
+          grid_type: config["grid_type"],
+          quantity_per_grid: resolve_quantity_per_grid(config, current_price),
+          stop_loss_price: config["stop_loss_price"],
+          take_profit_price: config["take_profit_price"]
+        }}
+      end
+    end
   end
 
   @impl true
+  def should_enter?(%{direction: :grid} = signal, context) do
+    # Grid bots always "enter" — the signal contains the grid levels to manage
+    positions = Map.get(context, :positions, %{})
+    max = Map.get(context, :config, %{}) |> Map.get("max_open_orders", 20)
+    open_count = map_size(positions)
+
+    # Only proceed if we have levels to place and haven't hit the limit
+    has_levels = length(signal.buy_levels) > 0 or length(signal.sell_levels) > 0
+    has_levels and open_count < max
+  end
   def should_enter?(_signal, _context), do: false
 
   @impl true
-  def should_exit?(_position, _context), do: false
+  def should_exit?(position, context) do
+    config = Map.merge(@defaults, Map.get(context, :config, %{}))
+    price_cache = Map.get(context, :price_cache, %{})
+    current_price = Map.get(price_cache, position.symbol, position.current_price)
+
+    cond do
+      # Stop loss triggered
+      config["stop_loss_price"] && is_number(config["stop_loss_price"]) &&
+        config["stop_loss_price"] > 0 && current_price <= config["stop_loss_price"] ->
+        true
+
+      # Take profit triggered
+      config["take_profit_price"] && is_number(config["take_profit_price"]) &&
+        config["take_profit_price"] > 0 && current_price >= config["take_profit_price"] ->
+        true
+
+      # Grid bots don't exit individual positions via this callback —
+      # exits are managed by the grid order fill cycle
+      true ->
+        false
+    end
+  end
 
   @impl true
   def calculate_position_size(_signal, context) do
     config = Map.merge(@defaults, Map.get(context, :config, %{}))
-    per_grid = config["investment_per_grid"]
+    total = config["total_investment"]
+    grid_count = config["grid_levels"] || 10
+    per_grid = total / max(grid_count, 1)
     {:ok, per_grid, per_grid}
   end
 
   @impl true
-  def calculate_stop_loss(_signal, entry_price, context) do
+  def calculate_stop_loss(_signal, _entry_price, context) do
     config = Map.merge(@defaults, Map.get(context, :config, %{}))
-    config["lower_price"] || entry_price * 0.95
+    config["stop_loss_price"] || config["lower_price"] || 0.0
+  end
+
+  # ===========================================================================
+  # GRID COMPUTATION
+  # ===========================================================================
+
+  @doc "Compute the grid price levels"
+  def compute_grid_levels(config) do
+    upper = config["upper_price"]
+    lower = config["lower_price"]
+    n = config["grid_levels"] || 10
+    grid_type = config["grid_type"] || "arithmetic"
+
+    if upper <= lower or n < 2, do: [], else: do_compute_levels(grid_type, lower, upper, n)
+  end
+
+  defp do_compute_levels("geometric", lower, upper, n) do
+    # Geometric: equal percentage spacing
+    ratio = :math.pow(upper / lower, 1.0 / n)
+    for i <- 0..n, do: Float.round(lower * :math.pow(ratio, i), 8)
+  end
+
+  defp do_compute_levels(_arithmetic, lower, upper, n) do
+    # Arithmetic: equal price spacing
+    step = (upper - lower) / n
+    for i <- 0..n, do: Float.round(lower + step * i, 8)
+  end
+
+  @doc """
+  Analyze grid state: which levels need buy orders, which need sell orders.
+  Returns a map with :buy_levels and :sell_levels based on current price
+  and existing positions/orders.
+  """
+  def analyze_grid_state(grid_levels, current_price, context) do
+    # Grid positions tracked in bot state (keyed by grid_level price)
+    existing_grid_orders = Map.get(context, :grid_orders, %{})
+
+    # Levels below current price → buy orders
+    # Levels above current price → sell orders
+    buy_levels = grid_levels
+      |> Enum.filter(fn level -> level < current_price and not Map.has_key?(existing_grid_orders, level) end)
+      |> Enum.sort(:desc) # Closest to price first
+
+    sell_levels = grid_levels
+      |> Enum.filter(fn level -> level > current_price and not Map.has_key?(existing_grid_orders, level) end)
+      |> Enum.sort(:asc) # Closest to price first
+
+    %{
+      buy_levels: buy_levels,
+      sell_levels: sell_levels,
+      total_levels: length(grid_levels),
+      current_zone: find_current_zone(grid_levels, current_price)
+    }
+  end
+
+  defp find_current_zone(grid_levels, price) do
+    sorted = Enum.sort(grid_levels)
+    idx = Enum.find_index(sorted, fn l -> l > price end)
+    case idx do
+      nil -> length(sorted) - 1
+      0 -> 0
+      n -> n - 1
+    end
+  end
+
+  defp resolve_quantity_per_grid(config, current_price) do
+    explicit = config["quantity_per_grid"]
+    if explicit && explicit > 0 do
+      explicit
+    else
+      # Derive from total_investment / grid_levels / current_price
+      total = config["total_investment"] || 2000.0
+      n = config["grid_levels"] || 10
+      usd_per_grid = total / max(n, 1)
+      if current_price > 0, do: usd_per_grid / current_price, else: 0.0
+    end
   end
 end

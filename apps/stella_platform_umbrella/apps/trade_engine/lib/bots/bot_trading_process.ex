@@ -82,6 +82,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         # Step 4: Allocating capital
         BotRegistry.report_init_step(bot_id, "allocating_capital")
 
+        is_grid = strategy_module == TradeEngine.Strategies.GridBot
+
         state = %{
           bot_id: bot_id,
           user_id: bot.user_id,
@@ -107,7 +109,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           # Capital
           allocated_capital: bot.allocated_capital || 0.0,
           # Derived from merged config
-          max_positions: Map.get(merged_config, "max_positions", 3)
+          max_positions: Map.get(merged_config, "max_positions", 3),
+          # Grid bot state (only used when strategy is GridBot)
+          is_grid: is_grid,
+          grid_orders: %{},          # %{price_level => %{order_id, side, status}}
+          grid_initialized: false
         }
 
         # Step 5: Ready
@@ -124,6 +130,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         Process.send_after(self(), :check_exits, @exit_check_interval_ms)
         Process.send_after(self(), :update_prices, @price_update_interval_ms)
         Process.send_after(self(), :poll_candles, @candle_poll_interval_ms)
+
+        # Grid bot: check for filled orders every 10s
+        if is_grid do
+          Process.send_after(self(), :grid_check_fills, 10_000)
+        end
 
         Logger.info("BotTradingProcess started for #{bot.name} (#{bot_id}) — strategy: #{inspect(strategy_module)} — pairs: #{inspect(bot.trading_pairs)}")
         {:ok, state}
@@ -256,6 +267,16 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   @impl true
+  def handle_info(:grid_check_fills, state) do
+    if state.is_grid do
+      Process.send_after(self(), :grid_check_fills, 10_000)
+      {:noreply, grid_check_fills(state)}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
@@ -364,7 +385,29 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       # Pass full candle buffer to strategy (not just latest candle)
       candle_buffer = Map.get(state.candle_buffers, symbol, [candle])
 
+      # Add grid_orders to context so the strategy can see existing orders
+      context = if state.is_grid do
+        Map.put(context, :grid_orders, state.grid_orders)
+      else
+        context
+      end
+
       case strategy.generate_signal(candle_buffer, nil, context) do
+        {:ok, %{direction: :grid} = signal} ->
+          # Grid signal → manage grid of limit orders
+          BotLogger.debug(state.bot_id, :signal, "Grid signal generated", %{
+            symbol: symbol,
+            buy_levels: length(signal.buy_levels),
+            sell_levels: length(signal.sell_levels),
+            current_price: signal.current_price
+          })
+
+          new_state = %{state |
+            recent_signals: Map.put(state.recent_signals, symbol, now)
+          }
+
+          execute_grid_orders(signal, new_state)
+
         {:ok, signal} ->
           BotLogger.debug(state.bot_id, :signal, "Signal generated", %{
             symbol: symbol,
@@ -756,4 +799,200 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   defp to_float(n) when is_float(n), do: n
   defp to_float(n) when is_integer(n), do: n * 1.0
   defp to_float(_), do: nil
+
+  # ========================================================================
+  # GRID BOT — ORDER MANAGEMENT
+  # ========================================================================
+
+  defp execute_grid_orders(signal, state) do
+    max_orders = get_strategy_param(state.config, "max_open_orders", 20)
+    current_order_count = map_size(state.grid_orders)
+    available_slots = max(0, max_orders - current_order_count)
+
+    if available_slots == 0 do
+      BotLogger.debug(state.bot_id, :grid, "Grid full, no slots available", %{
+        max_orders: max_orders,
+        current: current_order_count
+      })
+      state
+    else
+      symbol = signal.symbol
+      qty = signal.quantity_per_grid
+
+      # Place buy orders below current price (closest first), then sell orders above
+      buy_levels = Enum.take(signal.buy_levels, div(available_slots, 2) + 1)
+      sell_levels = Enum.take(signal.sell_levels, div(available_slots, 2) + 1)
+
+      state = Enum.reduce(buy_levels, state, fn price_level, acc ->
+        if map_size(acc.grid_orders) < max_orders do
+          place_grid_limit_order(acc, symbol, "BUY", qty, price_level)
+        else
+          acc
+        end
+      end)
+
+      Enum.reduce(sell_levels, state, fn price_level, acc ->
+        if map_size(acc.grid_orders) < max_orders do
+          place_grid_limit_order(acc, symbol, "SELL", qty, price_level)
+        else
+          acc
+        end
+      end)
+    end
+  end
+
+  defp place_grid_limit_order(state, symbol, side, quantity, price_level) do
+    bot_context = [
+      user_id: state.user_id,
+      bot_id: state.bot_id,
+      credential_id: state.credential_id,
+      strategy_id: state.strategy_id,
+      market_type: state.market_type,
+      grid_level: price_level
+    ]
+
+    case OrderManager.place_limit_order(
+      state.credential_id, symbol, side, quantity, price_level, bot_context
+    ) do
+      {:ok, result} ->
+        order_id = result[:order_id]
+
+        BotLogger.info(state.bot_id, :grid, "Grid order placed", %{
+          side: side,
+          price: price_level,
+          quantity: quantity,
+          order_id: order_id
+        })
+
+        grid_entry = %{
+          order_id: order_id,
+          side: side,
+          quantity: quantity,
+          price: price_level,
+          symbol: symbol,
+          status: "NEW",
+          placed_at: DateTime.utc_now()
+        }
+
+        %{state |
+          grid_orders: Map.put(state.grid_orders, price_level, grid_entry),
+          total_trades: state.total_trades + 1
+        }
+
+      {:error, reason} ->
+        BotLogger.warning(state.bot_id, :grid, "Grid order failed", %{
+          side: side,
+          price: price_level,
+          reason: inspect(reason)
+        })
+        state
+    end
+  end
+
+  # Check exchange for filled grid orders and place counter-orders
+  defp grid_check_fills(state) do
+    if map_size(state.grid_orders) == 0 do
+      state
+    else
+      symbol = List.first(state.trading_pairs)
+      if is_nil(symbol), do: state, else: do_grid_check_fills(state, symbol)
+    end
+  end
+
+  defp do_grid_check_fills(state, symbol) do
+    case OrderManager.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
+      {:ok, open_orders} ->
+        open_ids = MapSet.new(open_orders, fn o -> o.order_id end)
+
+        # Find grid orders that are no longer open on exchange → they were filled
+        {filled, still_open} = state.grid_orders
+          |> Enum.split_with(fn {_level, entry} ->
+            entry.order_id && not MapSet.member?(open_ids, entry.order_id)
+          end)
+
+        if length(filled) == 0 do
+          state
+        else
+          BotLogger.info(state.bot_id, :grid, "Grid fills detected", %{
+            filled_count: length(filled),
+            open_count: length(still_open)
+          })
+
+          # Process each filled order: place counter-order
+          state = %{state | grid_orders: Map.new(still_open)}
+
+          Enum.reduce(filled, state, fn {price_level, entry}, acc ->
+            process_grid_fill(acc, symbol, entry, price_level)
+          end)
+        end
+
+      {:error, reason} ->
+        BotLogger.warning(state.bot_id, :grid, "Failed to check open orders", %{
+          reason: inspect(reason)
+        })
+        state
+    end
+  end
+
+  defp process_grid_fill(state, symbol, filled_entry, filled_price) do
+    config = state.config
+    grid_levels = TradeEngine.Strategies.GridBot.compute_grid_levels(config)
+    sorted_levels = Enum.sort(grid_levels)
+
+    # Find the next level for a counter-order
+    counter_side = if filled_entry.side == "BUY", do: "SELL", else: "BUY"
+
+    counter_price = if filled_entry.side == "BUY" do
+      # Buy filled → place sell one level above
+      sorted_levels |> Enum.find(fn l -> l > filled_price end)
+    else
+      # Sell filled → place buy one level below
+      sorted_levels |> Enum.reverse() |> Enum.find(fn l -> l < filled_price end)
+    end
+
+    pnl = if filled_entry.side == "SELL" do
+      # A sell fill completes a grid cycle — estimate profit
+      # (sell_price - buy_price) * quantity, approximated by grid spacing
+      grid_spacing = if length(sorted_levels) >= 2 do
+        Enum.at(sorted_levels, 1) - Enum.at(sorted_levels, 0)
+      else
+        0.0
+      end
+      grid_spacing * filled_entry.quantity
+    else
+      0.0
+    end
+
+    if pnl > 0 do
+      BotRegistry.report_trade(state.bot_id, pnl, true)
+    end
+
+    state = if pnl > 0 do
+      %{state |
+        winning_trades: state.winning_trades + 1,
+        total_realized_pnl: state.total_realized_pnl + pnl
+      }
+    else
+      state
+    end
+
+    BotLogger.info(state.bot_id, :grid, "Grid fill processed", %{
+      filled_side: filled_entry.side,
+      filled_price: filled_price,
+      counter_side: counter_side,
+      counter_price: counter_price,
+      estimated_pnl: Float.round(pnl, 4)
+    })
+
+    # Place counter-order if we have a valid price level
+    if counter_price do
+      place_grid_limit_order(state, symbol, counter_side, filled_entry.quantity, counter_price)
+    else
+      BotLogger.warning(state.bot_id, :grid, "No counter-level found (price at grid boundary)", %{
+        filled_price: filled_price,
+        side: filled_entry.side
+      })
+      state
+    end
+  end
 end

@@ -47,6 +47,56 @@ defmodule TradeEngine.Trading.OrderManager do
     execute(:close_short, credential_id, symbol, quantity, entry_price, opts)
   end
 
+  @doc "Place a limit order with order tracking"
+  def place_limit_order(credential_id, symbol, side, quantity, price, opts \\ []) do
+    order_attrs = %{
+      symbol: symbol,
+      side: to_string(side) |> String.downcase(),
+      order_type: "limit",
+      quantity: to_decimal(quantity),
+      status: "submitted",
+      submitted_at: DateTime.utc_now(),
+      user_id: Keyword.get(opts, :user_id),
+      bot_id: Keyword.get(opts, :bot_id),
+      credential_id: Keyword.get(opts, :credential_id, credential_id),
+      strategy_id: Keyword.get(opts, :strategy_id),
+      position_id: Keyword.get(opts, :position_id),
+      metadata: %{
+        action: "limit_#{side}",
+        market_type: Keyword.get(opts, :market_type, "spot"),
+        limit_price: price,
+        grid_level: Keyword.get(opts, :grid_level),
+        client_order_id: Keyword.get(opts, :client_order_id)
+      }
+    }
+
+    case Repo.insert(Order.changeset(%Order{}, order_attrs)) do
+      {:ok, order} ->
+        broadcast({:order_created, order})
+        broadcast_bot(order.bot_id, {:order_created, order})
+
+        exchange_result = Executor.place_limit_order(
+          credential_id, symbol, side, quantity, price, opts
+        )
+
+        finalize_order(order, exchange_result)
+
+      {:error, changeset} ->
+        Logger.error("OrderManager: failed to insert limit order: #{inspect(changeset.errors)}")
+        Executor.place_limit_order(credential_id, symbol, side, quantity, price, opts)
+    end
+  end
+
+  @doc "Cancel an order with tracking"
+  def cancel_order(credential_id, symbol, order_id, opts \\ []) do
+    Executor.cancel_order(credential_id, symbol, order_id, opts)
+  end
+
+  @doc "Get open orders for a symbol"
+  def get_open_orders(credential_id, symbol, opts \\ []) do
+    Executor.get_open_orders(credential_id, symbol, opts)
+  end
+
   @doc "List recent orders across all bots (for dashboard feed)"
   def list_recent(limit \\ 50) do
     Order

@@ -67,6 +67,39 @@ defmodule TradeEngine.Exchanges.Executor do
     end
   end
 
+  @doc "Place a limit order (used by grid bot and other limit-order strategies)"
+  def place_limit_order(credential_id, symbol, side, quantity, price, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :place_limit_order, 6) do
+        adapter.place_limit_order(symbol, side, quantity, price, creds, opts)
+      else
+        {:error, :limit_orders_not_supported}
+      end
+    end
+  end
+
+  @doc "Cancel an order by orderId"
+  def cancel_order(credential_id, symbol, order_id, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :cancel_order, 4) do
+        adapter.cancel_order(symbol, order_id, creds, opts)
+      else
+        {:error, :cancel_not_supported}
+      end
+    end
+  end
+
+  @doc "Get all open orders for a symbol"
+  def get_open_orders(credential_id, symbol, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_open_orders, 3) do
+        adapter.get_open_orders(symbol, creds, opts)
+      else
+        {:error, :open_orders_not_supported}
+      end
+    end
+  end
+
   @doc "Get current price for a symbol. Pass market_type: in opts for correct endpoint routing."
   def get_price(credential_id, symbol, opts \\ []) do
     with {:ok, adapter, creds} <- resolve(credential_id) do

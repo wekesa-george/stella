@@ -488,6 +488,120 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   end
 
   # ========================================================================
+  # LIMIT ORDERS — used by grid bot and other limit-order strategies
+  # ========================================================================
+
+  @doc "Place a limit order on Binance (spot or futures)"
+  def place_limit_order(symbol, side, quantity, price, credentials, opts \\ []) do
+    trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = opts[:market_type] || "spot"
+    qty_str = format_quantity(trading_symbol, quantity, market_type: market_type)
+    price_str = format_price(price)
+
+    url = case market_type do
+      "usds_futures" -> usds_futures_order_url(credentials)
+      "coinm_futures" -> coinm_futures_order_url(credentials)
+      _ -> spot_url(credentials) <> "/v3/order"
+    end
+
+    params = %{
+      "symbol" => trading_symbol,
+      "side" => String.upcase(to_string(side)),
+      "type" => "LIMIT",
+      "quantity" => qty_str,
+      "price" => price_str,
+      "timeInForce" => Keyword.get(opts, :time_in_force, "GTC"),
+      "newOrderRespType" => "RESULT"
+    }
+
+    # Add client order ID if provided (useful for grid order tracking)
+    params = case Keyword.get(opts, :client_order_id) do
+      nil -> params
+      id -> Map.put(params, "newClientOrderId", id)
+    end
+
+    case signed_request(:post, url, params, credentials) do
+      {:ok, order} ->
+        {:ok, %{
+          order_id: order["orderId"],
+          client_order_id: order["clientOrderId"],
+          status: order["status"],
+          executed_qty: extract_executed_qty(order),
+          executed_price: extract_executed_price(order),
+          price: parse_float_safe(order["price"]),
+          symbol: order["symbol"]
+        }}
+      error -> error
+    end
+  end
+
+  @doc "Cancel an order by orderId"
+  def cancel_order(symbol, order_id, credentials, opts \\ []) do
+    trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = opts[:market_type] || "spot"
+
+    url = case market_type do
+      "usds_futures" -> usds_futures_order_url(credentials)
+      "coinm_futures" -> coinm_futures_order_url(credentials)
+      _ -> spot_url(credentials) <> "/v3/order"
+    end
+
+    params = %{
+      "symbol" => trading_symbol,
+      "orderId" => order_id
+    }
+
+    case signed_request(:delete, url, params, credentials) do
+      {:ok, order} ->
+        {:ok, %{
+          order_id: order["orderId"],
+          status: order["status"],
+          symbol: order["symbol"]
+        }}
+      error -> error
+    end
+  end
+
+  @doc "Get all open orders for a symbol"
+  def get_open_orders(symbol, credentials, opts \\ []) do
+    trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = opts[:market_type] || "spot"
+
+    url = case market_type do
+      "usds_futures" ->
+        base = resolve_futures_base_url(credentials)
+        base <> "/v1/openOrders"
+      "coinm_futures" ->
+        base = Map.get(credentials, :coinm_futures_base_url) || Map.get(credentials, :futures_base_url) || ""
+        base <> "/v1/openOrders"
+      _ ->
+        spot_url(credentials) <> "/v3/openOrders"
+    end
+
+    params = %{"symbol" => trading_symbol}
+
+    case signed_request(:get, url, params, credentials) do
+      {:ok, orders} when is_list(orders) ->
+        parsed = Enum.map(orders, fn order ->
+          %{
+            order_id: order["orderId"],
+            client_order_id: order["clientOrderId"],
+            symbol: order["symbol"],
+            side: order["side"],
+            type: order["type"],
+            price: parse_float_safe(order["price"]),
+            quantity: parse_float_safe(order["origQty"]),
+            executed_qty: parse_float_safe(order["executedQty"]),
+            status: order["status"],
+            time: order["time"]
+          }
+        end)
+        {:ok, parsed}
+      error -> error
+    end
+  end
+
+  # ========================================================================
   # PRIVATE — HMAC-signed requests
   # ========================================================================
 
@@ -510,11 +624,13 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
     final_url = case method do
       :get -> "#{url}?#{final_query}"
+      :delete -> "#{url}?#{final_query}"
       :post -> url
     end
 
     result = case method do
       :get -> HTTPoison.get(final_url, headers, timeout: @http_timeout_ms, recv_timeout: @http_timeout_ms)
+      :delete -> HTTPoison.delete(final_url, headers, timeout: @http_timeout_ms, recv_timeout: @http_timeout_ms)
       :post -> HTTPoison.post(final_url, final_query, headers, timeout: @http_timeout_ms, recv_timeout: @http_timeout_ms)
     end
 
@@ -620,6 +736,15 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       true -> 3
     end
   end
+
+  defp format_price(price) when is_float(price) do
+    # Use enough decimals to cover most tick sizes (8 is Binance's max)
+    :erlang.float_to_binary(price, decimals: 8)
+    |> String.trim_trailing("0")
+    |> String.trim_trailing(".")
+  end
+  defp format_price(price) when is_integer(price), do: Integer.to_string(price)
+  defp format_price(price) when is_binary(price), do: price
 
   defp parse_float_safe(nil), do: 0.0
   defp parse_float_safe(n) when is_float(n), do: n
