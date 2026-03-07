@@ -242,41 +242,6 @@ export class IncidentsService {
   }
 
   /**
-   * Escalate an incident.
-   */
-  async escalate(id: string): Promise<Incident> {
-    const incident = await this.incidentsRepo.findOneBy({ id });
-    if (!incident) throw new NotFoundException(`Incident ${id} not found`);
-
-    incident.status = 'escalated';
-    incident.supervisorNotified = true;
-    incident.supervisorNotifiedAt = new Date();
-    incident.updatedAt = new Date();
-    const saved = await this.incidentsRepo.save(incident);
-
-    // Send notifications
-    const severity = incident.priority === 'P1' ? 'critical' : incident.priority === 'P2' ? 'warning' : 'info';
-    const channels = incident.priority === 'P1' ? ['ntfy', 'slack'] : ['ntfy'];
-
-    this.notificationService.sendMulti(channels, {
-      severity,
-      title: `${incident.priority} Incident Escalated: ${incident.incidentNumber}`,
-      message: `${incident.title}\nCategory: ${incident.category}\nBot: ${incident.botRef || 'N/A'}`,
-      tags: [incident.priority === 'P1' ? 'rotating_light' : 'warning', 'escalation'],
-      topic: 'stella-ops',
-      metadata: {
-        incidentId: incident.id,
-        incidentNumber: incident.incidentNumber,
-        priority: incident.priority,
-        category: incident.category,
-      },
-      dedupKey: `escalate:${incident.id}`,
-    }).catch(() => { /* fire and forget */ });
-
-    return saved;
-  }
-
-  /**
    * Resolve an incident.
    */
   async resolve(id: string, dto: UpdateIncidentDto): Promise<Incident> {

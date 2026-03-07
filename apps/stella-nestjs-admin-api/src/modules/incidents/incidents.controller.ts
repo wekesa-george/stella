@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
+import { EscalationService } from './escalation.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
 import { CreateKillSwitchDto } from './dto/create-kill-switch.dto';
@@ -28,7 +29,10 @@ import { CurrentAdmin } from '../../common/decorators/current-user.decorator';
 @Controller('incidents')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class IncidentsController {
-  constructor(private readonly incidentsService: IncidentsService) {}
+  constructor(
+    private readonly incidentsService: IncidentsService,
+    private readonly escalationService: EscalationService,
+  ) {}
 
   // ─── Specific routes BEFORE :id param routes ───────────────────────
 
@@ -127,9 +131,13 @@ export class IncidentsController {
 
   @Post(':id/escalate')
   @RequirePermissions('incidents.escalate')
-  @ApiOperation({ summary: 'Escalate an incident' })
-  escalate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.incidentsService.escalate(id);
+  @ApiOperation({ summary: 'Escalate an incident to the next tier via escalation matrix' })
+  escalate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentAdmin() admin: any,
+  ) {
+    const adminId = admin?.id || admin?.sub;
+    return this.escalationService.escalateIncident(id, adminId);
   }
 
   @Post(':id/resolve')

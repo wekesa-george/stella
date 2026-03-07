@@ -120,6 +120,12 @@ export class Incident {
   @Column({ name: 'archive_month', type: 'varchar', length: 7, nullable: true })
   archiveMonth: string;
 
+  @Column({ name: 'current_escalation_tier', type: 'int', default: 0 })
+  currentEscalationTier: number;
+
+  @Column({ name: 'escalation_deadline', type: 'timestamptz', nullable: true })
+  escalationDeadline: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
