@@ -141,6 +141,14 @@ export default function NewBotPage() {
   const [botName, setBotName] = useState("");
   const [allocatedCapital, setAllocatedCapital] = useState("");
 
+  // Grid bot config (only used when strategy is core_grid)
+  const [gridUpperPrice, setGridUpperPrice] = useState("");
+  const [gridLowerPrice, setGridLowerPrice] = useState("");
+  const [gridLevels, setGridLevels] = useState("10");
+  const [gridType, setGridType] = useState<"arithmetic" | "geometric">("arithmetic");
+  const [gridStopLoss, setGridStopLoss] = useState("");
+  const [gridTakeProfit, setGridTakeProfit] = useState("");
+
   // Shared state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +159,7 @@ export default function NewBotPage() {
   const selectedStrategy = strategies.find((s) => s.id === selectedStrategyId);
   const selectedUser = users.find((u) => u.id === selectedUserId);
   const selectedSa = serviceAccounts.find((sa) => sa.id === selectedSaId);
+  const isGridStrategy = selectedStrategy?.type === "core_grid";
   const selectedAdapterRaw = selectedCredential ? adapters.find((a) => a.id === selectedCredential.adapter_id) : undefined;
   const adapterFlags = selectedAdapterRaw ? {
     spot: selectedAdapterRaw.supportsSpot ?? selectedAdapterRaw.supports_spot ?? false,
@@ -290,8 +299,15 @@ export default function NewBotPage() {
         return !!selectedPair;
       case 5:
         return !!selectedStrategyId;
-      case 6:
-        return !!botName.trim();
+      case 6: {
+        if (!botName.trim()) return false;
+        if (isGridStrategy) {
+          const upper = Number(gridUpperPrice);
+          const lower = Number(gridLowerPrice);
+          if (!upper || !lower || upper <= lower) return false;
+        }
+        return true;
+      }
       default:
         return false;
     }
@@ -325,6 +341,18 @@ export default function NewBotPage() {
         allocated_capital: allocatedCapital ? Number(allocatedCapital) : undefined,
         market_type: marketType,
       };
+
+      if (isGridStrategy) {
+        payload.config = {
+          upper_price: Number(gridUpperPrice),
+          lower_price: Number(gridLowerPrice),
+          grid_levels: Number(gridLevels) || 10,
+          grid_type: gridType,
+          total_investment: allocatedCapital ? Number(allocatedCapital) : 2000,
+          ...(gridStopLoss ? { stop_loss_price: Number(gridStopLoss) } : {}),
+          ...(gridTakeProfit ? { take_profit_price: Number(gridTakeProfit) } : {}),
+        };
+      }
 
       let result;
       if (ownerType === "system") {
@@ -884,6 +912,128 @@ export default function NewBotPage() {
                 />
               </div>
 
+              {/* Grid Bot Config */}
+              {isGridStrategy && (
+                <div className="border border-[rgba(61,157,243,0.25)] rounded-md overflow-hidden">
+                  <div className="px-3 py-2 bg-[rgba(61,157,243,0.06)] border-b border-[rgba(61,157,243,0.15)]">
+                    <span className="text-[9px] text-[#3d9df3] uppercase tracking-widest font-bold">
+                      Grid Configuration
+                    </span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Lower Price <span className="text-[#ff4757]">*</span>
+                        </label>
+                        <input
+                          value={gridLowerPrice}
+                          onChange={(e) => setGridLowerPrice(e.target.value)}
+                          placeholder="90000"
+                          type="number"
+                          min="0"
+                          step="any"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Upper Price <span className="text-[#ff4757]">*</span>
+                        </label>
+                        <input
+                          value={gridUpperPrice}
+                          onChange={(e) => setGridUpperPrice(e.target.value)}
+                          placeholder="110000"
+                          type="number"
+                          min="0"
+                          step="any"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                      </div>
+                    </div>
+                    {gridUpperPrice && gridLowerPrice && Number(gridUpperPrice) > Number(gridLowerPrice) && (
+                      <p className="text-[10px] text-[#5a7090]">
+                        Range: ${Number(gridLowerPrice).toLocaleString()} — ${Number(gridUpperPrice).toLocaleString()}
+                        {" "}({((Number(gridUpperPrice) - Number(gridLowerPrice)) / Number(gridLowerPrice) * 100).toFixed(1)}% spread)
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Grid Levels
+                        </label>
+                        <input
+                          value={gridLevels}
+                          onChange={(e) => setGridLevels(e.target.value)}
+                          placeholder="10"
+                          type="number"
+                          min="2"
+                          max="100"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Grid Type
+                        </label>
+                        <div className="flex gap-2">
+                          {(["arithmetic", "geometric"] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setGridType(t)}
+                              className={`flex-1 px-2 py-2 rounded-sm text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                                gridType === t
+                                  ? "border-[#3d9df3] bg-[rgba(61,157,243,0.1)] text-[#3d9df3]"
+                                  : "border-dark text-[#5a7090] hover:border-dark-2"
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {gridUpperPrice && gridLowerPrice && Number(gridUpperPrice) > Number(gridLowerPrice) && Number(gridLevels) >= 2 && (
+                      <p className="text-[10px] text-[#5a7090]">
+                        ≈ ${((Number(gridUpperPrice) - Number(gridLowerPrice)) / Number(gridLevels)).toFixed(2)} per grid level
+                        {allocatedCapital && ` · $${(Number(allocatedCapital) / Number(gridLevels)).toFixed(2)} per grid`}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Stop Loss Price
+                        </label>
+                        <input
+                          value={gridStopLoss}
+                          onChange={(e) => setGridStopLoss(e.target.value)}
+                          placeholder="Optional"
+                          type="number"
+                          min="0"
+                          step="any"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Take Profit Price
+                        </label>
+                        <input
+                          value={gridTakeProfit}
+                          onChange={(e) => setGridTakeProfit(e.target.value)}
+                          placeholder="Optional"
+                          type="number"
+                          min="0"
+                          step="any"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Summary */}
               <div className="border border-dark rounded-md overflow-hidden">
                 <div className="px-3 py-2 bg-dark-elevated border-b border-dark">
@@ -941,6 +1091,22 @@ export default function NewBotPage() {
                       label="Capital"
                       value={`$${Number(allocatedCapital).toLocaleString()}`}
                     />
+                  )}
+                  {isGridStrategy && gridUpperPrice && gridLowerPrice && (
+                    <>
+                      <SummaryRow
+                        label="Grid Range"
+                        value={`$${Number(gridLowerPrice).toLocaleString()} — $${Number(gridUpperPrice).toLocaleString()}`}
+                      />
+                      <SummaryRow label="Grid Levels" value={gridLevels} />
+                      <SummaryRow label="Grid Type" value={gridType} />
+                      {gridStopLoss && (
+                        <SummaryRow label="Stop Loss" value={`$${Number(gridStopLoss).toLocaleString()}`} />
+                      )}
+                      {gridTakeProfit && (
+                        <SummaryRow label="Take Profit" value={`$${Number(gridTakeProfit).toLocaleString()}`} />
+                      )}
+                    </>
                   )}
                 </div>
               </div>
