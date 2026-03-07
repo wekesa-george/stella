@@ -17,8 +17,8 @@ export class NotificationChannel {
   @Column('varchar', { length: 100 })
   name: string;
 
-  @Column('varchar', { length: 50 })
-  type: string;
+  @Column('varchar', { length: 50, nullable: true })
+  icon: string;
 
   @Column('boolean', { name: 'is_active', default: true })
   isActive: boolean;

@@ -24,6 +24,7 @@ import { NilShiftDto } from './dto/nil-shift.dto';
 import { QueryIncidentsDto } from './dto/query-incidents.dto';
 import { SummaryQueryDto } from './dto/summary-query.dto';
 import { PaginatedResponse } from '../../common/dto/pagination.dto';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
 export class IncidentsService {
@@ -37,6 +38,7 @@ export class IncidentsService {
     @InjectRepository(IncidentCounter)
     private readonly counterRepo: Repository<IncidentCounter>,
     private readonly dataSource: DataSource,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -250,7 +252,28 @@ export class IncidentsService {
     incident.supervisorNotified = true;
     incident.supervisorNotifiedAt = new Date();
     incident.updatedAt = new Date();
-    return this.incidentsRepo.save(incident);
+    const saved = await this.incidentsRepo.save(incident);
+
+    // Send notifications
+    const severity = incident.priority === 'P1' ? 'critical' : incident.priority === 'P2' ? 'warning' : 'info';
+    const channels = incident.priority === 'P1' ? ['ntfy', 'slack'] : ['ntfy'];
+
+    this.notificationService.sendMulti(channels, {
+      severity,
+      title: `${incident.priority} Incident Escalated: ${incident.incidentNumber}`,
+      message: `${incident.title}\nCategory: ${incident.category}\nBot: ${incident.botRef || 'N/A'}`,
+      tags: [incident.priority === 'P1' ? 'rotating_light' : 'warning', 'escalation'],
+      topic: 'stella-ops',
+      metadata: {
+        incidentId: incident.id,
+        incidentNumber: incident.incidentNumber,
+        priority: incident.priority,
+        category: incident.category,
+      },
+      dedupKey: `escalate:${incident.id}`,
+    }).catch(() => { /* fire and forget */ });
+
+    return saved;
   }
 
   /**
@@ -267,7 +290,25 @@ export class IncidentsService {
     if (dto.rootCause !== undefined) incident.rootCause = dto.rootCause;
     if (dto.notes !== undefined) incident.notes = dto.notes;
     incident.updatedAt = new Date();
-    return this.incidentsRepo.save(incident);
+    const saved = await this.incidentsRepo.save(incident);
+
+    // Notify resolution
+    this.notificationService.send({
+      channel: 'ntfy',
+      severity: 'info',
+      title: `Incident Resolved: ${incident.incidentNumber}`,
+      message: `${incident.title}\nResolved${dto.rootCause ? ` — Root cause: ${dto.rootCause}` : ''}`,
+      tags: ['white_check_mark', 'resolved'],
+      topic: 'stella-ops',
+      metadata: {
+        incidentId: incident.id,
+        incidentNumber: incident.incidentNumber,
+        priority: incident.priority,
+      },
+      dedupKey: `resolve:${incident.id}`,
+    }).catch(() => { /* fire and forget */ });
+
+    return saved;
   }
 
   /**

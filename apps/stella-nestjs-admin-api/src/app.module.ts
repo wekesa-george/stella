@@ -16,6 +16,7 @@ import { FinanceModule } from './modules/finance/finance.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { IncidentsModule } from './modules/incidents/incidents.module';
+import { NotificationModule } from './modules/notifications/notification.module';
 
 @Module({
   controllers: [AppController],
@@ -49,6 +50,7 @@ import { IncidentsModule } from './modules/incidents/incidents.module';
     SettingsModule,
     WebhooksModule,
     IncidentsModule,
+    NotificationModule,
   ],
 })
 export class AppModule {}
