@@ -10,8 +10,8 @@ export class NotificationSettings {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column('int', { name: 'dedup_window_seconds', default: 300 })
-  dedupWindowSeconds: number;
+  @Column('int', { name: 'dedup_window_minutes', default: 5 })
+  dedupWindowMinutes: number;
 
   @Column('uuid', { name: 'updated_by_user_id', nullable: true })
   updatedByUserId: string | null;

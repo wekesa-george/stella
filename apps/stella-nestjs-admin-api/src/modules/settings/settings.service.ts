@@ -715,7 +715,7 @@ export class SettingsService {
     if (!settings[0]) throw new NotFoundException('Notification settings not initialized');
 
     const fieldsToUpdate: Record<string, any> = {};
-    if (dto.dedupWindowSeconds !== undefined) fieldsToUpdate.dedupWindowSeconds = dto.dedupWindowSeconds;
+    if (dto.dedupWindowMinutes !== undefined) fieldsToUpdate.dedupWindowMinutes = dto.dedupWindowMinutes;
 
     await this.notifSettingsRepo.update(settings[0].id, fieldsToUpdate);
     return this.notifSettingsRepo.findOneBy({ id: settings[0].id });

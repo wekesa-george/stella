@@ -41,7 +41,7 @@ export interface SendResult {
 export class NotificationService implements OnModuleInit {
   private readonly logger = new Logger(NotificationService.name);
   private channels: Map<string, NotificationChannel> = new Map();
-  private dedupWindowSeconds = 300;
+  private dedupWindowMs = 5 * 60 * 1000;
   private recentDedup: Map<string, number> = new Map(); // dedupKey -> timestamp
 
   constructor(
@@ -67,10 +67,10 @@ export class NotificationService implements OnModuleInit {
 
     const settings = await this.settingsRepo.findOne({ where: {} });
     if (settings) {
-      this.dedupWindowSeconds = settings.dedupWindowSeconds;
+      this.dedupWindowMs = settings.dedupWindowMinutes * 60 * 1000;
     }
 
-    this.logger.log(`Loaded ${this.channels.size} notification channels (dedup: ${this.dedupWindowSeconds}s)`);
+    this.logger.log(`Loaded ${this.channels.size} notification channels (dedup: ${this.dedupWindowMs / 1000}s)`);
   }
 
   /** Send a notification to a single channel */
@@ -90,14 +90,14 @@ export class NotificationService implements OnModuleInit {
     if (dto.dedupKey) {
       const now = Date.now();
       const lastSent = this.recentDedup.get(dto.dedupKey);
-      if (lastSent && (now - lastSent) < this.dedupWindowSeconds * 1000) {
+      if (lastSent && (now - lastSent) < this.dedupWindowMs) {
         this.logger.debug(`Dedup: skipping '${dto.dedupKey}' (sent ${Math.round((now - lastSent) / 1000)}s ago)`);
         return { channelKey: dto.channel, success: true, logId: '', error: 'Deduped' };
       }
       this.recentDedup.set(dto.dedupKey, now);
       // Cleanup old entries
       if (this.recentDedup.size > 1000) {
-        const cutoff = now - this.dedupWindowSeconds * 1000;
+        const cutoff = now - this.dedupWindowMs;
         for (const [key, ts] of this.recentDedup) {
           if (ts < cutoff) this.recentDedup.delete(key);
         }
