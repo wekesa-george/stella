@@ -534,9 +534,12 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   defp spot_url(credentials), do: credentials.base_url
 
   defp resolve_futures_base_url(credentials) do
-    Map.get(credentials, :usds_futures_base_url) ||
-      Map.get(credentials, :futures_base_url) ||
-      Logger.warning("Binance: no futures_base_url configured in credentials") || ""
+    case Map.get(credentials, :usds_futures_base_url) || Map.get(credentials, :futures_base_url) do
+      nil ->
+        Logger.warning("Binance: no futures_base_url configured in credentials")
+        ""
+      url -> url
+    end
   end
 
   defp usds_futures_order_url(credentials) do
@@ -545,9 +548,12 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   end
 
   defp coinm_futures_order_url(credentials) do
-    base = Map.get(credentials, :coinm_futures_base_url) ||
-      Map.get(credentials, :futures_base_url) ||
-      Logger.warning("Binance: no coinm_futures_base_url configured in credentials") || ""
+    base = case Map.get(credentials, :coinm_futures_base_url) || Map.get(credentials, :futures_base_url) do
+      nil ->
+        Logger.warning("Binance: no coinm_futures_base_url configured in credentials")
+        ""
+      url -> url
+    end
     base <> "/v1/order"
   end
 
