@@ -44,7 +44,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "symbol" => trading_symbol,
       "side" => "BUY",
       "type" => "MARKET",
-      "quantity" => qty_str
+      "quantity" => qty_str,
+      "newOrderRespType" => "RESULT"
     }
 
     case signed_request(:post, url, params, credentials) do
@@ -81,7 +82,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "symbol" => trading_symbol,
         "side" => "SELL",
         "type" => "MARKET",
-        "quantity" => qty_str
+        "quantity" => qty_str,
+        "newOrderRespType" => "RESULT"
       }
 
       case signed_request(:post, url, params, credentials) do
@@ -162,7 +164,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "symbol" => trading_symbol,
       "side" => "SELL",
       "type" => "MARKET",
-      "quantity" => qty_str
+      "quantity" => qty_str,
+      "newOrderRespType" => "RESULT"
     }
 
     case signed_request(:post, url, params, credentials) do
@@ -206,7 +209,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "symbol" => trading_symbol,
         "side" => "BUY",
         "type" => "MARKET",
-        "quantity" => qty_str
+        "quantity" => qty_str,
+        "newOrderRespType" => "RESULT"
       }
 
       case signed_request(:post, url, params, credentials) do
