@@ -380,6 +380,51 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
     end
   end
 
+  @doc """
+  Get USDS-M futures account balance via /fapi/v2/balance.
+  Returns non-zero asset balances with wallet and available amounts.
+  """
+  def get_futures_account(credentials) do
+    futures_url = resolve_futures_base_url(credentials)
+
+    if futures_url == "" do
+      {:error, :no_futures_url_configured}
+    else
+      case signed_request(:get, futures_url <> "/v2/balance", %{}, credentials) do
+        {:ok, balances} when is_list(balances) ->
+          non_zero = Enum.filter(balances, fn b ->
+            {wb, _} = Float.parse(b["balance"] || "0")
+            wb != 0.0
+          end)
+
+          assets = Enum.map(non_zero, fn b ->
+            %{
+              asset: b["asset"],
+              wallet_balance: parse_float_safe(b["balance"]),
+              available_balance: parse_float_safe(b["availableBalance"] || b["withdrawAvailable"]),
+              unrealized_pnl: parse_float_safe(b["crossUnPnl"] || "0")
+            }
+          end)
+
+          total_wallet = Enum.reduce(assets, 0.0, fn a, acc -> acc + a.wallet_balance end)
+          total_available = Enum.reduce(assets, 0.0, fn a, acc -> acc + a.available_balance end)
+
+          {:ok, %{
+            assets: assets,
+            total_wallet_balance: total_wallet,
+            total_available_balance: total_available,
+            market_type: "usds_futures"
+          }}
+
+        {:ok, %{"code" => code, "msg" => msg}} ->
+          {:error, %{code: code, message: msg}}
+
+        error ->
+          error
+      end
+    end
+  end
+
   # ========================================================================
   # SYMBOL NORMALIZATION
   # ========================================================================

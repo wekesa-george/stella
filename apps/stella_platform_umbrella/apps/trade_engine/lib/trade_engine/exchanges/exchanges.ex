@@ -54,27 +54,31 @@ defmodule TradeEngine.Exchanges.Exchanges do
 
   @doc "List exchange credentials for a user (without encrypted fields)"
   def list_user_credentials(user_id) do
+    adapter_names = adapter_name_map()
+
     ExchangeConfig
     |> where([c], c.user_id == ^user_id)
     |> order_by([c], desc: :created_at)
     |> Repo.all()
-    |> Enum.map(&sanitize_credential/1)
+    |> Enum.map(&sanitize_credential(&1, adapter_names))
   end
 
   @doc "List exchange credentials for a service account (without encrypted fields)"
   def list_service_account_credentials(service_account_id) do
+    adapter_names = adapter_name_map()
+
     ExchangeConfig
     |> where([c], c.service_account_id == ^service_account_id)
     |> order_by([c], desc: :created_at)
     |> Repo.all()
-    |> Enum.map(&sanitize_credential/1)
+    |> Enum.map(&sanitize_credential(&1, adapter_names))
   end
 
   @doc "Get a specific credential by ID (without encrypted fields)"
   def get_credential(id) do
     case Repo.get(ExchangeConfig, id) do
       nil -> {:error, :not_found}
-      cred -> {:ok, sanitize_credential(cred)}
+      cred -> {:ok, sanitize_credential(cred, adapter_name_map())}
     end
   end
 
@@ -84,7 +88,7 @@ defmodule TradeEngine.Exchanges.Exchanges do
     |> ExchangeConfig.changeset(attrs)
     |> Repo.insert()
     |> case do
-      {:ok, cred} -> {:ok, sanitize_credential(cred)}
+      {:ok, cred} -> {:ok, sanitize_credential(cred, adapter_name_map())}
       {:error, changeset} -> {:error, format_errors(changeset)}
     end
   end
@@ -100,7 +104,7 @@ defmodule TradeEngine.Exchanges.Exchanges do
         |> ExchangeConfig.changeset(attrs)
         |> Repo.update()
         |> case do
-          {:ok, updated} -> {:ok, sanitize_credential(updated)}
+          {:ok, updated} -> {:ok, sanitize_credential(updated, adapter_name_map())}
           {:error, changeset} -> {:error, format_errors(changeset)}
         end
     end
@@ -140,13 +144,27 @@ defmodule TradeEngine.Exchanges.Exchanges do
   # PRIVATE
   # ========================================================================
 
+  # Build a map of adapter_id => %{name, code} for enriching credentials
+  defp adapter_name_map do
+    case Repo.query("SELECT id, code, name FROM exchange.adapters") do
+      {:ok, %{rows: rows}} ->
+        Map.new(rows, fn [id, code, name] -> {id, %{name: name, code: code}} end)
+      _ ->
+        %{}
+    end
+  end
+
   # Strip encrypted fields — never expose API keys through admin endpoints
-  defp sanitize_credential(cred) do
+  defp sanitize_credential(cred, adapter_names \\ %{}) do
+    adapter_info = Map.get(adapter_names, cred.adapter_id, %{})
+
     %{
       id: cred.id,
       user_id: cred.user_id,
       service_account_id: cred.service_account_id,
       adapter_id: cred.adapter_id,
+      adapter_name: adapter_info[:name],
+      adapter_code: adapter_info[:code],
       label: cred.exchange_name,
       status: cred.status,
       auth_model: cred.auth_model,

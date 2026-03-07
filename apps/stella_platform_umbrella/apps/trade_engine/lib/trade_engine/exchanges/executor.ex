@@ -88,6 +88,87 @@ defmodule TradeEngine.Exchanges.Executor do
     end
   end
 
+  @doc """
+  Get normalized balance for a credential. Supports both spot and futures.
+  Pass market_type: "usds_futures" to fetch futures balance for Binance.
+  Returns a normalized map with :total_balance, :available_balance, :assets, :currency.
+  """
+  def get_balance(credential_id, opts \\ []) do
+    market_type = Keyword.get(opts, :market_type, "spot")
+
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      result = if market_type in ["usds_futures", "coinm_futures"] and
+                  function_exported?(adapter, :get_futures_account, 1) do
+        adapter.get_futures_account(creds)
+      else
+        adapter.get_account(creds)
+      end
+
+      case result do
+        {:ok, data} ->
+          {:ok, normalize_balance(data, adapter, market_type)}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  defp normalize_balance(%{total_wallet_balance: total, total_available_balance: avail, assets: assets}, _adapter, market_type) do
+    %{
+      total_balance: total,
+      available_balance: avail,
+      currency: "USDT",
+      market_type: market_type,
+      assets: assets
+    }
+  end
+
+  # Alpaca returns equity/cash/buying_power
+  defp normalize_balance(%{equity: equity, cash: cash, buying_power: bp} = data, _adapter, _market_type) do
+    %{
+      total_balance: equity,
+      available_balance: bp,
+      currency: "USD",
+      market_type: "spot",
+      assets: [%{asset: "USD", wallet_balance: cash, available_balance: bp, unrealized_pnl: equity - cash}],
+      account_status: data[:status]
+    }
+  end
+
+  # Binance spot returns balances list
+  defp normalize_balance(%{balances: balances}, _adapter, _market_type) when is_list(balances) do
+    assets = Enum.map(balances, fn b ->
+      free = parse_balance_float(b["free"])
+      locked = parse_balance_float(b["locked"])
+      %{asset: b["asset"], wallet_balance: free + locked, available_balance: free, unrealized_pnl: 0.0}
+    end)
+
+    total = Enum.reduce(assets, 0.0, fn a, acc -> acc + a.wallet_balance end)
+    avail = Enum.reduce(assets, 0.0, fn a, acc -> acc + a.available_balance end)
+
+    %{
+      total_balance: total,
+      available_balance: avail,
+      currency: "MULTI",
+      market_type: "spot",
+      assets: assets
+    }
+  end
+
+  defp normalize_balance(data, _adapter, market_type) do
+    %{total_balance: 0.0, available_balance: 0.0, currency: "UNKNOWN", market_type: market_type, raw: data}
+  end
+
+  defp parse_balance_float(nil), do: 0.0
+  defp parse_balance_float(n) when is_number(n), do: n * 1.0
+  defp parse_balance_float(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, _} -> f
+      :error -> 0.0
+    end
+  end
+
   @doc "Normalize a symbol for a specific purpose"
   def normalize_symbol(credential_id, symbol, purpose) do
     with {:ok, adapter, _creds} <- resolve(credential_id) do

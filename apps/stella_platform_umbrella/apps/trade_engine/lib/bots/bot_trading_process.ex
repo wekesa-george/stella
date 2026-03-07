@@ -17,6 +17,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
   alias TradeEngine.Bots.{BotRegistry, BotLogger}
   alias TradeEngine.Exchanges.Executor
+  alias TradeEngine.Trading.OrderManager
   alias TradeEngine.Risk.{AssetTierManager, VirtualBalanceManager}
   alias TradeEngine.Strategies.Behaviour, as: StrategyBehaviour
 
@@ -166,8 +167,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     ]
 
     result = case String.upcase(to_string(side)) do
-      "LONG" -> Executor.execute_long(state.credential_id, symbol, quantity, bot_context)
-      "SHORT" -> Executor.execute_short(state.credential_id, symbol, quantity, bot_context)
+      "LONG" -> OrderManager.execute_long(state.credential_id, symbol, quantity, bot_context)
+      "SHORT" -> OrderManager.execute_short(state.credential_id, symbol, quantity, bot_context)
       _ -> {:error, :invalid_side}
     end
 
@@ -466,6 +467,20 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     # Delegate position sizing to strategy module
     case strategy.calculate_position_size(signal, context) do
       {:ok, quantity, position_value} ->
+        # Round quantity to exchange precision (Binance truncates to step size)
+        qty_precision = exchange_qty_precision(signal.symbol, state.market_type)
+        rounded_qty = Float.floor(quantity * :math.pow(10, qty_precision)) / :math.pow(10, qty_precision)
+
+        # If rounded notional is below minimum, bump quantity up to meet it
+        rounded_notional = rounded_qty * current_price
+        quantity = if rounded_notional < effective_min_notional and current_price > 0 do
+          min_qty = Float.ceil(effective_min_notional / current_price * :math.pow(10, qty_precision)) / :math.pow(10, qty_precision)
+          Logger.info("[BotTrading] Bumping qty from #{Float.round(rounded_qty, 6)} to #{Float.round(min_qty, 6)} to meet $#{effective_min_notional} min notional")
+          min_qty
+        else
+          rounded_qty
+        end
+
         notional = quantity * current_price
         if notional < effective_min_notional do
           Logger.warning("[BotTrading] Notional too low: $#{Float.round(notional, 2)} < $#{effective_min_notional} min for #{signal.symbol}")
@@ -511,10 +526,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           exchange_result = case signal.direction do
             :long ->
               Logger.info("Bot #{state.bot_id} BUY: #{signal.symbol} qty=#{Float.round(quantity, 6)} via #{inspect(strategy)}")
-              Executor.execute_long(state.credential_id, signal.symbol, quantity, bot_context)
+              OrderManager.execute_long(state.credential_id, signal.symbol, quantity, bot_context)
             :short ->
               Logger.info("Bot #{state.bot_id} SHORT: #{signal.symbol} qty=#{Float.round(quantity, 6)} via #{inspect(strategy)}")
-              Executor.execute_short(state.credential_id, signal.symbol, quantity, bot_context)
+              OrderManager.execute_short(state.credential_id, signal.symbol, quantity, bot_context)
             _ ->
               {:error, :invalid_direction}
           end
@@ -607,8 +622,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     ]
 
     exchange_result = case pos.direction do
-      :long -> Executor.close_long(state.credential_id, pos.symbol, pos.quantity, pos.entry_price, bot_context)
-      :short -> Executor.close_short(state.credential_id, pos.symbol, pos.quantity, pos.entry_price, bot_context)
+      :long -> OrderManager.close_long(state.credential_id, pos.symbol, pos.quantity, pos.entry_price, bot_context)
+      :short -> OrderManager.close_short(state.credential_id, pos.symbol, pos.quantity, pos.entry_price, bot_context)
       _ -> {:error, :invalid_direction}
     end
 
@@ -721,6 +736,18 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       signal[:take_profit] -> to_float(signal[:take_profit])
       signal[:target_price] -> to_float(signal[:target_price])
       true -> nil
+    end
+  end
+
+  # Quantity precision matching Binance step sizes
+  defp exchange_qty_precision(symbol, market_type) do
+    is_futures = market_type in ["usds_futures", "coinm_futures"]
+    cond do
+      String.starts_with?(symbol, "BTC") and is_futures -> 3
+      String.starts_with?(symbol, "ETH") and is_futures -> 3
+      String.starts_with?(symbol, "BTC") -> 5
+      String.starts_with?(symbol, "ETH") -> 4
+      true -> 3
     end
   end
 

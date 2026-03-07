@@ -280,6 +280,40 @@ defmodule TradeEngine.API do
     {:ok, snapshots}
   end
 
+  @doc "Get platform-wide equity curve (aggregated across all bots)"
+  def get_platform_equity_curve(opts \\ []) do
+    limit = Keyword.get(opts, :limit, 200)
+    since = Keyword.get(opts, :since)
+
+    import Ecto.Query
+    alias TradeEngine.Trading.EquitySnapshot
+
+    # Aggregate equity by snapshot time bucket (hourly) across all bots
+    query = from(s in EquitySnapshot,
+      group_by: fragment("date_trunc('hour', ?)", s.snapshot_at),
+      order_by: [asc: fragment("date_trunc('hour', ?)", s.snapshot_at)],
+      select: %{
+        snapshot_at: fragment("date_trunc('hour', ?)", s.snapshot_at),
+        total_equity_usd: sum(s.total_equity_usd),
+        unrealized_pnl_usd: sum(s.unrealized_pnl_usd),
+        realized_pnl_usd: sum(s.realized_pnl_usd),
+        open_positions: sum(s.open_positions),
+        bot_count: count(fragment("DISTINCT ?", s.bot_id))
+      },
+      limit: ^limit
+    )
+
+    query = if since do
+      from(s in query, where: s.snapshot_at > ^since)
+    else
+      query
+    end
+
+    {:ok, Repo.all(query)}
+  rescue
+    e -> {:error, %{reason: :query_failed, detail: Exception.message(e)}}
+  end
+
   @doc "Get list of running bot trading processes"
   def get_bot_processes do
     {:ok, BotSupervisor.which_children()}
@@ -451,6 +485,14 @@ defmodule TradeEngine.API do
       _ -> query
     end
     orders = TradeEngine.Repo.all(query)
+    enriched = orders |> Enum.map(&Map.from_struct/1) |> Enrichment.enrich_orders()
+    {:ok, enriched}
+  rescue
+    e -> {:error, %{reason: :query_failed, detail: Exception.message(e)}}
+  end
+
+  def get_recent_orders(limit \\ 50) do
+    orders = TradeEngine.Trading.OrderManager.list_recent(limit)
     enriched = orders |> Enum.map(&Map.from_struct/1) |> Enrichment.enrich_orders()
     {:ok, enriched}
   rescue

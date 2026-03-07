@@ -85,9 +85,10 @@ defmodule TradeEngine.Application do
       {TradeEngine.Bots.HeartbeatTracker, []},
       {TradeEngine.Risk.RiskMonitor, []},
 
-      # Phase: Alert persistence and notification
+      # Phase: Alert persistence, notification, and incident auto-creation
       {TradeEngine.Alerts.AlertPersister, []},
       {TradeEngine.Alerts.NotificationDispatcher, []},
+      {TradeEngine.Operations.IncidentManager, []},
 
       # Per-bot structured logging persistence
       {TradeEngine.Bots.BotLogPersister, []},

@@ -78,15 +78,21 @@ defmodule TradeEngine.Infra.Monitor do
 
   defp collect_db_metrics do
     try do
-      # Check Ecto pool stats if available
       pool_size = Application.get_env(:trade_engine, TradeEngine.Repo)[:pool_size] || 10
+
+      # Measure DB round-trip latency with a simple query
+      {latency_us, _} = :timer.tc(fn ->
+        TradeEngine.Repo.query("SELECT 1", [], timeout: 3_000)
+      end)
+      latency_ms = Float.round(latency_us / 1_000, 1)
 
       %{
         pool_size: pool_size,
-        status: "connected"
+        status: "connected",
+        latency_ms: latency_ms
       }
     rescue
-      _ -> %{pool_size: 0, status: "unknown"}
+      _ -> %{pool_size: 0, status: "unknown", latency_ms: 0.0}
     end
   end
 

@@ -40,7 +40,7 @@ defmodule TradeEngine.Trading.EquitySnapshot do
   def changeset(snapshot, attrs) do
     snapshot
     |> cast(attrs, @cast_fields)
-    |> validate_required([:bot_id, :user_id, :total_equity_usd, :snapshot_source, :snapshot_at])
+    |> validate_required([:bot_id, :total_equity_usd, :snapshot_source, :snapshot_at])
   end
 
   @doc "Insert a new equity snapshot row."

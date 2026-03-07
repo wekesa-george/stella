@@ -23,6 +23,7 @@ defmodule TradeEngine.API.Controller do
     POST   /api/bots/:bot_id/stop        Stop bot
     GET    /api/bots/:bot_id/positions    Get bot positions
     GET    /api/bots/:bot_id/orders       Get bot orders
+    GET    /api/orders/recent             Recent orders (all bots, dashboard feed)
 
   CREDENTIALS
     GET    /api/service-accounts/:sa_id/credentials  Service account credentials
@@ -171,8 +172,27 @@ defmodule TradeEngine.API.Controller do
     json_response(conn, API.get_bot_positions(bot_id))
   end
 
+  get "/api/orders/recent" do
+    limit = (conn.query_params["limit"] || "50") |> parse_number() |> trunc() |> min(200)
+    json_response(conn, API.get_recent_orders(limit))
+  end
+
   get "/api/bots/:bot_id/orders" do
     json_response(conn, API.get_bot_orders(bot_id))
+  end
+
+  get "/api/platform/equity-curve" do
+    limit = (conn.query_params["limit"] || "200") |> parse_number() |> trunc() |> min(500)
+    opts = [limit: limit]
+    opts = case conn.query_params["since"] do
+      nil -> opts
+      since_str ->
+        case DateTime.from_iso8601(since_str) do
+          {:ok, dt, _} -> Keyword.put(opts, :since, dt)
+          _ -> opts
+        end
+    end
+    json_response(conn, API.get_platform_equity_curve(opts))
   end
 
   get "/api/bots/:bot_id/equity-curve" do
@@ -665,6 +685,53 @@ defmodule TradeEngine.API.Controller do
   end
 
   # ============================================================================
+  # INCIDENTS
+  # ============================================================================
+
+  get "/api/incidents" do
+    limit = min(String.to_integer(Map.get(conn.params, "limit", "50")), 200)
+    incidents =
+      TradeEngine.Operations.Incident.list_recent(limit)
+      |> Enum.map(&sanitize/1)
+
+    json_response(conn, {:ok, %{incidents: incidents}})
+  end
+
+  get "/api/incidents/open" do
+    limit = min(String.to_integer(Map.get(conn.params, "limit", "50")), 200)
+    incidents =
+      TradeEngine.Operations.Incident.list_open(limit)
+      |> Enum.map(&sanitize/1)
+
+    json_response(conn, {:ok, %{incidents: incidents}})
+  end
+
+  patch "/api/incidents/:id" do
+    case TradeEngine.Operations.Incident.update(id, conn.body_params) do
+      {:ok, incident} ->
+        json_response(conn, {:ok, sanitize(incident)})
+      {:error, changeset} ->
+        json_response(conn, {:error, inspect(changeset.errors)})
+    end
+  end
+
+  post "/api/incidents/:id/resolve" do
+    attrs = %{
+      "status" => "resolved",
+      "action_taken" => conn.body_params["action_taken"] || conn.body_params["notes"],
+      "notes" => conn.body_params["notes"],
+      "time_to_resolve_mins" => conn.body_params["time_to_resolve_mins"]
+    } |> Enum.reject(fn {_, v} -> is_nil(v) end) |> Map.new()
+
+    case TradeEngine.Operations.Incident.update(id, attrs) do
+      {:ok, incident} ->
+        json_response(conn, {:ok, sanitize(incident)})
+      {:error, changeset} ->
+        json_response(conn, {:error, inspect(changeset.errors)})
+    end
+  end
+
+  # ============================================================================
   # CATCH-ALL
   # ============================================================================
 
@@ -817,5 +884,18 @@ defmodule TradeEngine.API.Controller do
   end
   defp sanitize(list) when is_list(list), do: Enum.map(list, &sanitize/1)
   defp sanitize(tuple) when is_tuple(tuple), do: Tuple.to_list(tuple) |> sanitize()
+  defp sanitize(bin) when is_binary(bin) do
+    if String.valid?(bin) do
+      bin
+    else
+      # Raw binary (e.g. 16-byte UUID) — format as UUID string if 16 bytes, else hex
+      case bin do
+        <<a::binary-4, b::binary-2, c::binary-2, d::binary-2, e::binary-6>> ->
+          Enum.map_join([a, b, c, d, e], "-", &Base.encode16(&1, case: :lower))
+        _ ->
+          Base.encode16(bin, case: :lower)
+      end
+    end
+  end
   defp sanitize(other), do: other
 end

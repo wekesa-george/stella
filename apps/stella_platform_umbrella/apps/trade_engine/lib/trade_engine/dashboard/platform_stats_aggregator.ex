@@ -52,11 +52,17 @@ defmodule TradeEngine.Dashboard.PlatformStatsAggregator do
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp aggregate_stats do
+    pnl = pnl_stats()
+    capital = capital_stats()
+
     %{
       bots: bot_stats(),
       positions: position_stats(),
       orders: order_stats(),
-      pnl: pnl_stats(),
+      pnl: pnl,
+      capital: capital,
+      total_equity: capital.total_capital + pnl.total_realized,
+      open_positions: position_stats_count(),
       collected_at: DateTime.utc_now() |> DateTime.to_iso8601()
     }
   rescue
@@ -136,6 +142,28 @@ defmodule TradeEngine.Dashboard.PlatformStatsAggregator do
     }
   rescue
     _ -> %{realized_today: 0.0, total_realized: 0.0}
+  end
+
+  defp capital_stats do
+    allocations = TradeEngine.Risk.CapitalAllocator.all_allocations()
+
+    total_capital = allocations
+      |> Map.values()
+      |> Enum.reduce(0.0, fn alloc, acc -> acc + (alloc[:total_capital] || 0.0) end)
+
+    active_capital = allocations
+      |> Map.values()
+      |> Enum.reduce(0.0, fn alloc, acc -> acc + (alloc[:active_capital] || 0.0) end)
+
+    %{total_capital: total_capital, active_capital: active_capital, accounts: map_size(allocations)}
+  rescue
+    _ -> %{total_capital: 0.0, active_capital: 0.0, accounts: 0}
+  end
+
+  defp position_stats_count do
+    Repo.one(from(p in Position, where: p.status == "open", select: count(p.id)), timeout: 5_000) || 0
+  rescue
+    _ -> 0
   end
 
   defp decimal_to_float(nil), do: 0.0

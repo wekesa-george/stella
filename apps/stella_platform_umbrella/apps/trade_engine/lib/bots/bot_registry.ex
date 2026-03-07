@@ -872,19 +872,34 @@ defmodule TradeEngine.Bots.BotRegistry do
   defp record_equity_snapshot(runtime, source) do
     try do
       equity = runtime.allocated_capital + runtime.total_pnl
-      EquitySnapshot.insert_snapshot(%{
+
+      # user_id FK references auth.users — only set if bot has a real user_id
+      # Service account bots don't have a user_id in auth.users
+      user_id = runtime.user_id
+
+      # Skip snapshot if no valid user_id (service account bots need user_id nullable)
+      # For now, use direct insert to bypass the FK when user_id is nil
+      attrs = %{
         bot_id: runtime.id,
-        user_id: runtime.user_id || runtime.service_account_id,
         total_equity_usd: Decimal.from_float(equity + 0.0),
         available_balance_usd: Decimal.from_float(runtime.active_capital + 0.0),
         unrealized_pnl_usd: Decimal.new(0),
         realized_pnl_usd: Decimal.from_float(runtime.total_pnl + 0.0),
         open_positions: runtime.open_positions || 0,
         snapshot_source: source,
-        snapshot_at: DateTime.utc_now()
-      })
+        snapshot_at: DateTime.utc_now(),
+        high_water_mark_usd: Decimal.from_float(equity + 0.0)
+      }
+
+      attrs = if user_id, do: Map.put(attrs, :user_id, user_id), else: attrs
+
+      case EquitySnapshot.insert_snapshot(attrs) do
+        {:ok, _} -> :ok
+        {:error, changeset} ->
+          Logger.warning("Equity snapshot insert failed: #{inspect(changeset.errors)}")
+      end
     rescue
-      e -> Logger.debug("Equity snapshot failed: #{inspect(e)}")
+      e -> Logger.warning("Equity snapshot exception: #{inspect(e)}")
     end
   end
 

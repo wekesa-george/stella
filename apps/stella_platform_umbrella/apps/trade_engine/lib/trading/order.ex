@@ -70,9 +70,9 @@ defmodule TradeEngine.Trading.Order do
       :cancelled_at, :cancel_reason, :rejection_reason,
       :exchange_response, :metadata
     ])
-    |> validate_required([:symbol, :side, :order_type, :quantity, :user_id])
+    |> validate_required([:symbol, :side, :order_type, :quantity])
     |> validate_inclusion(:side, ["buy", "sell"])
     |> validate_inclusion(:order_type, ["market", "limit", "stop", "stop_limit"])
-    |> validate_inclusion(:status, ["pending", "open", "filled", "cancelled", "rejected"])
+    |> validate_inclusion(:status, ["pending", "submitted", "open", "filled", "partially_filled", "cancelled", "rejected", "failed"])
   end
 end

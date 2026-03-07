@@ -57,14 +57,17 @@ defmodule AdminGatewayWeb.OrderChannel do
     %{
       id: order.id,
       bot_id: Map.get(order, :bot_id),
+      user_id: Map.get(order, :user_id),
       symbol: order.symbol,
       side: order.side,
-      order_type: Map.get(order, :order_type, "limit"),
+      order_type: Map.get(order, :order_type, "market"),
       price: Map.get(order, :price) |> to_string(),
+      execution_price: Map.get(order, :execution_price) |> to_string(),
       quantity: Map.get(order, :quantity) |> to_string(),
       filled_quantity: Map.get(order, :filled_quantity, 0) |> to_string(),
       status: order.status,
-      created_at: order.inserted_at
+      exchange_order_id: Map.get(order, :exchange_order_id),
+      created_at: Map.get(order, :created_at) || Map.get(order, :inserted_at)
     }
   end
 
@@ -72,12 +75,17 @@ defmodule AdminGatewayWeb.OrderChannel do
     %{
       id: Map.get(order, :id),
       bot_id: Map.get(order, :bot_id),
+      user_id: Map.get(order, :user_id),
       symbol: Map.get(order, :symbol),
       side: Map.get(order, :side),
-      order_type: Map.get(order, :order_type, "limit"),
+      order_type: Map.get(order, :order_type, "market"),
       price: Map.get(order, :price) |> to_string(),
+      execution_price: Map.get(order, :execution_price) |> to_string(),
       quantity: Map.get(order, :quantity) |> to_string(),
-      status: Map.get(order, :status)
+      filled_quantity: Map.get(order, :filled_quantity, 0) |> to_string(),
+      status: Map.get(order, :status),
+      exchange_order_id: Map.get(order, :exchange_order_id),
+      created_at: Map.get(order, :created_at)
     }
   end
 end
