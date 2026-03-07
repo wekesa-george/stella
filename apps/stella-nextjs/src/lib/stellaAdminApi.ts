@@ -939,3 +939,42 @@ export async function archiveIncidentMonth(month: string) {
 export async function getArchivedMonths() {
   return request('/incidents/archived');
 }
+
+// ─── Escalation Matrix ──────────────────────────────────────────────
+export async function getEscalationMatrix() {
+  return request('/escalation-matrix');
+}
+
+export async function createEscalationRule(body: Record<string, any>) {
+  return request('/escalation-matrix', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateEscalationRule(id: string, body: Record<string, any>) {
+  return request(`/escalation-matrix/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteEscalationRule(id: string) {
+  return request(`/escalation-matrix/${id}`, { method: 'DELETE' });
+}
+
+export async function previewEscalationChain(priority: string, category?: string) {
+  const qs = category ? `priority=${priority}&category=${category}` : `priority=${priority}`;
+  return request(`/escalation-matrix/resolve?${qs}`);
+}
+
+export async function getEscalationLog(incidentId: string) {
+  return request(`/incidents/${incidentId}/escalation-log`);
+}
+
+export async function acknowledgeEscalation(incidentId: string, adminId: string) {
+  return request(`/incidents/${incidentId}/acknowledge-escalation`, {
+    method: 'POST',
+    body: JSON.stringify({ adminId }),
+  });
+}

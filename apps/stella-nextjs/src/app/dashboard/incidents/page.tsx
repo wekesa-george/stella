@@ -20,6 +20,8 @@ import {
   archiveIncidentMonth,
   getArchivedMonths,
   createIncidentCorrection,
+  getEscalationLog,
+  acknowledgeEscalation,
 } from "@/lib/stellaAdminApi";
 import { useShiftState } from "@/components/shift/useShiftState";
 import { ActiveShiftBar } from "@/components/shift/ActiveShiftBar";
@@ -107,6 +109,8 @@ interface Incident {
   isCorrection: boolean;
   createdAt: string;
   updatedAt: string;
+  currentEscalationTier?: number;
+  escalationDeadline?: string | null;
   killSwitchActivations?: KillSwitchActivation[];
   rogueBotIncidents?: RogueBotIncident[];
   daysOpen?: number;
@@ -1524,6 +1528,63 @@ function CreateIncidentDialog({
 // Incident Detail Sheet
 // ============================================================================
 
+function EscalationTimeline({ incidentId }: { incidentId: string }) {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getEscalationLog(incidentId);
+        if (!cancelled) setLogs(res?.data || []);
+      } catch {
+        if (!cancelled) setLogs([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [incidentId]);
+
+  if (loading) return <div className="text-[10px] text-[#5a7090] font-mono">Loading escalation log...</div>;
+  if (logs.length === 0) return null;
+
+  return (
+    <div className="bg-[rgba(245,166,35,0.04)] border border-[rgba(245,166,35,0.15)] rounded-md px-3 py-2">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-[#f5a623]">Escalation Timeline</span>
+      <div className="relative pl-4 mt-2">
+        <div className="absolute left-1 top-0 bottom-0 w-px bg-[rgba(245,166,35,0.3)]" />
+        {logs.map((log: any) => (
+          <div key={log.id} className="relative mb-2.5 last:mb-0">
+            <div
+              className="absolute -left-[11px] top-1 w-2 h-2 rounded-full"
+              style={{
+                backgroundColor: log.acknowledgedAt ? "#00e5a0" : log.autoEscalated ? "#ff4757" : "#f5a623",
+              }}
+            />
+            <div className="text-[10px] font-mono">
+              <span className="text-[#e8edf3] font-bold">Tier {log.tier}</span>
+              <span className="text-[#5a7090] ml-2">
+                {new Date(log.createdAt).toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
+              </span>
+              {log.autoEscalated && <span className="text-[#ff4757] ml-1.5">(auto)</span>}
+            </div>
+            <div className="text-[9px] text-[#5a7090] font-mono mt-0.5">
+              Channels: {(log.notificationChannelsUsed || []).join(", ") || "—"}
+            </div>
+            {log.acknowledgedAt && (
+              <div className="text-[9px] text-[#00e5a0] font-mono mt-0.5">
+                Acknowledged: {new Date(log.acknowledgedAt).toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function IncidentDetailSheet({
   incident,
   open,
@@ -1537,6 +1598,7 @@ function IncidentDetailSheet({
 }) {
   if (!incident) return null;
   const pConfig = PRIORITY_CONFIG[incident.priority];
+  const hasDeadline = incident.escalationDeadline && new Date(incident.escalationDeadline) > new Date();
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -1546,11 +1608,39 @@ function IncidentDetailSheet({
             <span className="font-mono text-[#FFD700]">{incident.incidentNumber}</span>
             <PriorityBadge priority={incident.priority} />
             <StatusBadge status={incident.status} />
+            {(incident.currentEscalationTier ?? 0) > 0 && (
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[rgba(245,166,35,0.15)] text-[#f5a623] border border-[rgba(245,166,35,0.3)]">
+                T{incident.currentEscalationTier}
+              </span>
+            )}
           </SheetTitle>
         </SheetHeader>
         <div className="mt-4 space-y-4">
           {/* Priority bar */}
           <div className="h-1 rounded-full" style={{ backgroundColor: pConfig.color }} />
+
+          {/* SLA deadline warning */}
+          {hasDeadline && (
+            <div className="bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.25)] rounded-md px-3 py-2 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#ff4757]">SLA Deadline</span>
+                <p className="text-[10px] text-[#ff4757] font-mono mt-0.5">
+                  Auto-escalation at {new Date(incident.escalationDeadline!).toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-[10px] border-[#00e5a0] text-[#00e5a0] hover:bg-[rgba(0,229,160,0.1)] h-7"
+                onClick={async () => {
+                  await acknowledgeEscalation(incident.id, "current-admin");
+                  onClose();
+                }}
+              >
+                Acknowledge
+              </Button>
+            </div>
+          )}
 
           {/* Title */}
           <h3 className="text-sm font-semibold text-foreground">{incident.title}</h3>
@@ -1602,8 +1692,13 @@ function IncidentDetailSheet({
             </div>
           )}
 
-          {/* Escalated info */}
-          {incident.escalatedTo && (
+          {/* Escalation Timeline */}
+          {incident.status === "escalated" && (
+            <EscalationTimeline incidentId={incident.id} />
+          )}
+
+          {/* Escalated info (legacy display) */}
+          {incident.escalatedTo && !incident.currentEscalationTier && (
             <div className="bg-[rgba(245,166,35,0.06)] border border-[rgba(245,166,35,0.2)] rounded-md px-3 py-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#f5a623]">Escalated To</span>
               <p className="text-xs text-[#f5a623] mt-0.5">{incident.escalatedTo}</p>
@@ -1633,10 +1728,10 @@ function IncidentDetailSheet({
 
           {/* Actions */}
           <div className="flex flex-wrap gap-2 pt-2 border-t border-dark">
-            {incident.status === "open" && (
+            {(incident.status === "open" || incident.status === "escalated") && (
               <Button size="sm" variant="outline" className="text-xs border-[#f5a623] text-[#f5a623] hover:bg-[rgba(245,166,35,0.1)]"
                 onClick={async () => { await escalateIncident(incident.id); onClose(); }}>
-                Escalate
+                {incident.status === "escalated" ? `Escalate → T${(incident.currentEscalationTier ?? 0) + 2}` : "Escalate"}
               </Button>
             )}
             {incident.status !== "resolved" && (

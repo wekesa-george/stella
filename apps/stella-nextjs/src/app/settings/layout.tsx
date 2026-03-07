@@ -83,6 +83,7 @@ const NAV_CONFIG = [
     items: [
       { key: "subscriptions", label: "Users & Subscriptions", href: "/settings/subscriptions", icon: Icons.users },
       { key: "notifications", label: "Notifications & Alerts", href: "/settings/notifications", icon: Icons.bell },
+      { key: "escalation", label: "Escalation Matrix", href: "/settings/escalation", icon: Icons.bolt },
       { key: "billing", label: "Billing & Fees", href: "/settings/billing", icon: Icons.creditCard },
     ],
   },
