@@ -651,7 +651,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   # PRIVATE — Helpers
   # ========================================================================
 
-  defp spot_url(credentials), do: credentials.base_url
+  defp spot_url(credentials), do: credentials.base_url <> "/api"
 
   defp resolve_futures_base_url(credentials) do
     case Map.get(credentials, :usds_futures_base_url) || Map.get(credentials, :futures_base_url) do
