@@ -856,7 +856,7 @@ function LogStream({ botId, logEvents }: { botId: string; logEvents: any[] }) {
         const { getBotLogs } = await import("@/lib/tradingEngineApi");
         const result = await getBotLogs(botId);
         if (result.data && Array.isArray(result.data)) {
-          setLogs(result.data.map((l: any, i: number) => ({
+          setLogs([...result.data].reverse().map((l: any, i: number) => ({
             id: l.id || i,
             level: (l.level || "INFO").toUpperCase(),
             category: l.category || "",
@@ -1075,14 +1075,14 @@ function TabHistory({ botId }: { botId: string }) {
         // Map orders
         if (ordResult.data && Array.isArray(ordResult.data)) {
           setOrders(ordResult.data.map((o: any) => ({
-            id: o.id ?? o.order_id ?? "",
+            id: o.order_id ?? o.id ?? "",
             side: (o.side ?? "BUY").toUpperCase(),
-            pair: o.symbol ?? o.pair ?? "",
+            pair: o.trading_pair ?? o.symbol ?? o.pair ?? "",
             type: (o.order_type ?? o.type ?? "MARKET").toUpperCase(),
-            price: Number(o.price ?? o.avg_fill_price ?? 0),
-            qty: Number(o.quantity ?? o.qty ?? 0),
-            status: (o.status ?? "UNKNOWN").toUpperCase(),
-            createdAt: o.inserted_at ? new Date(o.inserted_at).toLocaleString() : o.created_at ? new Date(o.created_at).toLocaleString() : "--",
+            price: Number(o.execution_price ?? o.order_price ?? o.price ?? o.avg_fill_price ?? 0),
+            qty: Number(o.order_size ?? o.filled_quantity ?? o.quantity ?? o.qty ?? 0),
+            status: (o.order_status ?? o.status ?? "UNKNOWN").toUpperCase(),
+            createdAt: o.timestamp ? new Date(o.timestamp).toLocaleString() : o.created_at ? new Date(o.created_at).toLocaleString() : "--",
           })));
         }
       } catch {
@@ -1464,14 +1464,14 @@ export default function BotDetailPage() {
         }
         if (ordResult.data && Array.isArray(ordResult.data)) {
           setOrderHistory(ordResult.data.map((o: any) => ({
-            id: o.id ?? o.order_id ?? "",
+            id: o.order_id ?? o.id ?? "",
             side: (o.side ?? "BUY").toUpperCase(),
-            pair: o.symbol ?? o.pair ?? "",
+            pair: o.trading_pair ?? o.symbol ?? o.pair ?? "",
             type: (o.order_type ?? o.type ?? "MARKET").toUpperCase(),
-            price: Number(o.price ?? o.avg_fill_price ?? 0),
-            qty: Number(o.quantity ?? o.qty ?? 0),
-            status: (o.status ?? "UNKNOWN").toUpperCase(),
-            createdAt: o.inserted_at ? new Date(o.inserted_at).toLocaleString() : o.created_at ? new Date(o.created_at).toLocaleString() : "--",
+            price: Number(o.execution_price ?? o.order_price ?? o.price ?? o.avg_fill_price ?? 0),
+            qty: Number(o.order_size ?? o.filled_quantity ?? o.quantity ?? o.qty ?? 0),
+            status: (o.order_status ?? o.status ?? "UNKNOWN").toUpperCase(),
+            createdAt: o.timestamp ? new Date(o.timestamp).toLocaleString() : o.created_at ? new Date(o.created_at).toLocaleString() : "--",
           })));
         }
       } catch {
