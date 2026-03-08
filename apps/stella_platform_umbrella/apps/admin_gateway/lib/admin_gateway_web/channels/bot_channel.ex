@@ -58,6 +58,12 @@ defmodule AdminGatewayWeb.BotChannel do
     {:noreply, socket}
   end
 
+  # BotRegistry broadcasts heartbeats as {atom, map} — handle that pattern too
+  def handle_info({:bot_heartbeat, payload}, socket) when is_map(payload) do
+    push(socket, "bot_heartbeat", payload)
+    {:noreply, socket}
+  end
+
   def handle_info({:bot_error, bot_id, error}, socket) do
     push(socket, "bot_error", %{bot_id: bot_id, error: to_string(error)})
     {:noreply, socket}

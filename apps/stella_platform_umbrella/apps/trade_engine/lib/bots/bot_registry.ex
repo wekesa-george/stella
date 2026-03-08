@@ -663,7 +663,7 @@ defmodule TradeEngine.Bots.BotRegistry do
         error_count: runtime.error_count
       })
 
-      if runtime.status == "running" do
+      if runtime.status == "running" and runtime.allocated_capital > 0 do
         record_equity_snapshot(runtime, "periodic")
       end
     end)
