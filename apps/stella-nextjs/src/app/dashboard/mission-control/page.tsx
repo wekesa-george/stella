@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { listBots, getInfraMetrics } from "@/lib/tradingEngineApi";
-import { getAlerts, acknowledgeAlert as ackAlertApi, getInfrastructureStatus } from "@/lib/stellaAdminApi";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { getInfraMetrics } from "@/lib/tradingEngineApi";
+import { acknowledgeAlert as ackAlertApi } from "@/lib/stellaAdminApi";
 import { useBotChannel, useInfraChannel, useAlertChannel, usePlatformChannel } from "@/hooks/usePhoenixChannel";
-import { mapApiBotToUiBot, mapApiAlertToUiAlert, mapWsAlertToUiAlert, mapWsInfraToTradeEngineMetrics, tradeEngineMetricsToCpuRam } from "@/lib/api/mappers";
+import { mapWsAlertToUiAlert, mapWsInfraToTradeEngineMetrics, tradeEngineMetricsToCpuRam } from "@/lib/api/mappers";
 import type { Bot, TradeEngineMetrics, Alert, InfraHistoryPoint } from "@/lib/types/dashboard";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine } from "recharts";
+import { useBots, useAlerts as useAlertsQuery, useCoolifyStatus, useInfraMetrics as useInfraMetricsQuery } from "@/hooks/useQueries";
 
 const MAX_HISTORY = 40;
 const COOLIFY_POLL_INTERVAL = 30_000;
@@ -48,14 +49,27 @@ function formatBytes(bytes: number) {
 const BEAM_MEMORY_REFERENCE_MB = 2048;
 
 export default function MissionControlPage() {
-  const [bots, setBots] = useState<Bot[]>([]);
+  // React Query — parallel data fetching with caching (shared across pages)
+  const { data: botsData } = useBots();
+  const { data: alertsData = [] } = useAlertsQuery({ limit: 20 });
+  const { data: coolifyServices = [] } = useCoolifyStatus();
+  const { data: infraRestData } = useInfraMetricsQuery();
+
   const [infraMetrics, setInfraMetrics] = useState<TradeEngineMetrics | null>(null);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [localAlerts, setLocalAlerts] = useState<Alert[]>([]);
   const [infraHistory, setInfraHistory] = useState<InfraHistoryPoint[]>([]);
   const [showAlerts, setShowAlerts] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [coolifyServices, setCoolifyServices] = useState<CoolifyServiceData[]>([]);
   const historyIndexRef = useRef(0);
+
+  // Derive bots and loading from React Query
+  const bots = botsData?.bots ?? [];
+  const loading = !botsData && !alertsData.length;
+
+  // Sync alerts from React Query to local state for WS merging
+  useEffect(() => {
+    if (alertsData.length > 0) setLocalAlerts(alertsData);
+  }, [alertsData]);
+  const alerts = localAlerts.length > 0 ? localAlerts : alertsData;
 
   // Real-time WS hooks
   const { bots: wsBots } = useBotChannel();
@@ -63,109 +77,37 @@ export default function MissionControlPage() {
   const { alerts: wsAlerts } = useAlertChannel();
   const { stats: platformStats } = usePlatformChannel();
 
-  // Fetch Coolify status
-  const fetchCoolifyStatus = useCallback(async () => {
-    try {
-      const res = await getInfrastructureStatus();
-      const body = res.data as any;
-      if (body?.services && Array.isArray(body.services)) {
-        setCoolifyServices(body.services);
-      }
-    } catch {
-      // Coolify API unavailable
-    }
-  }, []);
-
-  // REST fallback for infra metrics (loads immediately, doesn't wait for WS)
-  const fetchInfraMetricsRest = useCallback(async () => {
-    console.log('[MissionControl] REST fallback: fetching /api/phoenix/infra/metrics...');
-    try {
-      const res = await getInfraMetrics();
-      const body = res.data as any;
-      console.log('[MissionControl] REST response:', res.error ? `ERROR: ${res.error}` : `OK, keys=${body ? Object.keys(body).join(',') : 'null'}`);
-      const payload = body?.data ?? body;
+  // Map REST infra metrics (from React Query) as initial infra data
+  useEffect(() => {
+    if (infraRestData && !infraMetrics && !wsInfraMetrics) {
+      const payload = (infraRestData as any)?.data ?? infraRestData;
       if (payload && (payload.beam || payload.database)) {
-        const mapped = mapWsInfraToTradeEngineMetrics(payload);
-        console.log('[MissionControl] REST mapped metrics:', { cpu: mapped.beam.cpuPercent, mem: mapped.beam.totalMemoryMb, procs: mapped.beam.processCount });
-        setInfraMetrics((prev) => {
-          // Don't override if WS is already delivering data
-          if (prev && wsInfraMetrics) {
-            console.log('[MissionControl] REST: skipping — WS already active');
-            return prev;
-          }
-          console.log('[MissionControl] REST: setting infraMetrics (WS not active yet)');
-          return mapped;
-        });
-      } else {
-        console.log('[MissionControl] REST: no beam/database in payload');
+        setInfraMetrics(mapWsInfraToTradeEngineMetrics(payload));
       }
-    } catch (e) {
-      console.warn('[MissionControl] REST fallback failed:', e);
     }
-  }, [wsInfraMetrics]);
+  }, [infraRestData, infraMetrics, wsInfraMetrics]);
 
-  // Load initial data from APIs (with timeout so page doesn't hang)
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 5000);
-    (async () => {
-      try {
-        const [botsResult, alertsResult] = await Promise.all([
-          listBots().catch(() => ({ data: [] })),
-          getAlerts({ limit: 20 }).catch(() => ({ data: [] })),
-          fetchCoolifyStatus(),
-          fetchInfraMetricsRest(),
-        ]);
+  // React Query handles infra polling via refetchInterval — no manual polling needed
 
-        if (botsResult.data && Array.isArray(botsResult.data)) {
-          setBots(botsResult.data.map(mapApiBotToUiBot));
-        }
-
-        if (alertsResult.data && Array.isArray(alertsResult.data)) {
-          setAlerts(alertsResult.data.map(mapApiAlertToUiAlert));
-        }
-      } catch {
-        // API failed — lists stay empty
-      } finally {
-        clearTimeout(timeout);
-        setLoading(false);
+  // WS bot data is used directly from the hook (wsBots) — no need to merge
+  // The bots variable above already comes from React Query cache
+  // WS bots are merged with REST bots for display
+  const mergedBots = useMemo(() => {
+    if (wsBots.length === 0) return bots;
+    const merged = [...bots];
+    for (const wsBot of wsBots) {
+      const idx = merged.findIndex((b) => b.id === wsBot.id);
+      if (idx >= 0) {
+        merged[idx] = { ...merged[idx], status: (wsBot.status || merged[idx].status) as Bot['status'] };
       }
-    })();
-    return () => clearTimeout(timeout);
-  }, []);
-
-  // REST polling fallback — only when WS is not delivering infra data
-  useEffect(() => {
-    if (wsInfraMetrics) return; // WS is active, no need to poll
-
-    const interval = setInterval(fetchInfraMetricsRest, REST_POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [wsInfraMetrics, fetchInfraMetricsRest]);
-
-  // Overlay WS bot list
-  useEffect(() => {
-    if (wsBots.length > 0) {
-      setBots((prev) => {
-        const updated = [...prev];
-        for (const wsBot of wsBots) {
-          const idx = updated.findIndex((b) => b.id === wsBot.id);
-          const mapped = mapApiBotToUiBot(wsBot as any);
-          if (idx >= 0) {
-            updated[idx] = { ...updated[idx], ...mapped, user: updated[idx].user || mapped.user };
-          } else {
-            updated.push(mapped);
-          }
-        }
-        return updated;
-      });
     }
-  }, [wsBots]);
+    return merged;
+  }, [bots, wsBots]);
 
   // WS infra updates → replace metrics + append history
   useEffect(() => {
     if (!wsInfraMetrics) return;
-    console.log('[MissionControl] WS infra_update received:', { keys: Object.keys(wsInfraMetrics), collected_at: wsInfraMetrics.collected_at });
     const mapped = mapWsInfraToTradeEngineMetrics(wsInfraMetrics);
-    console.log('[MissionControl] WS mapped:', { cpu: mapped.beam.cpuPercent, mem: mapped.beam.totalMemoryMb, procs: mapped.beam.processCount, dbStatus: mapped.dbPool.status });
     setInfraMetrics(mapped);
 
     const { cpu, ram } = tradeEngineMetricsToCpuRam(mapped);
@@ -182,21 +124,17 @@ export default function MissionControlPage() {
     if (wsAlerts.length > 0) {
       const latest = wsAlerts[0];
       const mapped = mapWsAlertToUiAlert(latest);
-      setAlerts((prev) => {
+      setLocalAlerts((prev) => {
         if (prev.some((a) => a.id === mapped.id)) return prev;
         return [mapped, ...prev];
       });
     }
   }, [wsAlerts]);
 
-  // Coolify polling
-  useEffect(() => {
-    const interval = setInterval(fetchCoolifyStatus, COOLIFY_POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [fetchCoolifyStatus]);
+  // Coolify polling handled by React Query refetchInterval in useCoolifyStatus
 
   const handleAckAlert = async (id: number | string) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acked: true } : a)));
+    setLocalAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acked: true } : a)));
     await ackAlertApi(String(id)).catch(console.error);
   };
 
@@ -204,12 +142,13 @@ export default function MissionControlPage() {
     return <DashboardSkeleton />;
   }
 
-  // Compute stats — prefer platform WS stats, fallback to bot-derived
-  const totalEquity = platformStats?.total_equity ?? bots.reduce((s, b) => s + b.equity, 0);
-  const totalPnl = platformStats?.total_pnl ?? bots.reduce((s, b) => s + b.pnl, 0);
-  const running = bots.filter(b => b.status === "running").length;
-  const errors = bots.filter(b => b.status === "error").length;
-  const totalPositions = platformStats?.open_positions ?? bots.reduce((s, b) => s + b.openPositions, 0);
+  // Compute stats — prefer platform WS stats, fallback to bot-derived (use mergedBots for WS accuracy)
+  const displayBots = mergedBots;
+  const totalEquity = platformStats?.total_equity ?? displayBots.reduce((s, b) => s + b.equity, 0);
+  const totalPnl = platformStats?.total_pnl ?? displayBots.reduce((s, b) => s + b.pnl, 0);
+  const running = displayBots.filter(b => b.status === "running").length;
+  const errors = displayBots.filter(b => b.status === "error").length;
+  const totalPositions = platformStats?.open_positions ?? displayBots.reduce((s, b) => s + b.openPositions, 0);
 
   return (
     <div className="flex h-full relative">
@@ -374,7 +313,7 @@ export default function MissionControlPage() {
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
-                {coolifyServices.map((svc) => {
+                {coolifyServices.map((svc: any) => {
                   const isHealthy = svc.status === 'running' && svc.healthy;
                   const isStopped = svc.status === 'stopped' || svc.status === 'exited';
                   const statusColor = isHealthy ? "#00e5a0" : isStopped ? "#ff4757" : "#f5a623";

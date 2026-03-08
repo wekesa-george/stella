@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { listStrategies, updateStrategy } from "@/lib/tradingEngineApi";
+import { useState, useMemo } from "react";
+import { updateStrategy } from "@/lib/tradingEngineApi";
 import type { Strategy, StrategyType, StrategyStatus } from "@/lib/types/strategy";
 import { StrategyCard } from "@/components/dashboard/strategy-card";
 import { StrategyDetailPanel } from "@/components/dashboard/strategy-detail-panel";
@@ -10,10 +10,13 @@ import { RunBacktestModal } from "@/components/backtesting/run-backtest-modal";
 import { StrategyGridSkeleton } from "@/components/ui/skeleton";
 import type { BacktestRun } from "@/lib/types/backtest";
 import { Search } from "lucide-react";
+import { useStrategies } from "@/hooks/useQueries";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/hooks/useQueries";
 
 export default function StrategiesPage() {
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: strategies = [], isLoading: loading } = useStrategies();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -22,49 +25,42 @@ export default function StrategiesPage() {
   const [backtestModalOpen, setBacktestModalOpen] = useState(false);
   const [backtestStrategyId, setBacktestStrategyId] = useState<string | undefined>();
 
-  // Load strategies on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await listStrategies();
-        if (result.data && Array.isArray(result.data)) {
-          setStrategies(result.data as Strategy[]);
-        }
-      } catch {
-        // API failed — list stays empty
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
   // Optimistic status change
   const handleStatusChange = async (id: string, newStatus: StrategyStatus) => {
     const prev = strategies;
-    setStrategies((s) => s.map((st) => st.id === id ? { ...st, status: newStatus } : st));
+    // Optimistic update in cache
+    queryClient.setQueryData(queryKeys.strategies(), (old: Strategy[] | undefined) =>
+      (old ?? []).map((st) => st.id === id ? { ...st, status: newStatus } : st)
+    );
 
     try {
       const result = await updateStrategy(id, { status: newStatus });
       if (result.error) {
-        setStrategies(prev); // revert
+        queryClient.setQueryData(queryKeys.strategies(), prev); // revert
       } else if (result.data) {
-        setStrategies((s) => s.map((st) => st.id === id ? (result.data as Strategy) : st));
+        queryClient.setQueryData(queryKeys.strategies(), (old: Strategy[] | undefined) =>
+          (old ?? []).map((st) => st.id === id ? (result.data as Strategy) : st)
+        );
       }
     } catch {
-      setStrategies(prev); // revert
+      queryClient.setQueryData(queryKeys.strategies(), prev); // revert
     }
   };
 
   const handleCreated = (newStrategy: Strategy) => {
-    setStrategies((prev) => [newStrategy, ...prev]);
+    queryClient.setQueryData(queryKeys.strategies(), (old: Strategy[] | undefined) =>
+      [newStrategy, ...(old ?? [])]
+    );
   };
 
   const handleUpdate = (updated: Strategy) => {
-    setStrategies((prev) => prev.map((s) => s.id === updated.id ? updated : s));
+    queryClient.setQueryData(queryKeys.strategies(), (old: Strategy[] | undefined) =>
+      (old ?? []).map((s) => s.id === updated.id ? updated : s)
+    );
   };
 
-  // Client-side filtering
-  const filteredStrategies = strategies.filter((s) => {
+  // Client-side filtering (memoized)
+  const filteredStrategies = useMemo(() => strategies.filter((s) => {
     const q = searchQuery.toLowerCase();
     const matchesSearch =
       !q ||
@@ -74,7 +70,7 @@ export default function StrategiesPage() {
     const matchesType = filterType === "all" || s.type === filterType;
     const matchesStatus = filterStatus === "all" || s.status === filterStatus;
     return matchesSearch && matchesType && matchesStatus;
-  });
+  }), [strategies, searchQuery, filterType, filterStatus]);
 
   const selectedStrategy = selectedStrategyId
     ? strategies.find((s) => s.id === selectedStrategyId) || null

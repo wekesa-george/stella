@@ -1,44 +1,40 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getAlerts, acknowledgeAlert as ackAlertApi, acknowledgeAlertsBulk, deleteAlert as deleteAlertApi } from "@/lib/stellaAdminApi";
+import { useState, useEffect, useMemo } from "react";
+import { acknowledgeAlert as ackAlertApi, acknowledgeAlertsBulk, deleteAlert as deleteAlertApi } from "@/lib/stellaAdminApi";
 import { useAlertChannel } from "@/hooks/usePhoenixChannel";
-import { mapApiAlertToUiAlert, mapWsAlertToUiAlert } from "@/lib/api/mappers";
+import { mapWsAlertToUiAlert } from "@/lib/api/mappers";
 import type { Alert } from "@/lib/types/dashboard";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
+import { useAlerts as useAlertsQuery } from "@/hooks/useQueries";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/hooks/useQueries";
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const queryClient = useQueryClient();
+  const { data: apiAlerts = [], isLoading: loading } = useAlertsQuery({ limit: 100 });
+  const [localAlerts, setLocalAlerts] = useState<Alert[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+
+  // Sync API alerts to local state for optimistic updates
+  useEffect(() => {
+    if (apiAlerts.length > 0) {
+      setLocalAlerts(apiAlerts);
+    }
+  }, [apiAlerts]);
+
+  const alerts = localAlerts.length > 0 ? localAlerts : apiAlerts;
 
   // Real-time alerts from WS
   const { alerts: wsAlerts } = useAlertChannel();
-
-  // Load initial alerts from API
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await getAlerts({ limit: 100 });
-        if (result.data && Array.isArray(result.data)) {
-          setAlerts(result.data.map(mapApiAlertToUiAlert));
-        }
-      } catch {
-        // API failed — alerts stays empty
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
 
   // Prepend real-time WS alerts
   useEffect(() => {
     if (wsAlerts.length > 0) {
       const latest = wsAlerts[0];
       const mapped = mapWsAlertToUiAlert(latest);
-      setAlerts((prev) => {
-        // Avoid duplicates
+      setLocalAlerts((prev) => {
         if (prev.some((a) => a.id === mapped.id)) return prev;
         return [mapped, ...prev];
       });
@@ -47,7 +43,7 @@ export default function AlertsPage() {
 
   const handleAck = async (id: number | string) => {
     // Optimistic update
-    setAlerts((prev) =>
+    setLocalAlerts((prev) =>
       prev.map((a) => (a.id === id ? { ...a, acked: true } : a))
     );
     await ackAlertApi(String(id)).catch(console.error);
@@ -59,7 +55,7 @@ export default function AlertsPage() {
       return severity ? a.sev === severity : true;
     });
     // Optimistic update
-    setAlerts((prev) =>
+    setLocalAlerts((prev) =>
       prev.map((a) => {
         if (severity) {
           return a.sev === severity && !a.acked ? { ...a, acked: true } : a;
@@ -74,12 +70,12 @@ export default function AlertsPage() {
   };
 
   const handleDelete = async (id: number | string) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
+    setLocalAlerts((prev) => prev.filter((a) => a.id !== id));
     await deleteAlertApi(String(id)).catch(console.error);
   };
 
-  // Filter alerts
-  const filteredAlerts = alerts.filter((alert) => {
+  // Filter alerts (memoized)
+  const filteredAlerts = useMemo(() => alerts.filter((alert) => {
     const matchesFilter =
       filter === "all" ||
       (filter === "unacked" && !alert.acked) ||
@@ -89,9 +85,9 @@ export default function AlertsPage() {
       alert.msg.toLowerCase().includes(searchQuery.toLowerCase()) ||
       alert.service.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFilter && matchesSearch;
-  });
+  }), [alerts, filter, searchQuery]);
 
-  const unackedAlerts = alerts.filter((a) => !a.acked);
+  const unackedAlerts = useMemo(() => alerts.filter((a) => !a.acked), [alerts]);
   const criticalCount = unackedAlerts.filter((a) => a.sev === "critical").length;
   const warningCount = unackedAlerts.filter((a) => a.sev === "warning").length;
   const infoCount = unackedAlerts.filter((a) => a.sev === "info").length;

@@ -1,4 +1,9 @@
 import type { NextConfig } from "next";
+import bundleAnalyzer from "@next/bundle-analyzer";
+
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -8,6 +13,17 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: '**',
       },
+    ],
+  },
+  // Compress responses for faster transfer
+  compress: true,
+  // Optimize package imports — tree-shake heavy libraries
+  experimental: {
+    optimizePackageImports: [
+      'lucide-react',
+      'recharts',
+      'radix-ui',
+      '@web3icons/react',
     ],
   },
   async redirects() {
@@ -24,6 +40,30 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        // Cache static assets aggressively
+        source: '/_next/static/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        // Cache fonts
+        source: '/fonts/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+    ];
+  },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer(nextConfig);

@@ -7,6 +7,7 @@ import { logtoConfig } from "./logto";
 import { redirect } from "next/navigation";
 import { SocketProviderWithAuth } from "@/components/SocketProvider";
 import { AdminUserProvider } from "@/components/AdminUserProvider";
+import { QueryProvider } from "@/components/QueryProvider";
 import { getAdminUserId } from "@/lib/getAdminUserId";
 
 const openSans = localFont({
@@ -65,12 +66,14 @@ export default async function RootLayout({
       <body
         className={`${openSans.variable} ${gilanMedium.variable} antialiased font-sans`}
       >
-        <AdminUserProvider adminUserId={adminUserId}>
-          <Navbar user={user} />
-          <SocketProviderWithAuth>
-            <main className="min-h-[calc(100vh-56px)] sm:min-h-[calc(100vh-64px)]">{children}</main>
-          </SocketProviderWithAuth>
-        </AdminUserProvider>
+        <QueryProvider>
+          <AdminUserProvider adminUserId={adminUserId}>
+            <Navbar user={user} />
+            <SocketProviderWithAuth>
+              <main className="min-h-[calc(100vh-56px)] sm:min-h-[calc(100vh-64px)]">{children}</main>
+            </SocketProviderWithAuth>
+          </AdminUserProvider>
+        </QueryProvider>
       </body>
     </html>
   );

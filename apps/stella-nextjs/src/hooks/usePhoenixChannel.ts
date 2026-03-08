@@ -3,6 +3,7 @@ import { Channel } from 'phoenix';
 import { joinChannel, leaveChannel, getSocketVersion, onSocketVersionChange, isSocketAuthenticated } from '@/lib/phoenixSocket';
 
 const LOG_PREFIX = '[usePhoenixChannel]';
+const IS_DEV = process.env.NODE_ENV === 'development';
 
 /**
  * Generic hook to subscribe to a Phoenix channel and listen for events.
@@ -30,25 +31,25 @@ export function usePhoenixChannel(
     // Don't attempt to join channels until the socket has a token.
     // In production, anonymous connections are rejected by Phoenix.
     if (!isSocketAuthenticated()) {
-      console.log(LOG_PREFIX, `Effect SKIP → "${topic}" (no token yet, sockVer=${sockVer})`);
+      if (IS_DEV) console.log(LOG_PREFIX, `Effect SKIP → "${topic}" (no token yet, sockVer=${sockVer})`);
       return;
     }
 
-    console.log(LOG_PREFIX, `Effect RUN → joining "${topic}" (sockVer=${sockVer})`);
+    if (IS_DEV) console.log(LOG_PREFIX, `Effect RUN → joining "${topic}" (sockVer=${sockVer})`);
     const channel = joinChannel(topic);
     channelRef.current = channel;
 
     const refs: number[] = [];
     for (const [event] of Object.entries(eventsRef.current)) {
       const ref = channel.on(event, (payload) => {
-        console.log(LOG_PREFIX, `[${topic}] EVENT "${event}"`, typeof payload === 'object' ? `keys=${Object.keys(payload).join(',')}` : payload);
+        if (IS_DEV) console.log(LOG_PREFIX, `[${topic}] EVENT "${event}"`, typeof payload === 'object' ? `keys=${Object.keys(payload).join(',')}` : payload);
         eventsRef.current[event]?.(payload);
       });
       refs.push(ref);
     }
 
     return () => {
-      console.log(LOG_PREFIX, `Effect CLEANUP → leaving "${topic}"`);
+      if (IS_DEV) console.log(LOG_PREFIX, `Effect CLEANUP → leaving "${topic}"`);
       refs.forEach((ref, i) => {
         const event = Object.keys(eventsRef.current)[i];
         channel.off(event, ref);

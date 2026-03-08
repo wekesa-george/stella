@@ -2157,8 +2157,8 @@ function MissionCriticalDashboard() {
   const allRawOrders = useMemo(() => {
     const seen = new Set<string>();
     const result: any[] = [];
-    for (const o of wsOrders) { const k = o.order_id || o.id; if (k && !seen.has(k)) { seen.add(k); result.push(o); } }
-    for (const o of restOrders) { const k = o.order_id || o.id; if (k && !seen.has(k)) { seen.add(k); result.push(o); } }
+    for (const o of wsOrders) { const k = (o as any).order_id || o.id; if (k && !seen.has(k)) { seen.add(k); result.push(o); } }
+    for (const o of restOrders) { const k = (o as any).order_id || o.id; if (k && !seen.has(k)) { seen.add(k); result.push(o); } }
     return result;
   }, [wsOrders, restOrders]);
 

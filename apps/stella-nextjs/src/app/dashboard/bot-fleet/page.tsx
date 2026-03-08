@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { listBots, stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve } from "@/lib/tradingEngineApi";
+import { stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve } from "@/lib/tradingEngineApi";
 import type { BotListFilters } from "@/lib/tradingEngineApi";
-import { getAlerts, acknowledgeAlert as ackAlertApi } from "@/lib/stellaAdminApi";
+import { acknowledgeAlert as ackAlertApi } from "@/lib/stellaAdminApi";
 import { useBotChannel, useAlertChannel } from "@/hooks/usePhoenixChannel";
-import { mapApiBotToUiBot, mapApiAlertToUiAlert, mapWsAlertToUiAlert } from "@/lib/api/mappers";
+import { mapWsAlertToUiAlert } from "@/lib/api/mappers";
 import type { Bot, Alert } from "@/lib/types/dashboard";
 import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye, Play, Pause, Square, Trash2, LayoutGrid, TableProperties } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BotGridSkeleton } from "@/components/ui/skeleton";
+import { useBots, useAlerts as useAlertsQuery } from "@/hooks/useQueries";
 
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -30,8 +31,6 @@ function getStatusStyle(status: string) {
 }
 
 export default function BotFleetPage() {
-  const [bots, setBots] = useState<Bot[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterExchange, setFilterExchange] = useState<string>("all");
@@ -41,19 +40,11 @@ export default function BotFleetPage() {
   const [filterPnl, setFilterPnl] = useState<string>("all");
   const [filterEquity, setFilterEquity] = useState<string>("all");
   const [filterUptime, setFilterUptime] = useState<string>("all");
-  const [allExchanges, setAllExchanges] = useState<string[]>([]);
-  const [allStrategies, setAllStrategies] = useState<string[]>([]);
   const [killModal, setKillModal] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetching, setFetching] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(50);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [runningBots, setRunningBots] = useState(0);
-  const [totalPnl, setTotalPnl] = useState(0);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [botEquityCurves, setBotEquityCurves] = useState<Record<string, { t: number; value: number }[]>>({});
@@ -73,168 +64,85 @@ export default function BotFleetPage() {
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [searchQuery]);
 
-  // Fetch bots with server-side filters
-  const fetchBots = useCallback(async (showFullLoading = false) => {
-    if (showFullLoading) setLoading(true);
-    else setFetching(true);
-
-    try {
-      const filters: BotListFilters = {
-        page,
-        per_page: perPage,
-      };
-      if (filterStatus !== "all") filters.status = filterStatus;
-      if (filterExchange !== "all") filters.exchange = filterExchange;
-      if (filterStrategy !== "all") filters.strategy_type = filterStrategy;
-      if (filterUser !== "all") filters.user_id = filterUser;
-      if (filterOwnerType !== "all") filters.owner_type = filterOwnerType as 'user' | 'service_account';
-      if (debouncedSearch) filters.search = debouncedSearch;
-
-      // P&L filter
-      if (filterPnl === "profitable") filters.pnl_preset = "profitable";
-      else if (filterPnl === "losing") filters.pnl_preset = "losing";
-      else if (filterPnl === "breakeven") filters.pnl_preset = "breakeven";
-
-      // Equity range presets
-      if (filterEquity === "0-1k") { filters.equity_min = 0; filters.equity_max = 1000; }
-      else if (filterEquity === "1k-10k") { filters.equity_min = 1000; filters.equity_max = 10000; }
-      else if (filterEquity === "10k-50k") { filters.equity_min = 10000; filters.equity_max = 50000; }
-      else if (filterEquity === "50k+") { filters.equity_min = 50000; }
-
-      // Uptime presets (in seconds)
-      if (filterUptime === "1h") filters.uptime_min = 3600;
-      else if (filterUptime === "24h") filters.uptime_min = 86400;
-      else if (filterUptime === "7d") filters.uptime_min = 604800;
-      else if (filterUptime === "30d") filters.uptime_min = 2592000;
-
-      const result = await listBots(filters);
-      const raw = result.data as any;
-      const botsArr = Array.isArray(raw)
-        ? raw
-        : raw?.bots && Array.isArray(raw.bots)
-          ? raw.bots
-          : null;
-      if (botsArr) setBots(botsArr.map(mapApiBotToUiBot));
-      if (raw?.total_count !== undefined) setTotalCount(raw.total_count);
-      if (raw?.total_pages !== undefined) setTotalPages(raw.total_pages);
-      if (raw?.running_bots !== undefined) setRunningBots(raw.running_bots);
-      if (raw?.total_pnl !== undefined) setTotalPnl(raw.total_pnl);
-    } catch {
-      // API failed
-    } finally {
-      setLoading(false);
-      setFetching(false);
-    }
+  // Build filters for React Query
+  const botFilters = useMemo((): BotListFilters => {
+    const filters: BotListFilters = { page, per_page: perPage };
+    if (filterStatus !== "all") filters.status = filterStatus;
+    if (filterExchange !== "all") filters.exchange = filterExchange;
+    if (filterStrategy !== "all") filters.strategy_type = filterStrategy;
+    if (filterUser !== "all") filters.user_id = filterUser;
+    if (filterOwnerType !== "all") filters.owner_type = filterOwnerType as 'user' | 'service_account';
+    if (debouncedSearch) filters.search = debouncedSearch;
+    if (filterPnl === "profitable") filters.pnl_preset = "profitable";
+    else if (filterPnl === "losing") filters.pnl_preset = "losing";
+    else if (filterPnl === "breakeven") filters.pnl_preset = "breakeven";
+    if (filterEquity === "0-1k") { filters.equity_min = 0; filters.equity_max = 1000; }
+    else if (filterEquity === "1k-10k") { filters.equity_min = 1000; filters.equity_max = 10000; }
+    else if (filterEquity === "10k-50k") { filters.equity_min = 10000; filters.equity_max = 50000; }
+    else if (filterEquity === "50k+") { filters.equity_min = 50000; }
+    if (filterUptime === "1h") filters.uptime_min = 3600;
+    else if (filterUptime === "24h") filters.uptime_min = 86400;
+    else if (filterUptime === "7d") filters.uptime_min = 604800;
+    else if (filterUptime === "30d") filters.uptime_min = 2592000;
+    return filters;
   }, [page, perPage, filterStatus, filterExchange, filterStrategy, filterUser, filterOwnerType, filterPnl, filterEquity, filterUptime, debouncedSearch]);
 
-  // Initial load + re-fetch on filter/page change
-  useEffect(() => {
-    const isInitial = loading;
-    fetchBots(isInitial);
-  }, [fetchBots]);
+  // React Query for bots (auto-refetches when filters change)
+  const { data: botsData, isLoading: loading, isFetching: fetching } = useBots(botFilters);
+  const bots = botsData?.bots ?? [];
+  const totalCount = botsData?.totalCount ?? 0;
+  const totalPages = botsData?.totalPages ?? 1;
+  const runningBots = botsData?.runningBots ?? 0;
+  const totalPnl = botsData?.totalPnl ?? 0;
 
-  // Load alerts + filter options once
-  useEffect(() => {
-    (async () => {
-      try {
-        const [alertsResult, allBotsResult] = await Promise.all([
-          getAlerts({ limit: 20 }),
-          listBots({ per_page: 200 }),
-        ]);
-        if (alertsResult.data && Array.isArray(alertsResult.data))
-          setAlerts(alertsResult.data.map(mapApiAlertToUiAlert));
+  // React Query for alerts (cached, shared across pages)
+  const { data: alerts = [] } = useAlertsQuery({ limit: 20 });
 
-        // Extract unique filter values from full bot list
-        const allRaw = allBotsResult.data as any;
-        const allBotsArr = Array.isArray(allRaw)
-          ? allRaw
-          : allRaw?.bots && Array.isArray(allRaw.bots)
-            ? allRaw.bots
-            : [];
-        const exchanges = [...new Set(allBotsArr.map((b: any) => b.exchange).filter(Boolean))] as string[];
-        const strategies = [...new Set(allBotsArr.map((b: any) => b.strategy_type).filter(Boolean))] as string[];
-        setAllExchanges(exchanges.sort());
-        setAllStrategies(strategies.sort());
-      } catch {
-        // ignore
-      }
-    })();
-  }, []);
+  // Extract unique filter values from bots
+  const allExchanges = useMemo(() =>
+    [...new Set(bots.map((b) => b.exchange).filter(Boolean))].sort() as string[],
+    [bots]
+  );
+  const allStrategies = useMemo(() =>
+    [...new Set(bots.map((b) => b.strategy).filter(Boolean))].sort() as string[],
+    [bots]
+  );
 
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [filterStatus, filterExchange, filterStrategy, filterUser, filterOwnerType, filterPnl, filterEquity, filterUptime]);
 
-  useEffect(() => {
-    if (wsBots.length > 0) {
-      setBots((prev) => {
-        const updated = [...prev];
-        for (const wsBot of wsBots) {
-          const idx = updated.findIndex((b) => b.id === wsBot.id);
-          const mapped = mapApiBotToUiBot(wsBot as any);
-          if (idx >= 0) {
-            updated[idx] = { ...updated[idx], ...mapped, user: updated[idx].user || mapped.user };
-          } else {
-            updated.push(mapped);
-          }
-        }
-        return updated;
-      });
-    }
-  }, [wsBots]);
-
-  useEffect(() => {
-    if (wsAlerts.length > 0) {
-      const latest = wsAlerts[0];
-      const mapped = mapWsAlertToUiAlert(latest);
-      setAlerts((prev) => {
-        if (prev.some((a) => a.id === mapped.id)) return prev;
-        return [mapped, ...prev];
-      });
-    }
-  }, [wsAlerts]);
-
-  const botUsers = [...new Set(bots.map((b) => b.user).filter(Boolean))];
-  const unackedCount = alerts.filter((a) => !a.acked).length;
+  const botUsers = useMemo(() => [...new Set(bots.map((b) => b.user).filter(Boolean))], [bots]);
+  const unackedCount = useMemo(() => alerts.filter((a) => !a.acked).length, [alerts]);
 
   const handleAck = async (id: number | string) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, acked: true } : a)));
     await ackAlertApi(String(id)).catch(console.error);
   };
 
   const handleKill = (botId: string) => {
     setKillModal(botId);
-
   };
 
   const confirmKill = async () => {
     if (killModal) {
       await stopBot(killModal).catch(console.error);
-      setBots((prev) => prev.map((b) => b.id === killModal ? { ...b, status: 'stopped' } : b));
       setKillModal(null);
     }
   };
 
   const handleStart = async (botId: string) => {
-    setBots((prev) => prev.map((b) => b.id === botId ? { ...b, status: 'initializing' } : b));
     await startBot(botId).catch(console.error);
-
   };
 
   const handlePause = async (botId: string) => {
     await pauseBot(botId).catch(console.error);
-    setBots((prev) => prev.map((b) => b.id === botId ? { ...b, status: 'paused' } : b));
-
   };
 
   const handleResume = async (botId: string) => {
     await startBot(botId).catch(console.error);
-    setBots((prev) => prev.map((b) => b.id === botId ? { ...b, status: 'running' } : b));
-
   };
 
   const handleDelete = (botId: string) => {
     setDeleteModal(botId);
-
   };
 
   const confirmDelete = async () => {
@@ -246,9 +154,6 @@ export default function BotFleetPage() {
       });
       if (result && result.error) {
         alert(`Failed to delete bot: ${result.error}`);
-      } else if (result && !result.error) {
-        setBots((prev) => prev.filter((b) => b.id !== deleteModal));
-        setTotalCount((c) => c - 1);
       }
       setDeleteModal(null);
     }

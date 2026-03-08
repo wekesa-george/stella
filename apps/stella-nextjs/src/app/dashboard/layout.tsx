@@ -3,10 +3,9 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { useState, useEffect } from "react";
-import { getAlerts } from "@/lib/stellaAdminApi";
+import { useState, useEffect, useMemo } from "react";
 import { useAlertChannel, usePlatformChannel, useBotChannel } from "@/hooks/usePhoenixChannel";
-import { mapApiAlertToUiAlert } from "@/lib/api/mappers";
+import { useAlerts } from "@/hooks/useQueries";
 
 const dashboardTabs = [
   { label: "Mission Critical", href: "/dashboard/mission-critical" },
@@ -41,23 +40,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const totalBots = wsBots.length > 0 ? wsBots.length : null;
   const openTrades = platformStats?.open_positions;
 
-  // Load initial alert count from API
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await getAlerts({ limit: 100 });
-        if (result.data && Array.isArray(result.data)) {
-          const mapped = result.data.map(mapApiAlertToUiAlert);
-          const unacked = mapped.filter((a: any) => !a.acked).length;
-          setUnackedAlertCount(unacked);
-        }
-      } catch {
-        // Silently fail — badge will just show 0
-      }
-    })();
-  }, []);
+  // Use React Query cached alerts (shared with alerts page — no duplicate request)
+  const { data: cachedAlerts = [] } = useAlerts({ limit: 100 });
 
-  // Update badge count from WS alerts
+  // Compute unacked count from cached alerts + WS additions
+  const baseUnacked = useMemo(() => cachedAlerts.filter((a: any) => !a.acked).length, [cachedAlerts]);
+
+  // Update badge count from WS alerts (increment beyond cached count)
+  useEffect(() => {
+    setUnackedAlertCount(baseUnacked);
+  }, [baseUnacked]);
+
   useEffect(() => {
     if (wsAlerts.length > 0) {
       setUnackedAlertCount((prev) => prev + 1);
