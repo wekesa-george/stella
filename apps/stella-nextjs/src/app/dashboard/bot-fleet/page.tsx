@@ -15,6 +15,29 @@ import { useBots, useAlerts as useAlertsQuery } from "@/hooks/useQueries";
 
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+function FleetCardSkeleton({ label, className }: { label?: string; className?: string }) {
+  return (
+    <div className={cn("bg-dark-elevated border border-dark rounded-md p-3", className)}>
+      <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">{label ?? ""}</span>
+      <div className="flex flex-col items-center justify-center gap-2 py-4">
+        <div className="w-1/2 h-4 bg-[#1a2230] rounded animate-pulse" />
+        <div className="w-1/3 h-2 bg-[#1a2230] rounded animate-pulse" style={{ animationDelay: "0.3s" }} />
+      </div>
+    </div>
+  );
+}
+
+function FleetCardError({ label, className }: { label?: string; className?: string }) {
+  return (
+    <div className={cn("bg-dark-elevated border border-dark rounded-md p-3", className)}>
+      <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">{label ?? ""}</span>
+      <div className="flex items-center justify-center py-4">
+        <span className="font-mono text-[9px] text-[#ff4757] uppercase tracking-wider">Failed to load data</span>
+      </div>
+    </div>
+  );
+}
+
 const STATUS_COLORS: Record<string, { dot: string; bg: string; text: string }> = {
   running: { dot: "bg-[#00e5a0]", bg: "bg-[rgba(0,229,160,0.12)]", text: "text-[#00e5a0]" },
   paused: { dot: "bg-[#f5a623]", bg: "bg-[rgba(245,166,35,0.12)]", text: "text-[#f5a623]" },
@@ -88,7 +111,7 @@ export default function BotFleetPage() {
   }, [page, perPage, filterStatus, filterExchange, filterStrategy, filterUser, filterOwnerType, filterPnl, filterEquity, filterUptime, debouncedSearch]);
 
   // React Query for bots (auto-refetches when filters change)
-  const { data: botsData, isLoading: loading, isFetching: fetching } = useBots(botFilters);
+  const { data: botsData, isLoading: loading, isFetching: fetching, isError } = useBots(botFilters);
   const bots = botsData?.bots ?? [];
   const totalCount = botsData?.totalCount ?? 0;
   const totalPages = botsData?.totalPages ?? 1;
@@ -96,7 +119,13 @@ export default function BotFleetPage() {
   const totalPnl = botsData?.totalPnl ?? 0;
 
   // React Query for alerts (cached, shared across pages)
-  const { data: alerts = [] } = useAlertsQuery({ limit: 20 });
+  const { data: alerts = [], isLoading: alertsLoading, isError: alertsIsError } = useAlertsQuery({ limit: 20 });
+
+  // Per-section loading/error states
+  const botsReady = !loading;
+  const botsError = isError;
+  const alertsReady = !alertsLoading;
+  const alertsError = alertsIsError;
 
   // Extract unique filter values from bots
   const allExchanges = useMemo(() =>
@@ -250,18 +279,6 @@ export default function BotFleetPage() {
       return { t: ts, value: total };
     });
   }, [bots, botEquityCurves]);
-
-  if (loading) {
-    return (
-      <div className="flex h-full">
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
-          <div className="max-w-full mx-auto space-y-4 sm:space-y-6">
-            <BotGridSkeleton count={12} />
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full">
@@ -464,6 +481,8 @@ export default function BotFleetPage() {
           {/* Equity Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-2.5">
             {/* Fleet Equity Chart */}
+            {botsError ? <FleetCardError label="Fleet Equity" className="lg:col-span-2" /> :
+             !botsReady ? <FleetCardSkeleton label="Fleet Equity" className="lg:col-span-2" /> :
             <div className="lg:col-span-2 bg-dark-elevated border border-dark rounded-md p-3">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">Fleet Equity</span>
@@ -497,9 +516,11 @@ export default function BotFleetPage() {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
-            </div>
+            </div>}
 
             {/* Fleet P&L card */}
+            {botsError ? <FleetCardError label="Fleet P&L" /> :
+             !botsReady ? <FleetCardSkeleton label="Fleet P&L" /> :
             <div className="bg-dark-elevated border border-dark rounded-md p-3 flex flex-col justify-between">
               <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">Fleet P&L</span>
               <div>
@@ -521,9 +542,11 @@ export default function BotFleetPage() {
                   <div className="text-foreground font-bold font-mono">${(fleetMetrics.runningEquity / 1000).toFixed(1)}k</div>
                 </div>
               </div>
-            </div>
+            </div>}
 
             {/* Top Performers mini chart */}
+            {botsError ? <FleetCardError label="Top Performers" /> :
+             !botsReady ? <FleetCardSkeleton label="Top Performers" /> :
             <div className="bg-dark-elevated border border-dark rounded-md p-3">
               <span className="text-[10px] font-bold text-[#5a7090] uppercase tracking-wider">Top Performers</span>
               <div className="mt-1.5 space-y-1.5">
@@ -543,11 +566,17 @@ export default function BotFleetPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
           </div>
 
-          {/* Grid View */}
-          {viewMode === "grid" && (
+          {/* Bot Grid / Table */}
+          {botsError ? (
+            <div className="bg-dark-elevated border border-dark rounded-md p-8 text-center">
+              <span className="font-mono text-[9px] text-[#ff4757] uppercase tracking-wider">Failed to load bots</span>
+            </div>
+          ) : !botsReady ? (
+            <BotGridSkeleton count={12} />
+          ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
               {bots.map((bot) => {
                 const s = getStatusStyle(bot.status);
@@ -716,10 +745,7 @@ export default function BotFleetPage() {
                 </div>
               )}
             </div>
-          )}
-
-          {/* Table View */}
-          {viewMode === "table" && (
+          ) : viewMode === "table" ? (
           <div className="border border-dark rounded-md overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -909,7 +935,7 @@ export default function BotFleetPage() {
               </div>
             )}
           </div>
-          )}
+          ) : null}
 
           {/* Pagination */}
           {totalPages > 1 && (
@@ -970,7 +996,23 @@ export default function BotFleetPage() {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {alerts.map((alert) => (
+            {alertsError ? (
+              <div className="flex items-center justify-center py-8">
+                <span className="font-mono text-[9px] text-[#ff4757] uppercase tracking-wider">Failed to load alerts</span>
+              </div>
+            ) : !alertsReady ? (
+              <div className="space-y-0">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="px-3 py-2 border-b border-dark flex gap-2 items-start">
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#1a2230] animate-pulse flex-shrink-0 mt-1" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="w-3/4 h-3 bg-[#1a2230] rounded animate-pulse" />
+                      <div className="w-1/3 h-2 bg-[#1a2230] rounded animate-pulse" style={{ animationDelay: "0.3s" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : alerts.map((alert) => (
               <div
                 key={alert.id}
                 className={cn(
@@ -1005,6 +1047,7 @@ export default function BotFleetPage() {
       )}
 
       {/* Kill Modal */}
+
       {killModal && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-card border border-dark rounded-lg p-6 w-96 space-y-4">

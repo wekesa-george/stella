@@ -598,6 +598,12 @@ ${FONT}
   color: var(--bg0); background: var(--a); border-radius: 2px;
   letter-spacing: .1em; vertical-align: middle;
 }
+
+/* ── Skeleton pulse animation ── */
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
 `;
 
 /* ═══════════════════════════ COMPONENTS ════════════════════════════════════ */
@@ -1809,6 +1815,181 @@ function HeartbeatCard({ bots: botList, wsBots }: { bots: Bot[]; wsBots: any[] }
   );
 }
 
+/* ── Inline skeleton for cards that haven't loaded yet ── */
+function CardSkeleton({ label, className }: { label?: string; className?: string }) {
+  return (
+    <div className={`mc-card ${className ?? ""}`}>
+      <div className="mc-card-accent" style={{ background: "var(--b2)" }}/>
+      <div className="mc-ch"><div className="mc-ct" style={{ color: "var(--t3)" }}>{label ?? ""}</div></div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center", gap: 6 }}>
+        <div style={{ width: "50%", height: 18, background: "var(--bg3)", borderRadius: 3, animation: "pulse 1.5s ease-in-out infinite" }}/>
+        <div style={{ width: "30%", height: 8, background: "var(--bg3)", borderRadius: 2, animation: "pulse 1.5s ease-in-out infinite", animationDelay: "0.3s" }}/>
+      </div>
+    </div>
+  );
+}
+
+/* ── Error state for cards that failed to load ── */
+function CardError({ label, className }: { label?: string; className?: string }) {
+  return (
+    <div className={`mc-card ${className ?? ""}`}>
+      <div className="mc-card-accent" style={{ background: "var(--r)" }}/>
+      <div className="mc-ch"><div className="mc-ct" style={{ color: "var(--t3)" }}>{label ?? ""}</div></div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--r)", textTransform: "uppercase", letterSpacing: ".08em" }}>
+          Failed to load data
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════ QUERY HOOKS (independent per section) ════════ */
+import { useQuery } from "@tanstack/react-query";
+
+function useMCBots() {
+  return useQuery({
+    queryKey: ["mc-bots"],
+    queryFn: async () => {
+      const result = await listBots();
+      if (result.data && Array.isArray(result.data)) return result.data.map(mapApiBotToUiBot) as Bot[];
+      return [] as Bot[];
+    },
+    staleTime: 15_000,
+  });
+}
+
+function useMCAlerts() {
+  return useQuery({
+    queryKey: ["mc-alerts"],
+    queryFn: async () => {
+      const result = await getSystemAlerts(100);
+      const body = (result as any)?.data;
+      const list = body?.alerts ?? (Array.isArray(body) ? body : []);
+      return list.map((a: any) => mapWsAlertToUiAlert({
+        id: a.id,
+        category: a.category ?? a.alert_type ?? '',
+        severity: a.severity ?? 'info',
+        title: a.title ?? '',
+        message: a.message ?? a.title ?? '',
+        metadata: a.metadata ?? {},
+        timestamp: a.created_at ?? a.snapshot_at ?? '',
+      })) as Alert[];
+    },
+    staleTime: 10_000,
+  });
+}
+
+function useMCOrders() {
+  return useQuery({
+    queryKey: ["mc-orders"],
+    queryFn: async () => {
+      const result = await getRecentOrders(50);
+      const body = (result as any)?.data;
+      return (body && Array.isArray(body)) ? body : [];
+    },
+    staleTime: 10_000,
+  });
+}
+
+function useMCEquityCurve() {
+  return useQuery({
+    queryKey: ["mc-equity-curve"],
+    queryFn: async () => {
+      const result = await getPlatformEquityCurve(200);
+      const body = (result as any)?.data;
+      if (body && Array.isArray(body)) {
+        return body.map((s: any) => ({
+          t: s.snapshot_at ? new Date(s.snapshot_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : '',
+          eq: parseFloat(s.total_equity_usd) || 0,
+        }));
+      }
+      return [] as { t: string; eq: number }[];
+    },
+    staleTime: 30_000,
+  });
+}
+
+function useMCCapital() {
+  return useQuery({
+    queryKey: ["mc-capital"],
+    queryFn: async () => {
+      const result = await getAllCapitalAllocations();
+      const body = (result as any)?.data;
+      return (body && typeof body === 'object') ? body : {};
+    },
+    staleTime: 30_000,
+  });
+}
+
+function useMCIncidents() {
+  return useQuery({
+    queryKey: ["mc-incidents"],
+    queryFn: async () => {
+      const result = await getOpenIncidents(30);
+      const body = (result as any)?.data;
+      const list = body?.incidents ?? (Array.isArray(body) ? body : []);
+      return list as FormalIncident[];
+    },
+    staleTime: 15_000,
+  });
+}
+
+function useMCInfraMetrics() {
+  return useQuery({
+    queryKey: ["mc-infra-metrics"],
+    queryFn: async () => {
+      const result = await getInfraMetrics();
+      const body = result.data as any;
+      const payload = body?.data ?? body;
+      if (payload && (payload.beam || payload.database)) {
+        return mapWsInfraToTradeEngineMetrics(payload);
+      }
+      return null;
+    },
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  });
+}
+
+function useMCExchangeHealth() {
+  return useQuery({
+    queryKey: ["mc-exchange-health"],
+    queryFn: async () => {
+      const result = await getExchangeHealth();
+      const body = result.data as any;
+      return body?.exchanges ?? [];
+    },
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+}
+
+function useMCServiceHealth() {
+  return useQuery({
+    queryKey: ["mc-service-health"],
+    queryFn: async () => {
+      const result = await getServiceHealth();
+      return result.data ?? [];
+    },
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+}
+
+function useMCCoolify() {
+  return useQuery({
+    queryKey: ["mc-coolify"],
+    queryFn: async () => {
+      const result = await getInfrastructureStatus();
+      const body = result.data as any;
+      return (body?.services && Array.isArray(body.services)) ? body.services : [];
+    },
+    staleTime: 25_000,
+    refetchInterval: 30_000,
+  });
+}
+
 /* ═══════════════════════════ MAIN ═══════════════════════════════════════════ */
 export default function MissionCriticalPage() {
   return (
@@ -1828,102 +2009,45 @@ function MissionCriticalDashboard() {
   const { stats: platformStats } = usePlatformChannel();
   const { orders: wsOrders } = useOrderChannel();
 
-  // ── State: real data with mock fallbacks ──
+  // ── Independent data queries — each section loads on its own ──
+  const { data: apiBots = [], isLoading: botsLoading, isError: botsError } = useMCBots();
+  const { data: apiAlerts = [], isLoading: alertsLoading, isError: alertsError } = useMCAlerts();
+  const { data: restOrders = [], isLoading: ordersLoading, isError: ordersError } = useMCOrders();
+  const { data: equityCurve = [], isLoading: equityLoading, isError: equityError } = useMCEquityCurve();
+  const { data: capitalData = {}, isLoading: capitalLoading, isError: capitalError } = useMCCapital();
+  const { data: apiFormalIncidents = [], isLoading: incidentsLoading, isError: incidentsError } = useMCIncidents();
+  const { data: restInfraMetrics, isLoading: infraLoading, isError: infraError } = useMCInfraMetrics();
+  const { data: apiExchangeHealth = [], isLoading: exchangeLoading, isError: exchangeError } = useMCExchangeHealth();
+  const { data: apiServiceHealth = [], isLoading: serviceHealthLoading, isError: serviceHealthError } = useMCServiceHealth();
+  const { data: coolifyServices = [] } = useMCCoolify();
+
+  // ── Mutable state for WS overlay (merges on top of cached API data) ──
   const [bots, setBots] = useState<Bot[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [infraMetrics, setInfraMetrics] = useState<TradeEngineMetrics | null>(null);
   const [serviceHealthData, setServiceHealthData] = useState<any[]>([]);
   const [exchangeHealthData, setExchangeHealthData] = useState<any[]>([]);
-  const [coolifyServices, setCoolifyServices] = useState<any[]>([]);
-  const [restOrders, setRestOrders] = useState<any[]>([]);
-  const [equityCurve, setEquityCurve] = useState<{ t: string; eq: number }[]>([]);
   const [latencyHistory, setLatencyHistory] = useState<{ t: number; v: number }[]>([]);
-  const [capitalData, setCapitalData] = useState<Record<string, any>>({});
   const [formalIncidents, setFormalIncidents] = useState<FormalIncident[]>([]);
 
-  // ── Coolify fetch ──
-  const fetchCoolifyStatus = useCallback(async () => {
-    try {
-      const res = await getInfrastructureStatus();
-      const body = res.data as any;
-      if (body?.services && Array.isArray(body.services)) {
-        setCoolifyServices(body.services);
-      }
-    } catch {
-      // Coolify API unavailable
-    }
-  }, []);
+  // ── Sync API data into state (as each query resolves independently) ──
+  useEffect(() => { if (apiBots.length > 0 && bots.length === 0) setBots(apiBots); }, [apiBots]);
+  useEffect(() => { if (apiAlerts.length > 0 && alerts.length === 0) setAlerts(apiAlerts); }, [apiAlerts]);
+  useEffect(() => { if (apiFormalIncidents.length > 0 && formalIncidents.length === 0) setFormalIncidents(apiFormalIncidents); }, [apiFormalIncidents]);
+  useEffect(() => { if (restInfraMetrics && !infraMetrics) setInfraMetrics(restInfraMetrics); }, [restInfraMetrics]);
+  useEffect(() => { if (apiExchangeHealth.length > 0 && exchangeHealthData.length === 0) setExchangeHealthData(apiExchangeHealth); }, [apiExchangeHealth]);
+  useEffect(() => { if (apiServiceHealth && (apiServiceHealth as any[]).length > 0 && serviceHealthData.length === 0) setServiceHealthData(apiServiceHealth as any[]); }, [apiServiceHealth]);
 
-  // ── Initial REST fetch ──
-  useEffect(() => {
-    (async () => {
-      try {
-        const [botsResult, alertsResult, ordersResult, equityCurveResult, capitalResult, incidentsResult] = await Promise.all([
-          listBots().catch(() => ({ data: [] })),
-          getSystemAlerts(100).catch(() => ({ data: [] })),
-          getRecentOrders(50).catch(() => ({ data: [] })),
-          getPlatformEquityCurve(200).catch(() => ({ data: [] })),
-          getAllCapitalAllocations().catch(() => ({ data: {} })),
-          getOpenIncidents(30).catch(() => ({ data: [] })),
-          getServiceHealth().catch(() => ({ data: null })),
-          fetchCoolifyStatus(),
-          getInfraMetrics().catch(() => ({ data: null })).then(res => {
-            const body = res.data as any;
-            const payload = body?.data ?? body;
-            if (payload && (payload.beam || payload.database)) {
-              setInfraMetrics(mapWsInfraToTradeEngineMetrics(payload));
-            }
-          }),
-          getExchangeHealth().catch(() => ({ data: null })).then(res => {
-            const body = res.data as any;
-            if (body?.exchanges) setExchangeHealthData(body.exchanges);
-          }),
-        ]);
-
-        if (botsResult.data && Array.isArray(botsResult.data)) {
-          setBots(botsResult.data.map(mapApiBotToUiBot));
-        }
-        // Phoenix returns { ok: true, data: { alerts: [...] } }
-        const alertBody = (alertsResult as any)?.data;
-        const alertList = alertBody?.alerts ?? (Array.isArray(alertBody) ? alertBody : []);
-        if (alertList.length > 0) {
-          setAlerts(alertList.map((a: any) => mapWsAlertToUiAlert({
-            id: a.id,
-            category: a.category ?? a.alert_type ?? '',
-            severity: a.severity ?? 'info',
-            title: a.title ?? '',
-            message: a.message ?? a.title ?? '',
-            metadata: a.metadata ?? {},
-            timestamp: a.created_at ?? a.snapshot_at ?? '',
-          })));
-        }
-        const ordersBody = (ordersResult as any)?.data;
-        if (ordersBody && Array.isArray(ordersBody)) {
-          setRestOrders(ordersBody);
-        }
-        const eqBody = (equityCurveResult as any)?.data;
-        if (eqBody && Array.isArray(eqBody)) {
-          setEquityCurve(eqBody.map((s: any) => ({
-            t: s.snapshot_at
-              ? new Date(s.snapshot_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-              : '',
-            eq: parseFloat(s.total_equity_usd) || 0,
-          })));
-        }
-        const capBody = (capitalResult as any)?.data;
-        if (capBody && typeof capBody === 'object') {
-          setCapitalData(capBody);
-        }
-        const incBody = (incidentsResult as any)?.data;
-        const incList = incBody?.incidents ?? (Array.isArray(incBody) ? incBody : []);
-        if (incList.length > 0) {
-          setFormalIncidents(incList);
-        }
-      } catch {
-        // APIs unavailable — mock fallbacks used
-      }
-    })();
-  }, []);
+  // ── Derived loading states per section ──
+  const botsReady = bots.length > 0 || (!botsLoading && apiBots.length === 0);
+  const alertsReady = alerts.length > 0 || (!alertsLoading && apiAlerts.length === 0);
+  const ordersReady = !ordersLoading;
+  const infraReady = infraMetrics !== null || !infraLoading;
+  const exchangeReady = exchangeHealthData.length > 0 || !exchangeLoading;
+  const servicesReady = serviceHealthData.length > 0 || !serviceHealthLoading;
+  const equityReady = !equityLoading;
+  const capitalReady = !capitalLoading;
+  const incidentsReady = !incidentsLoading;
 
   // ── WS overlay: bots ──
   useEffect(() => {
@@ -2003,11 +2127,7 @@ function MissionCriticalDashboard() {
     return () => clearInterval(interval);
   }, [wsInfraMetrics]);
 
-  // ── Coolify polling (30s) ──
-  useEffect(() => {
-    const interval = setInterval(fetchCoolifyStatus, 30_000);
-    return () => clearInterval(interval);
-  }, [fetchCoolifyStatus]);
+  // Coolify polling handled by React Query (useMCCoolify refetchInterval)
 
   // ── Training mode: merge injected data ──
   const training = useTraining();
@@ -2103,7 +2223,7 @@ function MissionCriticalDashboard() {
   const wsNames = new Set(wsServices.map(s => s.name.toLowerCase()));
   const mergedServices = [
     ...wsServices,
-    ...coolifyMapped.filter(c => !wsNames.has(c.name.toLowerCase())),
+    ...coolifyMapped.filter((c: any) => !wsNames.has(c.name.toLowerCase())),
   ];
   const services = mergedServices;
 
@@ -2331,41 +2451,89 @@ function MissionCriticalDashboard() {
               <div className="mc-left">
                 <div className="mc-grid-left">
                   {/* ── ROW 1: KEY METRICS ── */}
-                  <EquityCard equity={totalEquity} activeBots={runningBots} curveData={equityCurve} />
-                  <PnlCard pnl={totalPnl} equity={totalEquity} />
-                  <WinRateCard bots={bots} />
-                  <ActiveBotsCard running={runningBots} total={totalBotCount || fleetBots.length} />
+                  {botsError && equityError ? <CardError label="Platform Equity" /> :
+                   !botsReady || !equityReady ? <CardSkeleton label="Platform Equity" /> :
+                   <EquityCard equity={totalEquity} activeBots={runningBots} curveData={equityCurve} />}
+
+                  {botsError ? <CardError label="24h Realized P&L" /> :
+                   !botsReady ? <CardSkeleton label="24h Realized P&L" /> :
+                   <PnlCard pnl={totalPnl} equity={totalEquity} />}
+
+                  {botsError ? <CardError label="Win Rate" /> :
+                   !botsReady ? <CardSkeleton label="Win Rate" /> :
+                   <WinRateCard bots={bots} />}
+
+                  {botsError ? <CardError label="Bot Fleet" /> :
+                   !botsReady ? <CardSkeleton label="Bot Fleet" /> :
+                   <ActiveBotsCard running={runningBots} total={totalBotCount || fleetBots.length} />}
 
                   {/* ── Below Equity: Trades + Failed Orders + Micro Stats ── */}
                   <TradesCard platformStats={platformStats} />
-                  <FailedOrdersCard orders={allRawOrders} />
-                  <OpenPosCard count={openPositions} runningBots={runningBots} />
-                  <CircuitBreakerCard bots={bots} />
+
+                  {ordersError ? <CardError label="Failed Orders" /> :
+                   !ordersReady ? <CardSkeleton label="Failed Orders" /> :
+                   <FailedOrdersCard orders={allRawOrders} />}
+
+                  {botsError ? <CardError label="Open Positions" /> :
+                   !botsReady ? <CardSkeleton label="Open Positions" /> :
+                   <OpenPosCard count={openPositions} runningBots={runningBots} />}
+
+                  {botsError ? <CardError label="Circuit Breakers" /> :
+                   !botsReady ? <CardSkeleton label="Circuit Breakers" /> :
+                   <CircuitBreakerCard bots={bots} />}
+
                   <VolumeCard platformStats={platformStats} />
-                  <FillRateCard orders={allRawOrders} />
+
+                  {ordersError ? <CardError label="Fill Rate" /> :
+                   !ordersReady ? <CardSkeleton label="Fill Rate" /> :
+                   <FillRateCard orders={allRawOrders} />}
+
                   <SlippageCard />
                   <DrawdownCard platformStats={platformStats} />
                   <AvgExecCard />
-                  <HeartbeatCard bots={bots} wsBots={wsBots} />
+
+                  {botsError ? <CardError label="Heartbeats" /> :
+                   !botsReady ? <CardSkeleton label="Heartbeats" /> :
+                   <HeartbeatCard bots={bots} wsBots={wsBots} />}
 
                   {/* ── LIVE ORDERS + EXCHANGE ── */}
-                  <LiveOrdersFeed orders={liveOrders} />
-                  <ExchangeCard exchangeHealth={exchangeHealthData} />
+                  {ordersError ? <CardError label="Live Orders" /> :
+                   !ordersReady ? <CardSkeleton label="Live Orders" /> :
+                   <LiveOrdersFeed orders={liveOrders} />}
+
+                  {exchangeError ? <CardError label="Exchanges" /> :
+                   !exchangeReady ? <CardSkeleton label="Exchanges" /> :
+                   <ExchangeCard exchangeHealth={exchangeHealthData} />}
 
                   {/* ── LATENCY + CAPITAL ── */}
-                  <LatencyCard infraMetrics={infraMetrics} latencyData={latencyHistory} />
-                  <CapitalAllocationCard bots={bots} capitalData={capitalData} />
+                  {infraError ? <CardError label="API Latency" /> :
+                   !infraReady ? <CardSkeleton label="API Latency" /> :
+                   <LatencyCard infraMetrics={infraMetrics} latencyData={latencyHistory} />}
+
+                  {capitalError ? <CardError label="Capital Allocation" /> :
+                   !capitalReady || !botsReady ? <CardSkeleton label="Capital Allocation" /> :
+                   <CapitalAllocationCard bots={bots} capitalData={capitalData} />}
 
                   {/* ── SERVICES + UPTIME ── */}
-                  <ServicesCard services={services} />
-                  <UptimeCard services={services} infraMetrics={infraMetrics} />
+                  {serviceHealthError ? <CardError label="Services" /> :
+                   !servicesReady ? <CardSkeleton label="Services" /> :
+                   <ServicesCard services={services} />}
+
+                  {serviceHealthError && infraError ? <CardError label="Uptime" /> :
+                   !servicesReady || !infraReady ? <CardSkeleton label="Uptime" /> :
+                   <UptimeCard services={services} infraMetrics={infraMetrics} />}
                 </div>
               </div>
 
               {/* ── RIGHT SIDEBAR ── */}
               <div className="mc-right">
-                <IncidentsCard alerts={alertItems} formalIncidents={mergedIncidents} onAckAlert={handleAckAlert} onResolveIncident={handleResolveIncident} />
-                <BotFleetCard bots={fleetBots} onPauseBot={handlePauseBot} onStartBot={handleStartBot} onStopBot={handleStopBot} onNavigate={handleNavigate} />
+                {alertsError && incidentsError ? <CardError label="Incidents & Alerts" /> :
+                 !alertsReady && !incidentsReady ? <CardSkeleton label="Incidents & Alerts" /> :
+                 <IncidentsCard alerts={alertItems} formalIncidents={mergedIncidents} onAckAlert={handleAckAlert} onResolveIncident={handleResolveIncident} />}
+
+                {botsError ? <CardError label="Bot Fleet" /> :
+                 !botsReady ? <CardSkeleton label="Bot Fleet" /> :
+                 <BotFleetCard bots={fleetBots} onPauseBot={handlePauseBot} onStartBot={handleStartBot} onStopBot={handleStopBot} onNavigate={handleNavigate} />}
               </div>
 
             </div>

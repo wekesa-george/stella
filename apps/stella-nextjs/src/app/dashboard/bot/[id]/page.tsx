@@ -303,6 +303,7 @@ const STYLES = `
 .bdp-loading { display:flex; align-items:center; justify-content:center; height:100vh; background:var(--bg0); }
 .bdp-spinner { width:32px; height:32px; border:2px solid var(--border); border-top-color:var(--green); border-radius:50%; animation:bdp-spin 1s linear infinite; }
 @keyframes bdp-spin { to { transform:rotate(360deg); } }
+@keyframes bdp-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* ── RESPONSIVE ── */
 @media (max-width:860px) {
@@ -1272,6 +1273,49 @@ function formatAge(timestamp: string | undefined): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+// ─── SKELETON / ERROR COMPONENTS ──────────────────────────────────────────────
+function BdpSectionSkeleton({ label }: { label?: string }) {
+  return (
+    <div className="bdp-card">
+      <div className="bdp-card-hdr">
+        <span className="bdp-card-title">{label ?? ""}</span>
+      </div>
+      <div className="bdp-card-body" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 80 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <div style={{ width: "60%", height: 16, background: "var(--bg3)", borderRadius: 3, animation: "bdp-pulse 1.5s ease-in-out infinite" }} />
+          <div style={{ width: "40%", height: 8, background: "var(--bg3)", borderRadius: 2, animation: "bdp-pulse 1.5s ease-in-out infinite", animationDelay: "0.3s" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BdpSectionError({ label }: { label?: string }) {
+  return (
+    <div className="bdp-card">
+      <div className="bdp-card-hdr">
+        <span className="bdp-card-title">{label ?? ""}</span>
+      </div>
+      <div className="bdp-card-body" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 80 }}>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--red)", textTransform: "uppercase", letterSpacing: ".08em" }}>
+          Failed to load data
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BdpMetricSkeleton({ label }: { label?: string }) {
+  return (
+    <div className="bdp-metric">
+      <div className="bdp-metric-lbl">{label ?? ""}</div>
+      <div style={{ width: "60%", height: 22, background: "var(--bg3)", borderRadius: 3, animation: "bdp-pulse 1.5s ease-in-out infinite", marginBottom: 6 }} />
+      <div style={{ width: "40%", height: 8, background: "var(--bg3)", borderRadius: 2, animation: "bdp-pulse 1.5s ease-in-out infinite", animationDelay: "0.3s" }} />
+      <div className="bdp-metric-accent" style={{ background: "var(--bg3)" }} />
+    </div>
+  );
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function BotDetailPage() {
   const params = useParams();
@@ -1287,7 +1331,12 @@ export default function BotDetailPage() {
   const [capitalModal, setCapitalModal] = useState(false);
   const [capitalInput, setCapitalInput] = useState("");
   const [capitalSaving, setCapitalSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [botLoading, setBotLoading] = useState(true);
+  const [botError, setBotError] = useState(false);
+  const [positionsLoading, setPositionsLoading] = useState(true);
+  const [positionsError, setPositionsError] = useState(false);
+  const [equityLoading, setEquityLoading] = useState(true);
+  const [equityError, setEquityError] = useState(false);
 
   // Candlestick state
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -1298,42 +1347,36 @@ export default function BotDetailPage() {
   const [closedPositions, setClosedPositions] = useState<ClosedPosition[]>([]);
   const [orderHistory, setOrderHistory] = useState<Order[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState(false);
 
   // Real-time WS hooks
   const { snapshot: wsSnapshot, logEvents } = useBotChannel(botId);
   const { positions: wsPositions, closePosition: wsClosePosition } = usePositionChannel(botId);
   const { orders: wsOrders } = useOrderChannel(botId);
 
-  // Load bot data from real API
+  // Load bot data from real API — independent fetches
   useEffect(() => {
     (async () => {
       try {
-        const [botResult, posResult, curveResult] = await Promise.all([
-          getBot(botId),
-          getBotPositions(botId),
-          getBotEquityCurve(botId),
-        ]);
-
+        const botResult = await getBot(botId);
         if (botResult.data) {
           const mappedBot = mapApiBotToUiBot(botResult.data);
           setBot(mappedBot);
-
-          // Map equity snapshots — filter out $0 entries (recorded before capital was allocated)
-          if (curveResult.data && Array.isArray(curveResult.data) && curveResult.data.length > 0) {
-            const meaningful = curveResult.data
-              .map((s: any) => ({
-                t: new Date(s.snapshot_at).getTime(),
-                value: Number(s.total_equity_usd),
-              }))
-              .filter((p: any) => p.value > 0);
-            setEquityCurve(meaningful.length > 0 ? meaningful : [{ t: Date.now(), value: (mappedBot.allocatedCapital || 0) + (mappedBot.pnl || 0) }]);
-          } else {
-            const currentEquity = (mappedBot.allocatedCapital || 0) + (mappedBot.pnl || 0);
-            setEquityCurve([{ t: Date.now(), value: currentEquity || 0 }]);
-          }
+        } else {
+          setBotError(true);
         }
+      } catch {
+        setBotError(true);
+      } finally {
+        setBotLoading(false);
+      }
+    })();
+  }, [botId]);
 
-        // Map API positions
+  useEffect(() => {
+    (async () => {
+      try {
+        const posResult = await getBotPositions(botId);
         if (posResult.data && Array.isArray(posResult.data)) {
           setPositions(posResult.data
             .filter((p: any) => !p.status || p.status === "open")
@@ -1351,12 +1394,41 @@ export default function BotDetailPage() {
             })));
         }
       } catch {
-        // API failed
+        setPositionsError(true);
       } finally {
-        setLoading(false);
+        setPositionsLoading(false);
       }
     })();
   }, [botId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const curveResult = await getBotEquityCurve(botId);
+        if (curveResult.data && Array.isArray(curveResult.data) && curveResult.data.length > 0) {
+          const meaningful = curveResult.data
+            .map((s: any) => ({
+              t: new Date(s.snapshot_at).getTime(),
+              value: Number(s.total_equity_usd),
+            }))
+            .filter((p: any) => p.value > 0);
+          setEquityCurve(meaningful.length > 0 ? meaningful : [{ t: Date.now(), value: 0 }]);
+        }
+      } catch {
+        setEquityError(true);
+      } finally {
+        setEquityLoading(false);
+      }
+    })();
+  }, [botId]);
+
+  // Set equity fallback once bot loads (if equity curve is empty/default)
+  useEffect(() => {
+    if (bot && !equityLoading && equityCurve.length <= 1 && equityCurve[0]?.value === 0) {
+      const currentEquity = (bot.allocatedCapital || 0) + (bot.pnl || 0);
+      setEquityCurve([{ t: Date.now(), value: currentEquity || 0 }]);
+    }
+  }, [bot, equityLoading, equityCurve]);
 
   // Update bot from WS snapshots + append equity point
   useEffect(() => {
@@ -1536,7 +1608,7 @@ export default function BotDetailPage() {
           })));
         }
       } catch {
-        // History not available
+        setHistoryError(true);
       } finally {
         setLoadingHistory(false);
       }
@@ -1593,22 +1665,8 @@ export default function BotDetailPage() {
     setPositions(prev => prev.filter(p => p.id !== posId));
   };
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="bot-detail-page">
-        <style>{STYLES}</style>
-        <div className="bdp-loading">
-          <div style={{ textAlign:"center" }}>
-            <div className="bdp-spinner" />
-            <div style={{ marginTop:12, fontFamily:"var(--mono)", fontSize:10, color:"var(--text2)" }}>Loading bot...</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!bot) {
+  // Bot not found (after loading completes)
+  if (!botLoading && !bot) {
     return (
       <div className="bot-detail-page">
         <style>{STYLES}</style>
@@ -1624,8 +1682,8 @@ export default function BotDetailPage() {
     );
   }
 
-  const sc = STATUS_CFG[bot.status] || STATUS_CFG.stopped;
-  const pnlPos = bot.pnl >= 0;
+  const sc = bot ? (STATUS_CFG[bot.status] || STATUS_CFG.stopped) : STATUS_CFG.stopped;
+  const pnlPos = bot ? bot.pnl >= 0 : true;
   const lastEquity  = equityCurve[equityCurve.length - 1]?.value ?? 0;
   const firstEquity = equityCurve[0]?.value ?? 0;
   const profitable  = lastEquity >= firstEquity;
@@ -1639,7 +1697,7 @@ export default function BotDetailPage() {
     return "bdp-tag-blue";
   };
 
-  const metrics = [
+  const metrics = bot ? [
     { label:"Session P&L", value:`${pnlPos ? "+" : ""}$${Math.abs(bot.pnl).toFixed(2)}`,
       color: pnlPos ? "var(--green)" : "var(--red)", accent: pnlPos ? "var(--green)" : "var(--red)",
       sub: `${pnlPos ? "+" : ""}${bot.allocatedCapital > 0 ? ((bot.pnl / bot.allocatedCapital) * 100).toFixed(2) : "0.00"}% on capital` },
@@ -1647,7 +1705,9 @@ export default function BotDetailPage() {
     { label:"Total Trades", value:bot.trades ?? 0, color:"var(--text0)", accent:"var(--text2)", sub:"Session only" },
     { label:"Open Positions", value:positions.length, color:"var(--amber)", accent:"var(--amber)", sub:"of 20 max" },
     { label:"Uptime", value:bot.uptime ?? "--", color:"var(--text0)", accent:"var(--green)", sub:"Since last start" },
-  ];
+  ] : [];
+
+  const METRIC_LABELS = ["Session P&L", "Win Rate", "Total Trades", "Open Positions", "Uptime"];
 
   return (
     <div className="bot-detail-page">
@@ -1666,28 +1726,42 @@ export default function BotDetailPage() {
               <span className="bdp-breadcrumb-sep">/</span>
               <button className="bdp-breadcrumb-link" onClick={() => router.push("/dashboard/bot-fleet")}>Bot Fleet</button>
               <span className="bdp-breadcrumb-sep">/</span>
-              <span className="bdp-breadcrumb-cur">{bot.name || bot.id}</span>
+              <span className="bdp-breadcrumb-cur">{botLoading ? "Loading..." : (bot?.name || bot?.id || "--")}</span>
             </div>
             <div className="bdp-hdr-title">
-              <span className="bdp-bot-id">{bot.name || bot.id}</span>
-              <div className={`bdp-status-badge ${bot.status === "running" ? "bdp-running" : ""}`} style={{ color: sc.color, background: sc.bg, borderColor: sc.border }}>
-                <span className="bdp-status-dot" style={{ background: sc.color }} />
-                {sc.label}
+              {botLoading ? (
+                <div style={{ width: 140, height: 18, background: "var(--bg3)", borderRadius: 3, animation: "bdp-pulse 1.5s ease-in-out infinite" }} />
+              ) : (
+                <span className="bdp-bot-id">{bot?.name || bot?.id || "--"}</span>
+              )}
+              {botLoading ? (
+                <div style={{ width: 64, height: 18, background: "var(--bg3)", borderRadius: 2, animation: "bdp-pulse 1.5s ease-in-out infinite", animationDelay: "0.2s" }} />
+              ) : bot ? (
+                <div className={`bdp-status-badge ${bot.status === "running" ? "bdp-running" : ""}`} style={{ color: sc.color, background: sc.bg, borderColor: sc.border }}>
+                  <span className="bdp-status-dot" style={{ background: sc.color }} />
+                  {sc.label}
+                </div>
+              ) : null}
+            </div>
+            {bot ? (
+              <div className="bdp-hdr-meta">
+                <span>{bot.id}</span>
+                &nbsp;·&nbsp;
+                <span>{bot.exchange}</span>
+                &nbsp;·&nbsp;
+                <span>{bot.pair}</span>
+                &nbsp;·&nbsp;
+                {bot.user}
               </div>
-            </div>
-            <div className="bdp-hdr-meta">
-              <span>{bot.id}</span>
-              &nbsp;·&nbsp;
-              <span>{bot.exchange}</span>
-              &nbsp;·&nbsp;
-              <span>{bot.pair}</span>
-              &nbsp;·&nbsp;
-              {bot.user}
-            </div>
+            ) : !botLoading ? null : (
+              <div className="bdp-hdr-meta" style={{ display: "flex", gap: 6 }}>
+                <div style={{ width: 80, height: 8, background: "var(--bg3)", borderRadius: 2, animation: "bdp-pulse 1.5s ease-in-out infinite" }} />
+              </div>
+            )}
           </div>
 
           <div className="bdp-hdr-actions">
-            <ActionButtons bot={bot} onPauseResume={handlePauseResume} onStop={handleStop} onStart={handleStart} onDelete={() => setDeleteModal(true)} />
+            {bot && <ActionButtons bot={bot} onPauseResume={handlePauseResume} onStop={handleStop} onStart={handleStart} onDelete={() => setDeleteModal(true)} />}
           </div>
         </header>
 
@@ -1696,134 +1770,180 @@ export default function BotDetailPage() {
           <div className="bdp-tab-body">
 
             {/* Bot Details Bar */}
-            <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 16px", padding:"8px 12px", background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:4, fontFamily:"var(--mono)", fontSize:8, color:"var(--text2)" }}>
-              {([
-                ["Strategy", bot.strategy || "--"],
-                ["Pair", bot.pair || "--"],
-                ["Exchange", bot.exchange || "--"],
-                ["Capital", `$${(bot.allocatedCapital ?? 0).toLocaleString()}`, true],
-                ["User", bot.user || "--"],
-                ["Created", bot.createdAt ? new Date(bot.createdAt).toLocaleDateString() : "--"],
-              ] as [string, string, boolean?][]).map(([k, v, editable]) => (
-                <span key={k} style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase" }}>
-                  {k}: <span style={{ color: editable ? "var(--blue)" : "var(--text1)", fontWeight:500, cursor: editable ? "pointer" : "default" }}
-                    onClick={editable ? () => { setCapitalInput(String(bot.allocatedCapital ?? 0)); setCapitalModal(true); } : undefined}
-                    title={editable ? "Click to edit" : undefined}>{v}{editable && <span style={{ fontSize:7, marginLeft:3, opacity:.6 }}>&#9998;</span>}</span>
-                </span>
-              ))}
-            </div>
+            {botLoading ? (
+              <div style={{ display:"flex", gap:16, padding:"8px 12px", background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:4 }}>
+                {[1,2,3,4,5,6].map(i => (
+                  <div key={i} style={{ width: 80, height: 10, background: "var(--bg3)", borderRadius: 2, animation: "bdp-pulse 1.5s ease-in-out infinite", animationDelay: `${i * 0.1}s` }} />
+                ))}
+              </div>
+            ) : bot ? (
+              <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 16px", padding:"8px 12px", background:"var(--bg1)", border:"1px solid var(--border)", borderRadius:4, fontFamily:"var(--mono)", fontSize:8, color:"var(--text2)" }}>
+                {([
+                  ["Strategy", bot.strategy || "--"],
+                  ["Pair", bot.pair || "--"],
+                  ["Exchange", bot.exchange || "--"],
+                  ["Capital", `$${(bot.allocatedCapital ?? 0).toLocaleString()}`, true],
+                  ["User", bot.user || "--"],
+                  ["Created", bot.createdAt ? new Date(bot.createdAt).toLocaleDateString() : "--"],
+                ] as [string, string, boolean?][]).map(([k, v, editable]) => (
+                  <span key={k} style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase" }}>
+                    {k}: <span style={{ color: editable ? "var(--blue)" : "var(--text1)", fontWeight:500, cursor: editable ? "pointer" : "default" }}
+                      onClick={editable ? () => { setCapitalInput(String(bot.allocatedCapital ?? 0)); setCapitalModal(true); } : undefined}
+                      title={editable ? "Click to edit" : undefined}>{v}{editable && <span style={{ fontSize:7, marginLeft:3, opacity:.6 }}>&#9998;</span>}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
             {/* Metrics */}
             <div className="bdp-metrics-grid">
-              {/* Pair Card */}
-              {(() => {
-                const parts = (bot.pair || "").split(/[/\-_]/);
-                const base = (parts[0] || "").toUpperCase();
-                const quote = (parts[1] || "").toUpperCase();
-                const iconFallback = (symbol: string, size: number) => (
-                  <span className="inline-flex items-center justify-center rounded-full bg-[#1e2d40] font-mono font-bold text-[#8fa3b8]"
-                    style={{ width: size, height: size, fontSize: size * 0.45 }}>
-                    {symbol.slice(0, 2)}
-                  </span>
-                );
-                return (
-                  <div className="bdp-pair-card">
-                    <span className="flex items-center -space-x-1.5">
-                      <TokenIcon symbol={base} size={32} variant="branded" fallback={iconFallback(base, 32)} />
-                      {quote && <TokenIcon symbol={quote} size={26} variant="branded" fallback={iconFallback(quote, 26)} />}
-                    </span>
-                    <div className="bdp-pair-label">{bot.pair || "--"}</div>
-                    <div className="bdp-pair-exchange">{bot.exchange || "--"}</div>
-                  </div>
-                );
-              })()}
-              {metrics.map(m => (
-                <div className="bdp-metric" key={m.label}>
-                  <div className="bdp-metric-lbl">{m.label}</div>
-                  <div className="bdp-metric-val" style={{ color: m.color }}>{m.value}</div>
-                  <div className="bdp-metric-sub">{m.sub}</div>
-                  <div className="bdp-metric-accent" style={{ background: m.accent }} />
-                </div>
-              ))}
+              {botLoading ? (
+                <>
+                  <BdpMetricSkeleton label="Pair" />
+                  {METRIC_LABELS.map(l => <BdpMetricSkeleton key={l} label={l} />)}
+                </>
+              ) : botError ? (
+                <>
+                  {[...Array(6)].map((_, i) => (
+                    <div className="bdp-metric" key={i}>
+                      <div className="bdp-metric-lbl">&nbsp;</div>
+                      <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--red)", textTransform: "uppercase", letterSpacing: ".08em", marginTop: 8 }}>Error</div>
+                      <div className="bdp-metric-accent" style={{ background: "var(--red)" }} />
+                    </div>
+                  ))}
+                </>
+              ) : bot ? (
+                <>
+                  {/* Pair Card */}
+                  {(() => {
+                    const parts = (bot.pair || "").split(/[/\-_]/);
+                    const base = (parts[0] || "").toUpperCase();
+                    const quote = (parts[1] || "").toUpperCase();
+                    const iconFallback = (symbol: string, size: number) => (
+                      <span className="inline-flex items-center justify-center rounded-full bg-[#1e2d40] font-mono font-bold text-[#8fa3b8]"
+                        style={{ width: size, height: size, fontSize: size * 0.45 }}>
+                        {symbol.slice(0, 2)}
+                      </span>
+                    );
+                    return (
+                      <div className="bdp-pair-card">
+                        <span className="flex items-center -space-x-1.5">
+                          <TokenIcon symbol={base} size={32} variant="branded" fallback={iconFallback(base, 32)} />
+                          {quote && <TokenIcon symbol={quote} size={26} variant="branded" fallback={iconFallback(quote, 26)} />}
+                        </span>
+                        <div className="bdp-pair-label">{bot.pair || "--"}</div>
+                        <div className="bdp-pair-exchange">{bot.exchange || "--"}</div>
+                      </div>
+                    );
+                  })()}
+                  {metrics.map(m => (
+                    <div className="bdp-metric" key={m.label}>
+                      <div className="bdp-metric-lbl">{m.label}</div>
+                      <div className="bdp-metric-val" style={{ color: m.color }}>{m.value}</div>
+                      <div className="bdp-metric-sub">{m.sub}</div>
+                      <div className="bdp-metric-accent" style={{ background: m.accent }} />
+                    </div>
+                  ))}
+                </>
+              ) : null}
             </div>
 
             {/* Chart — toggle between Equity Curve and Candlestick */}
-            <div className="bdp-card">
-              <div className="bdp-card-hdr">
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div className="bdp-tf-bar">
-                    <button className={`bdp-tf-btn ${chartMode === "equity" ? "bdp-on" : ""}`} onClick={() => setChartMode("equity")}>Equity</button>
-                    <button className={`bdp-tf-btn ${chartMode === "candles" ? "bdp-on" : ""}`} onClick={() => setChartMode("candles")}>Candlestick</button>
+            {equityLoading && chartMode === "equity" ? (
+              <BdpSectionSkeleton label="Session Equity Curve" />
+            ) : equityError && chartMode === "equity" ? (
+              <BdpSectionError label="Session Equity Curve" />
+            ) : (
+              <div className="bdp-card">
+                <div className="bdp-card-hdr">
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div className="bdp-tf-bar">
+                      <button className={`bdp-tf-btn ${chartMode === "equity" ? "bdp-on" : ""}`} onClick={() => setChartMode("equity")}>Equity</button>
+                      <button className={`bdp-tf-btn ${chartMode === "candles" ? "bdp-on" : ""}`} onClick={() => setChartMode("candles")}>Candlestick</button>
+                    </div>
+                    {chartMode === "equity" && (
+                      <span style={{ fontFamily:"var(--mono)", fontSize:9, color: profitable ? "var(--green)" : "var(--red)", marginLeft:8 }}>
+                        {profitable ? "▲" : "▼"} {profitable ? "+" : ""}${(lastEquity - firstEquity).toFixed(2)}
+                      </span>
+                    )}
+                    {chartMode === "candles" && (
+                      <span className="bdp-card-title" style={{ marginLeft:4 }}>{bot?.pair || "--"} · {bot?.exchange || "--"}</span>
+                    )}
                   </div>
-                  {chartMode === "equity" && (
-                    <span style={{ fontFamily:"var(--mono)", fontSize:9, color: profitable ? "var(--green)" : "var(--red)", marginLeft:8 }}>
-                      {profitable ? "▲" : "▼"} {profitable ? "+" : ""}${(lastEquity - firstEquity).toFixed(2)}
-                    </span>
-                  )}
                   {chartMode === "candles" && (
-                    <span className="bdp-card-title" style={{ marginLeft:4 }}>{bot.pair || "--"} · {bot.exchange || "--"}</span>
+                    <div className="bdp-tf-bar">
+                      {TIMEFRAMES.map(t => (
+                        <button key={t} className={`bdp-tf-btn ${tf === t ? "bdp-on" : ""}`} onClick={() => setTf(t)}>{t}</button>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {chartMode === "candles" && (
-                  <div className="bdp-tf-bar">
-                    {TIMEFRAMES.map(t => (
-                      <button key={t} className={`bdp-tf-btn ${tf === t ? "bdp-on" : ""}`} onClick={() => setTf(t)}>{t}</button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {chartMode === "equity" ? (
-                <div className="bdp-card-body" style={{ padding:"16px 16px 8px" }}>
-                  <div className="bdp-equity-chart">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={equityWithStart} margin={{ top: 4, right: 10, bottom: 0, left: -20 }}>
-                        <defs>
-                          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={profitable ? "#00e5a0" : "#ff4757"} stopOpacity={0.35} />
-                            <stop offset="100%" stopColor={profitable ? "#00e5a0" : "#ff4757"} stopOpacity={0.01} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 4" stroke="#1e2d40" vertical={false} />
-                        <XAxis dataKey="t" tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} interval={Math.max(1, Math.floor(equityCurve.length / 8))}
-                          tickFormatter={(t: number) => new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })} />
-                        <YAxis tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${(v/1000).toFixed(1)}k`} domain={["auto","auto"]} />
-                        {startVal > 0 && <ReferenceLine y={startVal} stroke="#253550" strokeDasharray="4 3" />}
-                        <Tooltip content={<EquityTooltip />} />
-                        <Area type="monotone" dataKey="value" stroke={profitable ? "#00e5a0" : "#ff4757"} strokeWidth={1.5}
-                          fill={`url(#${gradId})`} dot={false} activeDot={{ r:3, fill: profitable ? "#00e5a0" : "#ff4757" }} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : (
-                loadingCandles ? (
-                  <div className="bdp-chart-wrap" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    <div className="bdp-spinner" />
+                {chartMode === "equity" ? (
+                  <div className="bdp-card-body" style={{ padding:"16px 16px 8px" }}>
+                    <div className="bdp-equity-chart">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={equityWithStart} margin={{ top: 4, right: 10, bottom: 0, left: -20 }}>
+                          <defs>
+                            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={profitable ? "#00e5a0" : "#ff4757"} stopOpacity={0.35} />
+                              <stop offset="100%" stopColor={profitable ? "#00e5a0" : "#ff4757"} stopOpacity={0.01} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 4" stroke="#1e2d40" vertical={false} />
+                          <XAxis dataKey="t" tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} interval={Math.max(1, Math.floor(equityCurve.length / 8))}
+                            tickFormatter={(t: number) => new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })} />
+                          <YAxis tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${(v/1000).toFixed(1)}k`} domain={["auto","auto"]} />
+                          {startVal > 0 && <ReferenceLine y={startVal} stroke="#253550" strokeDasharray="4 3" />}
+                          <Tooltip content={<EquityTooltip />} />
+                          <Area type="monotone" dataKey="value" stroke={profitable ? "#00e5a0" : "#ff4757"} strokeWidth={1.5}
+                            fill={`url(#${gradId})`} dot={false} activeDot={{ r:3, fill: profitable ? "#00e5a0" : "#ff4757" }} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 ) : (
-                  <CandlestickChart candles={candles} positions={positions} />
-                )
-              )}
-            </div>
+                  loadingCandles ? (
+                    <div className="bdp-chart-wrap" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      <div className="bdp-spinner" />
+                    </div>
+                  ) : (
+                    <CandlestickChart candles={candles} positions={positions} />
+                  )
+                )}
+              </div>
+            )}
 
             {/* Open Positions | Manual Order | Bot Logs */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 240px minmax(0,.85fr)", gap:14 }} className="bdp-pos-order-logs-row">
-              <div className="bdp-card" style={{ minWidth:0 }}>
-                <div className="bdp-card-hdr">
-                  <span className="bdp-card-title">Open Positions <span style={{ color:"var(--text2)", fontWeight:400 }}>({positions.length})</span></span>
+              {positionsLoading ? (
+                <BdpSectionSkeleton label="Open Positions" />
+              ) : positionsError ? (
+                <BdpSectionError label="Open Positions" />
+              ) : (
+                <div className="bdp-card" style={{ minWidth:0 }}>
+                  <div className="bdp-card-hdr">
+                    <span className="bdp-card-title">Open Positions <span style={{ color:"var(--text2)", fontWeight:400 }}>({positions.length})</span></span>
+                  </div>
+                  <div className="bdp-card-body bdp-np">
+                    <PositionsTable positions={positions} onClose={handleClosePosition} compact />
+                  </div>
                 </div>
-                <div className="bdp-card-body bdp-np">
-                  <PositionsTable positions={positions} onClose={handleClosePosition} compact />
-                </div>
-              </div>
-              <ManualOrderPanel bot={bot} botId={botId} />
+              )}
+              {bot ? (
+                <ManualOrderPanel bot={bot} botId={botId} />
+              ) : (
+                <BdpSectionSkeleton label="Manual Order" />
+              )}
               <LogStream botId={botId} logEvents={logEvents} />
             </div>
 
             {/* Closed Positions | Order History — side by side */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }} className="bdp-history-row">
               {/* Closed Positions */}
+              {historyError ? (
+                <BdpSectionError label="Closed Positions" />
+              ) : (
               <div className="bdp-card" style={{ minWidth:0 }}>
                 <div className="bdp-card-hdr">
                   <span className="bdp-card-title">Closed Positions <span style={{ color:"var(--text2)", fontWeight:400 }}>({closedPositions.length})</span></span>
@@ -1867,8 +1987,12 @@ export default function BotDetailPage() {
                   )}
                 </div>
               </div>
+              )}
 
               {/* Order History */}
+              {historyError ? (
+                <BdpSectionError label="Order History" />
+              ) : (
               <div className="bdp-card" style={{ minWidth:0 }}>
                 <div className="bdp-card-hdr">
                   <span className="bdp-card-title">Order History <span style={{ color:"var(--text2)", fontWeight:400 }}>({orderHistory.length})</span></span>
@@ -1908,6 +2032,7 @@ export default function BotDetailPage() {
                   )}
                 </div>
               </div>
+              )}
             </div>
 
           </div>
@@ -1918,7 +2043,7 @@ export default function BotDetailPage() {
       {closeModal && (
         <ClosePositionModal position={closeModal} onClose={() => setCloseModal(null)} onConfirm={confirmClose} />
       )}
-      {deleteModal && (
+      {deleteModal && bot && (
         <DeleteBotModal bot={bot} onClose={() => setDeleteModal(false)} onConfirm={handleDeleteBot} />
       )}
       {capitalModal && (
