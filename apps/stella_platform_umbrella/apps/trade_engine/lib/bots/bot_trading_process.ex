@@ -17,9 +17,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
   alias TradeEngine.Bots.{BotRegistry, BotLogger}
   alias TradeEngine.Exchanges.Executor
-  alias TradeEngine.Trading.OrderManager
+  alias TradeEngine.Trading.{OrderManager, Position}
   alias TradeEngine.Risk.{AssetTierManager, VirtualBalanceManager}
   alias TradeEngine.Strategies.Behaviour, as: StrategyBehaviour
+  alias TradeEngine.Repo
 
   @heartbeat_interval_ms 10_000
   @exit_check_interval_ms 5_000
@@ -607,6 +608,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
               BotRegistry.update_position_count(state.bot_id, map_size(state.positions) + 1)
 
+              # Persist position to DB
+              persist_position_open(position)
+
               new_state = %{state |
                 positions: Map.put(state.positions, position.id, position),
                 total_trades: state.total_trades + 1,
@@ -690,6 +694,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       principal = Map.get(pos, :position_value, pos.entry_price * pos.quantity)
       VirtualBalanceManager.close_position(pos.user_id, pos.id, principal, pnl)
     end
+
+    # Persist closed position to DB
+    persist_position_close(pos, final_exit_price, pnl)
 
     # Report to BotRegistry
     BotRegistry.report_trade(state.bot_id, pnl, is_win)
@@ -994,5 +1001,63 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       })
       state
     end
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # POSITION DB PERSISTENCE
+  # ════════════════════════════════════════════════════════════════════════════
+
+  defp persist_position_open(pos) do
+    direction = to_string(pos.direction)
+    side = if direction in ["long", "short"], do: direction, else: "long"
+
+    attrs = %{
+      symbol: pos.symbol,
+      position_type: side,
+      quantity: Decimal.from_float(pos.quantity + 0.0),
+      entry_price: Decimal.from_float(pos.entry_price + 0.0),
+      current_price: Decimal.from_float(pos.entry_price + 0.0),
+      status: "open",
+      entry_time: pos.entry_time,
+      user_id: pos.user_id,
+      bot_id: pos.bot_id,
+      credential_id: pos.credential_id,
+      strategy_id: pos.strategy_id,
+      entry_order_id: pos.exchange_order_id
+    }
+
+    case Repo.insert(Position.changeset(%Position{id: pos.id}, attrs)) do
+      {:ok, _} ->
+        Logger.info("[BotTrading] Position persisted to DB: #{pos.id} #{side} #{pos.symbol}")
+      {:error, changeset} ->
+        Logger.warning("[BotTrading] Failed to persist position #{pos.id}: #{inspect(changeset.errors)}")
+    end
+  rescue
+    e -> Logger.warning("[BotTrading] Position persist exception: #{inspect(e)}")
+  end
+
+  defp persist_position_close(pos, exit_price, pnl) do
+    case Repo.get(Position, pos.id) do
+      nil ->
+        Logger.warning("[BotTrading] Position #{pos.id} not found in DB for close update")
+      db_pos ->
+        changeset = Position.changeset(db_pos, %{
+          status: "closed",
+          exit_price: Decimal.from_float(exit_price + 0.0),
+          current_price: Decimal.from_float(exit_price + 0.0),
+          profit_loss: Decimal.from_float(pnl + 0.0),
+          exit_time: DateTime.utc_now(),
+          exit_reason: "strategy_exit"
+        })
+
+        case Repo.update(changeset) do
+          {:ok, _} ->
+            Logger.info("[BotTrading] Position closed in DB: #{pos.id} pnl=#{Float.round(pnl, 4)}")
+          {:error, changeset} ->
+            Logger.warning("[BotTrading] Failed to close position #{pos.id} in DB: #{inspect(changeset.errors)}")
+        end
+    end
+  rescue
+    e -> Logger.warning("[BotTrading] Position close persist exception: #{inspect(e)}")
   end
 end
