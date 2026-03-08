@@ -288,28 +288,48 @@ defmodule TradeEngine.API do
     import Ecto.Query
     alias TradeEngine.Trading.EquitySnapshot
 
-    # Aggregate equity by snapshot time bucket (hourly) across all bots
-    query = from(s in EquitySnapshot,
-      group_by: fragment("date_trunc('hour', ?)", s.snapshot_at),
-      order_by: [asc: fragment("date_trunc('hour', ?)", s.snapshot_at)],
-      select: %{
-        snapshot_at: fragment("date_trunc('hour', ?)", s.snapshot_at),
-        total_equity_usd: sum(s.total_equity_usd),
-        unrealized_pnl_usd: sum(s.unrealized_pnl_usd),
-        realized_pnl_usd: sum(s.realized_pnl_usd),
-        open_positions: sum(s.open_positions),
-        bot_count: count(fragment("DISTINCT ?", s.bot_id))
-      },
-      limit: ^limit
+    # Get the last snapshot per bot per hour bucket, then sum across bots
+    # This avoids inflating equity by counting multiple snapshots per bot per hour
+    since_clause = if since, do: "AND s.snapshot_at > '#{DateTime.to_iso8601(since)}'", else: ""
+
+    sql = """
+    WITH hourly_latest AS (
+      SELECT DISTINCT ON (bot_id, date_trunc('hour', snapshot_at))
+        bot_id,
+        date_trunc('hour', snapshot_at) AS hour,
+        total_equity_usd,
+        unrealized_pnl_usd,
+        realized_pnl_usd,
+        open_positions,
+        snapshot_at
+      FROM trading.equity_snapshots
+      WHERE total_equity_usd > 0 #{since_clause}
+      ORDER BY bot_id, date_trunc('hour', snapshot_at), snapshot_at DESC
     )
+    SELECT
+      hour AS snapshot_at,
+      SUM(total_equity_usd) AS total_equity_usd,
+      SUM(unrealized_pnl_usd) AS unrealized_pnl_usd,
+      SUM(realized_pnl_usd) AS realized_pnl_usd,
+      SUM(open_positions) AS open_positions,
+      COUNT(DISTINCT bot_id) AS bot_count
+    FROM hourly_latest
+    GROUP BY hour
+    ORDER BY hour ASC
+    LIMIT $1
+    """
 
-    query = if since do
-      from(s in query, where: s.snapshot_at > ^since)
-    else
-      query
+    case Repo.query(sql, [limit]) do
+      {:ok, %{columns: cols, rows: rows}} ->
+        results = Enum.map(rows, fn row ->
+          Enum.zip(cols, row) |> Map.new(fn {k, v} -> {String.to_atom(k), v} end)
+        end)
+        {:ok, results}
+      {:error, err} ->
+        require Logger
+        Logger.error("[API] Platform equity curve query failed: #{inspect(err)}")
+        {:ok, []}
     end
-
-    {:ok, Repo.all(query)}
   rescue
     e -> {:error, %{reason: :query_failed, detail: Exception.message(e)}}
   end
