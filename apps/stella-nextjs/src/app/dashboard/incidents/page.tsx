@@ -1537,9 +1537,9 @@ function EscalationTimeline({ incidentId }: { incidentId: string }) {
     (async () => {
       try {
         const res = await getEscalationLog(incidentId);
-        if (!cancelled) setLogs(res?.data || []);
+        if (!cancelled) setLogs(Array.isArray(res?.data) ? res.data : []);
       } catch {
-        if (!cancelled) setLogs([]);
+        if (!cancelled) setLogs([] as any[]);
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -339,9 +339,9 @@ function PreviewPanel() {
     setLoading(true);
     try {
       const res = await previewEscalationChain(priority, category || undefined);
-      setChain(res?.data || []);
+      setChain(Array.isArray(res?.data) ? res.data : []);
     } catch {
-      setChain([]);
+      setChain([] as EscalationRule[]);
     } finally {
       setLoading(false);
     }
@@ -440,9 +440,9 @@ export default function EscalationMatrixPage() {
     setLoading(true);
     try {
       const res = await getEscalationMatrix();
-      setRules(res?.data || []);
+      setRules(Array.isArray(res?.data) ? res.data : []);
     } catch {
-      setRules([]);
+      setRules([] as EscalationRule[]);
     } finally {
       setLoading(false);
     }
