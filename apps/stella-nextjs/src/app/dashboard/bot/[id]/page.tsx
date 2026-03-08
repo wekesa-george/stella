@@ -1417,6 +1417,62 @@ export default function BotDetailPage() {
     }
   }, [wsPositions]);
 
+  // Overlay WS order updates into order history
+  useEffect(() => {
+    if (wsOrders.length > 0) {
+      setOrderHistory(prev => {
+        const existingIds = new Set(prev.map(o => o.id));
+        const mapped = wsOrders
+          .filter((o: any) => !existingIds.has(o.id))
+          .map((o: any) => ({
+            id: o.id ?? o.order_id ?? "",
+            side: (o.side ?? "BUY").toUpperCase(),
+            pair: o.trading_pair ?? o.symbol ?? o.pair ?? "",
+            type: (o.order_type ?? o.type ?? "MARKET").toUpperCase(),
+            price: Number(o.execution_price ?? o.price ?? o.avg_fill_price ?? 0),
+            qty: Number(o.quantity ?? o.filled_quantity ?? o.qty ?? 0),
+            status: (o.status ?? "UNKNOWN").toUpperCase(),
+            createdAt: o.created_at ? new Date(o.created_at).toLocaleString() : "--",
+          }));
+        if (mapped.length === 0) {
+          // Update statuses of existing orders
+          const wsMap = new Map(wsOrders.map((o: any) => [o.id ?? o.order_id, o]));
+          return prev.map(o => {
+            const ws = wsMap.get(o.id);
+            return ws ? { ...o, status: (ws.status ?? o.status).toUpperCase(), price: Number(ws.execution_price ?? ws.price ?? o.price) } : o;
+          });
+        }
+        return [...mapped, ...prev];
+      });
+    }
+  }, [wsOrders]);
+
+  // Move closed positions from open to closed list via WS
+  useEffect(() => {
+    if (wsPositions.length > 0) {
+      const closed = wsPositions.filter((p: any) => p.status === "closed" || p.status === "liquidated");
+      if (closed.length > 0) {
+        setClosedPositions(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const newClosed = closed
+            .filter((p: any) => !existingIds.has(p.id))
+            .map((p: any) => ({
+              id: p.id ?? "",
+              side: (p.side ?? "LONG").toUpperCase(),
+              pair: p.symbol ?? p.pair ?? "",
+              entry: Number(p.entry_price ?? 0),
+              exit: Number(p.exit_price ?? p.close_price ?? 0),
+              qty: Number(p.quantity ?? p.size ?? 0),
+              pnl: Number(p.realized_pnl ?? p.pnl ?? 0),
+              closedAt: p.closed_at ? new Date(p.closed_at).toLocaleString() : "--",
+              reason: p.close_reason ?? p.reason ?? "--",
+            }));
+          return newClosed.length > 0 ? [...newClosed, ...prev] : prev;
+        });
+      }
+    }
+  }, [wsPositions]);
+
   // Load candles when timeframe changes
   const loadCandles = useCallback(async (timeframe: string) => {
     setLoadingCandles(true);
