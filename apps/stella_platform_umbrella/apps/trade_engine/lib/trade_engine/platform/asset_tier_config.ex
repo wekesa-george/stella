@@ -14,6 +14,7 @@ defmodule TradeEngine.Platform.AssetTierConfig do
   use Ecto.Schema
   import Ecto.Changeset
   import Ecto.Query
+  require Logger
 
   alias TradeEngine.Repo
 
@@ -118,11 +119,22 @@ defmodule TradeEngine.Platform.AssetTierConfig do
 
     cache_key = {:code, code}
     adapter_id = case :ets.lookup(@cache_table, cache_key) do
-      [{^cache_key, id, _}] -> id
+      [{^cache_key, id, _}] ->
+        Logger.debug("[AssetTierConfig] Cache hit for adapter code=#{code} → id=#{inspect(id)}")
+        id
       [] ->
-        id = case Repo.query("SELECT id FROM exchange.adapters WHERE code = $1 LIMIT 1", [code]) do
+        Logger.info("[AssetTierConfig] Cache miss for adapter code=#{code}, querying DB...")
+        result = Repo.query("SELECT id FROM exchange.adapters WHERE code = $1 LIMIT 1", [code])
+        Logger.info("[AssetTierConfig] DB adapter lookup result: #{inspect(result)}")
+
+        id = case result do
           {:ok, %{rows: [[found_id]]}} -> found_id
-          _ -> nil
+          {:ok, %{rows: rows}} ->
+            Logger.warning("[AssetTierConfig] Unexpected rows for code=#{code}: #{inspect(rows)}")
+            nil
+          {:error, err} ->
+            Logger.error("[AssetTierConfig] DB adapter lookup FAILED for code=#{code}: #{inspect(err)}")
+            nil
         end
 
         if id do
@@ -132,6 +144,7 @@ defmodule TradeEngine.Platform.AssetTierConfig do
         id
     end
 
+    Logger.info("[AssetTierConfig] Resolved adapter_id=#{inspect(adapter_id)} for code=#{code}")
     if adapter_id, do: get_by_adapter_id(adapter_id), else: nil
   end
 
@@ -193,18 +206,25 @@ defmodule TradeEngine.Platform.AssetTierConfig do
   # ════════════════════════════════════════════════════════════════════════════
 
   defp fetch_and_cache(adapter_id) do
+    Logger.info("[AssetTierConfig] Fetching config from DB for adapter_id=#{inspect(adapter_id)}")
+
     config = Repo.one(
       from c in __MODULE__,
         where: c.adapter_id == ^adapter_id
     )
 
     if config do
+      Logger.info("[AssetTierConfig] ✅ DB config loaded: tier1_assets=#{length(config.tier1_assets || [])} tier2=#{length(config.tier2_assets || [])} tier3=#{length(config.tier3_assets || [])} tier4=#{length(config.tier4_assets || [])}")
       :ets.insert(@cache_table, {adapter_id, config, System.monotonic_time(:millisecond)})
+    else
+      Logger.warning("[AssetTierConfig] ⚠️ No config found in DB for adapter_id=#{inspect(adapter_id)}")
     end
 
     config
   rescue
-    _ -> nil
+    e ->
+      Logger.error("[AssetTierConfig] ❌ DB fetch CRASHED for adapter_id=#{inspect(adapter_id)}: #{inspect(e)}")
+      nil
   end
 
   defp decimal_to_float(%Decimal{} = d), do: Decimal.to_float(d)

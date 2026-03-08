@@ -100,8 +100,10 @@ defmodule TradeEngine.Risk.AssetTierManager do
   def get_config_by_code(code) when is_binary(code) do
     case AssetTierConfig.get_by_adapter_code(code) do
       %AssetTierConfig{} = db_config ->
+        Logger.info("[AssetTierManager] ✅ Using DB config for code=#{code}")
         AssetTierConfig.to_tier_map(db_config)
       nil ->
+        Logger.warning("[AssetTierManager] ⚠️ No DB config for code=#{code}, using HARDCODED fallback defaults")
         default_config()
     end
   end
