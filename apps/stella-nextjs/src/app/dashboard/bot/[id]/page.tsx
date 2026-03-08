@@ -1318,14 +1318,15 @@ export default function BotDetailPage() {
           const mappedBot = mapApiBotToUiBot(botResult.data);
           setBot(mappedBot);
 
-          // Map equity snapshots
+          // Map equity snapshots — filter out $0 entries (recorded before capital was allocated)
           if (curveResult.data && Array.isArray(curveResult.data) && curveResult.data.length > 0) {
-            setEquityCurve(
-              curveResult.data.map((s: any) => ({
+            const meaningful = curveResult.data
+              .map((s: any) => ({
                 t: new Date(s.snapshot_at).getTime(),
                 value: Number(s.total_equity_usd),
               }))
-            );
+              .filter((p: any) => p.value > 0);
+            setEquityCurve(meaningful.length > 0 ? meaningful : [{ t: Date.now(), value: (mappedBot.allocatedCapital || 0) + (mappedBot.pnl || 0) }]);
           } else {
             const currentEquity = (mappedBot.allocatedCapital || 0) + (mappedBot.pnl || 0);
             setEquityCurve([{ t: Date.now(), value: currentEquity || 0 }]);
@@ -1378,19 +1379,23 @@ export default function BotDetailPage() {
             ? Math.round(((wsSnapshot.winning_trades ?? prev.winningTrades) / totalTrades) * 1000) / 10
             : prev.winRate,
           activeCapital,
-          allocatedCapital: wsSnapshot.allocated_capital ?? prev.allocatedCapital,
+          allocatedCapital: wsSnapshot.allocated_capital || prev.allocatedCapital,
           errorCount: wsSnapshot.error_count ?? prev.errorCount,
           lastError: wsSnapshot.last_error ?? prev.lastError,
         };
       });
 
-      const allocCap = wsSnapshot.allocated_capital ?? bot.allocatedCapital ?? 0;
-      const totalPnl = wsSnapshot.total_pnl ?? wsSnapshot.pnl_usd ?? bot.pnl ?? 0;
+      // Use || instead of ?? so that 0 falls through to the real value
+      const allocCap = wsSnapshot.allocated_capital || bot.allocatedCapital || 0;
+      const totalPnl = (wsSnapshot.total_pnl ?? wsSnapshot.pnl_usd ?? bot.pnl) || 0;
       const liveEquity = allocCap + totalPnl;
-      setEquityCurve(prev => {
-        const next = [...prev, { t: Date.now(), value: liveEquity }];
-        return next.length > 500 ? next.slice(next.length - 500) : next;
-      });
+      // Only append equity point when we have meaningful capital data
+      if (allocCap > 0) {
+        setEquityCurve(prev => {
+          const next = [...prev, { t: Date.now(), value: liveEquity }];
+          return next.length > 500 ? next.slice(next.length - 500) : next;
+        });
+      }
     }
   }, [wsSnapshot]);
 
