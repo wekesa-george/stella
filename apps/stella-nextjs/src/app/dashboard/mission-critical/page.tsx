@@ -2109,20 +2109,23 @@ function MissionCriticalDashboard() {
 
   // Merge REST orders + WS orders (WS orders overlay on top, deduped by id)
   const mergedOrders = useMemo(() => {
-    const mapOrder = (o: any) => ({
-      id: (o.id || '').slice(0, 8),
-      fullId: o.id || '',
-      bot: (o.bot_id || '').slice(0, 8) || '--',
-      pair: o.symbol || o.trading_pair || '--',
-      side: o.side || 'buy',
-      price: o.execution_price || o.price || '0',
-      qty: o.filled_quantity || o.quantity || '0',
-      status: o.status || 'pending',
-      age: '0s',
-      ts: o.created_at
-        ? new Date(o.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" })
-        : '--',
-    });
+    const mapOrder = (o: any) => {
+      const oid = o.order_id || o.id || '';
+      return {
+        id: oid.slice(0, 8),
+        fullId: oid,
+        bot: (o.bot_name || (o.bot_id || '').slice(0, 8)) || '--',
+        pair: o.trading_pair || o.symbol || '--',
+        side: (o.side || 'buy').toLowerCase(),
+        price: o.execution_price || o.order_price || o.price || '0',
+        qty: o.filled_quantity || o.order_size || o.quantity || '0',
+        status: (o.order_status || o.status || 'pending').toLowerCase(),
+        age: '0s',
+        ts: (o.timestamp || o.created_at)
+          ? new Date(o.timestamp || o.created_at).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" })
+          : '--',
+      };
+    };
 
     // Start with WS orders (most recent, real-time)
     const seen = new Set<string>();
@@ -2154,8 +2157,8 @@ function MissionCriticalDashboard() {
   const allRawOrders = useMemo(() => {
     const seen = new Set<string>();
     const result: any[] = [];
-    for (const o of wsOrders) { if (o.id && !seen.has(o.id)) { seen.add(o.id); result.push(o); } }
-    for (const o of restOrders) { if (o.id && !seen.has(o.id)) { seen.add(o.id); result.push(o); } }
+    for (const o of wsOrders) { const k = o.order_id || o.id; if (k && !seen.has(k)) { seen.add(k); result.push(o); } }
+    for (const o of restOrders) { const k = o.order_id || o.id; if (k && !seen.has(k)) { seen.add(k); result.push(o); } }
     return result;
   }, [wsOrders, restOrders]);
 
