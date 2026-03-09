@@ -32,6 +32,8 @@ defmodule TradeEngine.MarketData.Backfill do
 
   @timeframe_tables %{
     "1m" => "market_data.ohlcv_1m",
+    "5m" => "market_data.ohlcv_5m",
+    "15m" => "market_data.ohlcv_15m",
     "1h" => "market_data.ohlcv_1h",
     "1d" => "market_data.ohlcv_1d"
   }

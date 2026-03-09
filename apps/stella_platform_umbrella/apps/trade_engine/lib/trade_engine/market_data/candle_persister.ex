@@ -37,6 +37,8 @@ defmodule TradeEngine.MarketData.CandlePersister do
   def init(_opts) do
     # Subscribe to candle close events for all timeframes
     Phoenix.PubSub.subscribe(@pubsub, "candle_closed:1m")
+    Phoenix.PubSub.subscribe(@pubsub, "candle_closed:5m")
+    Phoenix.PubSub.subscribe(@pubsub, "candle_closed:15m")
     Phoenix.PubSub.subscribe(@pubsub, "candle_closed:1h")
     Phoenix.PubSub.subscribe(@pubsub, "candle_closed:1d")
 
@@ -45,6 +47,8 @@ defmodule TradeEngine.MarketData.CandlePersister do
 
     {:ok, %{
       buffer_1m: [],
+      buffer_5m: [],
+      buffer_15m: [],
       buffer_1h: [],
       buffer_1d: [],
       total_persisted: 0,
@@ -52,13 +56,28 @@ defmodule TradeEngine.MarketData.CandlePersister do
     }}
   end
 
+  # Handle the actual message format from KlineStream: {:candle_closed, %Candle{}}
+  # The timeframe is embedded in the PubSub topic and in the candle struct itself
   @impl true
-  def handle_info({:candle_closed, timeframe, candle_data}, state) do
+  def handle_info({:candle_closed, %{timeframe: timeframe} = candle_data}, state) do
+    buffer_key = timeframe_to_buffer(timeframe)
+
+    state = Map.update!(state, buffer_key, fn buf -> [candle_to_persist_map(candle_data) | buf] end)
+
+    # Flush if any buffer exceeds max size
+    if buffer_size(state) >= @max_buffer_size do
+      {:noreply, flush_all(state)}
+    else
+      {:noreply, state}
+    end
+  end
+
+  # Also handle the legacy 3-element tuple format in case anything else sends it
+  def handle_info({:candle_closed, timeframe, candle_data}, state) when is_binary(timeframe) do
     buffer_key = timeframe_to_buffer(timeframe)
 
     state = Map.update!(state, buffer_key, fn buf -> [candle_data | buf] end)
 
-    # Flush if any buffer exceeds max size
     if buffer_size(state) >= @max_buffer_size do
       {:noreply, flush_all(state)}
     else
@@ -77,6 +96,8 @@ defmodule TradeEngine.MarketData.CandlePersister do
   def handle_call(:stats, _from, state) do
     stats = %{
       buffer_1m: length(state.buffer_1m),
+      buffer_5m: length(state.buffer_5m),
+      buffer_15m: length(state.buffer_15m),
       buffer_1h: length(state.buffer_1h),
       buffer_1d: length(state.buffer_1d),
       total_persisted: state.total_persisted,
@@ -92,6 +113,8 @@ defmodule TradeEngine.MarketData.CandlePersister do
   defp flush_all(state) do
     state
     |> flush_buffer(:buffer_1m, "market_data.ohlcv_1m")
+    |> flush_buffer(:buffer_5m, "market_data.ohlcv_5m")
+    |> flush_buffer(:buffer_15m, "market_data.ohlcv_15m")
     |> flush_buffer(:buffer_1h, "market_data.ohlcv_1h")
     |> flush_buffer(:buffer_1d, "market_data.ohlcv_1d")
   end
@@ -106,9 +129,14 @@ defmodule TradeEngine.MarketData.CandlePersister do
       count = length(rows)
 
       try do
+        # Extract values in consistent column order to match INSERT statement
+        params = Enum.flat_map(rows, fn row ->
+          [row.time, row.exchange_code, row.trading_pair, row.open, row.high, row.low, row.close, row.volume, row.quote_volume, row.trade_count, row.is_complete]
+        end)
+
         Repo.query!(
           insert_sql(table, count),
-          rows |> Enum.flat_map(&Map.values/1)
+          params
         )
 
         Logger.info("📊 CandlePersister: flushed #{count} candles to #{table}")
@@ -123,6 +151,23 @@ defmodule TradeEngine.MarketData.CandlePersister do
           state
       end
     end
+  end
+
+  # Convert a Candle struct from KlineStream into a map suitable for persistence
+  defp candle_to_persist_map(%{} = candle) do
+    %{
+      time: candle[:timestamp] || candle.timestamp,
+      exchange_code: to_string(candle[:exchange] || candle.exchange || "binance"),
+      trading_pair: candle[:symbol] || candle.symbol,
+      open: candle[:open] || candle.open,
+      high: candle[:high] || candle.high,
+      low: candle[:low] || candle.low,
+      close: candle[:close] || candle.close,
+      volume: candle[:volume] || candle.volume || 0,
+      quote_volume: candle[:quote_volume] || candle.quote_volume || 0,
+      trade_count: candle[:trade_count] || candle.trade_count || 0,
+      is_complete: candle[:closed] || candle.closed || true
+    }
   end
 
   defp candle_to_row(candle) do
@@ -170,12 +215,14 @@ defmodule TradeEngine.MarketData.CandlePersister do
   defp to_decimal(_), do: Decimal.new(0)
 
   defp timeframe_to_buffer("1m"), do: :buffer_1m
+  defp timeframe_to_buffer("5m"), do: :buffer_5m
+  defp timeframe_to_buffer("15m"), do: :buffer_15m
   defp timeframe_to_buffer("1h"), do: :buffer_1h
   defp timeframe_to_buffer("1d"), do: :buffer_1d
   defp timeframe_to_buffer(_), do: :buffer_1m
 
   defp buffer_size(state) do
-    length(state.buffer_1m) + length(state.buffer_1h) + length(state.buffer_1d)
+    length(state.buffer_1m) + length(state.buffer_5m) + length(state.buffer_15m) + length(state.buffer_1h) + length(state.buffer_1d)
   end
 
   defp schedule_flush do
