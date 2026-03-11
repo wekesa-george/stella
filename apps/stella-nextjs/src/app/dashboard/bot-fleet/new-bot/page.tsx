@@ -144,10 +144,13 @@ export default function NewBotPage() {
   // Grid bot config (only used when strategy is core_grid)
   const [gridUpperPrice, setGridUpperPrice] = useState("");
   const [gridLowerPrice, setGridLowerPrice] = useState("");
-  const [gridLevels, setGridLevels] = useState("10");
-  const [gridType, setGridType] = useState<"arithmetic" | "geometric">("arithmetic");
+  const [gridLevels, setGridLevels] = useState("20");
+  const [gridType, setGridType] = useState<"arithmetic" | "geometric">("geometric");
   const [gridStopLoss, setGridStopLoss] = useState("");
   const [gridTakeProfit, setGridTakeProfit] = useState("");
+  const [gridFeeRate, setGridFeeRate] = useState("0.001");
+  const [gridMaxOpenOrders, setGridMaxOpenOrders] = useState("20");
+  const [gridRestartOnStopLoss, setGridRestartOnStopLoss] = useState(true);
 
   // Shared state
   const [submitting, setSubmitting] = useState(false);
@@ -160,6 +163,29 @@ export default function NewBotPage() {
   const selectedUser = users.find((u) => u.id === selectedUserId);
   const selectedSa = serviceAccounts.find((sa) => sa.id === selectedSaId);
   const isGridStrategy = selectedStrategy?.type === "core_grid";
+
+  // Grid computed metrics
+  const gridMetrics = useMemo(() => {
+    const upper = Number(gridUpperPrice);
+    const lower = Number(gridLowerPrice);
+    const levels = Number(gridLevels) || 2;
+    const feeRate = Number(gridFeeRate) || 0.001;
+    const capital = Number(allocatedCapital) || 0;
+
+    if (!upper || !lower || upper <= lower || levels < 2) return null;
+
+    const spacingPct = gridType === "geometric"
+      ? (Math.pow(upper / lower, 1 / levels) - 1) * 100
+      : ((upper - lower) / levels / lower) * 100;
+
+    const profitPerGridPct = spacingPct - feeRate * 2 * 100;
+    const investmentPerGrid = capital > 0 ? capital / levels : 0;
+    const rangePct = ((upper - lower) / lower) * 100;
+    const minSpacingRequired = feeRate * 2 * 100 * 2; // 2x round-trip fees minimum
+
+    return { spacingPct, profitPerGridPct, investmentPerGrid, rangePct, minSpacingRequired, isProfitable: profitPerGridPct > 0 };
+  }, [gridUpperPrice, gridLowerPrice, gridLevels, gridType, gridFeeRate, allocatedCapital]);
+
   const selectedAdapterRaw = selectedCredential ? adapters.find((a) => a.id === selectedCredential.adapter_id) : undefined;
   const adapterFlags = selectedAdapterRaw ? {
     spot: selectedAdapterRaw.supportsSpot ?? selectedAdapterRaw.supports_spot ?? false,
@@ -343,12 +369,22 @@ export default function NewBotPage() {
       };
 
       if (isGridStrategy) {
+        // Fee-aware validation
+        if (gridMetrics && !gridMetrics.isProfitable) {
+          setError(`Grid spacing (${gridMetrics.spacingPct.toFixed(3)}%) is too tight to cover fees. Reduce grid levels or widen the price range.`);
+          setSubmitting(false);
+          return;
+        }
         payload.config = {
           upper_price: Number(gridUpperPrice),
           lower_price: Number(gridLowerPrice),
-          grid_levels: Number(gridLevels) || 10,
+          grid_levels: Number(gridLevels) || 20,
           grid_type: gridType,
           total_investment: allocatedCapital ? Number(allocatedCapital) : 2000,
+          quantity_per_grid: 0,
+          max_open_orders: Number(gridMaxOpenOrders) || 20,
+          fee_rate: Number(gridFeeRate) || 0.001,
+          restart_on_stop_loss: gridRestartOnStopLoss,
           ...(gridStopLoss ? { stop_loss_price: Number(gridStopLoss) } : {}),
           ...(gridTakeProfit ? { take_profit_price: Number(gridTakeProfit) } : {}),
         };
@@ -951,10 +987,10 @@ export default function NewBotPage() {
                         />
                       </div>
                     </div>
-                    {gridUpperPrice && gridLowerPrice && Number(gridUpperPrice) > Number(gridLowerPrice) && (
+                    {gridMetrics && (
                       <p className="text-[10px] text-[#5a7090]">
                         Range: ${Number(gridLowerPrice).toLocaleString()} — ${Number(gridUpperPrice).toLocaleString()}
-                        {" "}({((Number(gridUpperPrice) - Number(gridLowerPrice)) / Number(gridLowerPrice) * 100).toFixed(1)}% spread)
+                        {" "}({gridMetrics.rangePct.toFixed(1)}% spread)
                       </p>
                     )}
                     <div className="grid grid-cols-2 gap-3">
@@ -965,10 +1001,10 @@ export default function NewBotPage() {
                         <input
                           value={gridLevels}
                           onChange={(e) => setGridLevels(e.target.value)}
-                          placeholder="10"
+                          placeholder="20"
                           type="number"
                           min="2"
-                          max="100"
+                          max="500"
                           className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
                         />
                       </div>
@@ -988,18 +1024,77 @@ export default function NewBotPage() {
                                   : "border-dark text-[#5a7090] hover:border-dark-2"
                               }`}
                             >
-                              {t}
+                              {t === "arithmetic" ? "Arithmetic (equal $)" : "Geometric (equal %)"}
                             </button>
                           ))}
                         </div>
                       </div>
                     </div>
-                    {gridUpperPrice && gridLowerPrice && Number(gridUpperPrice) > Number(gridLowerPrice) && Number(gridLevels) >= 2 && (
-                      <p className="text-[10px] text-[#5a7090]">
-                        ≈ ${((Number(gridUpperPrice) - Number(gridLowerPrice)) / Number(gridLevels)).toFixed(2)} per grid level
-                        {allocatedCapital && ` · $${(Number(allocatedCapital) / Number(gridLevels)).toFixed(2)} per grid`}
-                      </p>
+
+                    {/* Computed metrics panel */}
+                    {gridMetrics && (
+                      <div className="bg-dark-elevated border border-dark rounded-sm px-3 py-2.5 space-y-1">
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-[#5a7090]">Grid spacing</span>
+                          <span className="text-foreground font-mono">{gridMetrics.spacingPct.toFixed(3)}%</span>
+                        </div>
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-[#5a7090]">Net profit per grid (after fees)</span>
+                          <span className={`font-mono ${gridMetrics.isProfitable ? "text-[#00d4aa]" : "text-[#ff4757]"}`}>
+                            {gridMetrics.profitPerGridPct.toFixed(3)}%
+                          </span>
+                        </div>
+                        {gridMetrics.investmentPerGrid > 0 && (
+                          <div className="flex justify-between text-[10px]">
+                            <span className="text-[#5a7090]">Investment per grid</span>
+                            <span className="text-foreground font-mono">${gridMetrics.investmentPerGrid.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
                     )}
+
+                    {/* Fee warning */}
+                    {gridMetrics && !gridMetrics.isProfitable && (
+                      <div className="text-[10px] text-[#ff4757] bg-[rgba(255,71,87,0.06)] border border-[rgba(255,71,87,0.15)] rounded-sm px-2.5 py-1.5">
+                        Grid spacing ({gridMetrics.spacingPct.toFixed(3)}%) is less than 2x round-trip fees ({(Number(gridFeeRate) * 2 * 100).toFixed(2)}%). Every trade will lose money. Reduce grid levels or widen the price range.
+                      </div>
+                    )}
+
+                    {/* Execution settings */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Fee Rate (per side)
+                        </label>
+                        <input
+                          value={gridFeeRate}
+                          onChange={(e) => setGridFeeRate(e.target.value)}
+                          placeholder="0.001"
+                          type="number"
+                          min="0"
+                          max="0.01"
+                          step="0.0001"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                        <p className="text-[9px] text-[#5a7090] mt-0.5">0.001 = 0.1% (Binance spot maker)</p>
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
+                          Max Open Orders
+                        </label>
+                        <input
+                          value={gridMaxOpenOrders}
+                          onChange={(e) => setGridMaxOpenOrders(e.target.value)}
+                          placeholder="20"
+                          type="number"
+                          min="1"
+                          max="200"
+                          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Risk management */}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
@@ -1008,12 +1103,17 @@ export default function NewBotPage() {
                         <input
                           value={gridStopLoss}
                           onChange={(e) => setGridStopLoss(e.target.value)}
-                          placeholder="Optional"
+                          placeholder="Optional — below grid floor"
                           type="number"
                           min="0"
                           step="any"
                           className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
                         />
+                        {gridLowerPrice && gridStopLoss && Number(gridStopLoss) > 0 && (
+                          <p className="text-[9px] text-[#5a7090] mt-0.5">
+                            {((1 - Number(gridStopLoss) / Number(gridLowerPrice)) * 100).toFixed(1)}% below grid floor
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1">
@@ -1022,7 +1122,7 @@ export default function NewBotPage() {
                         <input
                           value={gridTakeProfit}
                           onChange={(e) => setGridTakeProfit(e.target.value)}
-                          placeholder="Optional"
+                          placeholder="Optional — above grid ceiling"
                           type="number"
                           min="0"
                           step="any"
@@ -1030,6 +1130,22 @@ export default function NewBotPage() {
                         />
                       </div>
                     </div>
+
+                    {/* Restart on stop-loss toggle */}
+                    <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={gridRestartOnStopLoss}
+                        onChange={(e) => setGridRestartOnStopLoss(e.target.checked)}
+                        className="accent-[#3d9df3]"
+                      />
+                      <div>
+                        <span className="text-[10px] text-foreground font-medium">Restart grid after stop-loss</span>
+                        <p className="text-[9px] text-[#5a7090] mt-0.5">
+                          When stop-loss triggers, redeploy the grid centered around the new price instead of stopping
+                        </p>
+                      </div>
+                    </label>
                   </div>
                 </div>
               )}
@@ -1098,14 +1214,22 @@ export default function NewBotPage() {
                         label="Grid Range"
                         value={`$${Number(gridLowerPrice).toLocaleString()} — $${Number(gridUpperPrice).toLocaleString()}`}
                       />
-                      <SummaryRow label="Grid Levels" value={gridLevels} />
-                      <SummaryRow label="Grid Type" value={gridType} />
+                      <SummaryRow label="Grid Levels" value={`${gridLevels} (${gridType})`} />
+                      <SummaryRow label="Fee Rate" value={`${(Number(gridFeeRate) * 100).toFixed(2)}% per side`} />
+                      {gridMetrics && (
+                        <SummaryRow
+                          label="Net Profit/Grid"
+                          value={`${gridMetrics.profitPerGridPct.toFixed(3)}%`}
+                        />
+                      )}
+                      <SummaryRow label="Max Open Orders" value={gridMaxOpenOrders} />
                       {gridStopLoss && (
                         <SummaryRow label="Stop Loss" value={`$${Number(gridStopLoss).toLocaleString()}`} />
                       )}
                       {gridTakeProfit && (
                         <SummaryRow label="Take Profit" value={`$${Number(gridTakeProfit).toLocaleString()}`} />
                       )}
+                      <SummaryRow label="Restart on SL" value={gridRestartOnStopLoss ? "Yes" : "No"} />
                     </>
                   )}
                 </div>

@@ -18,13 +18,7 @@ export interface BotConfig {
   strategy: 'grid' | 'dca' | 'arbitrage';
 
   // Grid strategy specific
-  gridConfig?: {
-    upperPrice: number;
-    lowerPrice: number;
-    gridLevels: number;
-    investmentPerGrid: number;
-    totalInvestment: number;
-  };
+  gridConfig?: GridBotConfig;
 
   // API configuration
   apiConfig: {
@@ -43,6 +37,37 @@ export interface BotConfig {
 
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Full grid bot configuration — maps to Elixir GridBot.default_config()
+ * and the strategy.config JSON field in the DB.
+ */
+export interface GridBotConfig {
+  // Required: grid boundaries
+  upper_price: number;
+  lower_price: number;
+
+  // Grid structure
+  grid_levels: number;          // number of grid lines (default 10)
+  grid_type: 'arithmetic' | 'geometric';  // spacing type (default arithmetic)
+
+  // Capital allocation
+  total_investment: number;     // total capital in USD
+  quantity_per_grid: number;    // base asset qty per grid (0 = auto-calc from total_investment)
+
+  // Risk management
+  stop_loss_price: number | null;       // emergency exit below grid
+  take_profit_price: number | null;     // close all above this
+
+  // Execution
+  max_open_orders: number;      // exchange order limit (default 20)
+  fee_rate: number;             // per-side fee rate (default 0.001 = 0.1%)
+
+  // Computed (read-only, shown in UI)
+  grid_spacing_pct?: number;    // % between levels
+  profit_per_grid_pct?: number; // spacing - 2*fee = net profit per round trip
+  estimated_daily_trades?: number;
 }
 
 export interface BotOrder {

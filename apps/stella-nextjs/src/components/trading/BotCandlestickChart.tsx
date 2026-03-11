@@ -189,7 +189,7 @@ export function BotCandlestickChart({
 
         {/* Grid level lines and zones - DRAW FIRST so candles are on top */}
         {botConfig.gridConfig && (() => {
-          const { upperPrice, lowerPrice, gridLevels } = botConfig.gridConfig;
+          const { upper_price: upperPrice, lower_price: lowerPrice, grid_levels: gridLevels } = botConfig.gridConfig;
           const upperY = toY(upperPrice);
           const lowerY = toY(lowerPrice);
           const priceStep = (upperPrice - lowerPrice) / gridLevels;
@@ -329,7 +329,7 @@ export function BotCandlestickChart({
 
         {/* Grid price labels - drawn on top */}
         {botConfig.gridConfig && (() => {
-          const { upperPrice, lowerPrice } = botConfig.gridConfig;
+          const { upper_price: upperPrice, lower_price: lowerPrice } = botConfig.gridConfig;
           const upperY = toY(upperPrice);
           const lowerY = toY(lowerPrice);
 

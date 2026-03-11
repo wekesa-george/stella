@@ -19,11 +19,16 @@ export const BOT_FLEET: Record<string, BotConfig> = {
     strategy: 'grid',
 
     gridConfig: {
-      upperPrice: 105000,
-      lowerPrice: 85000,
-      gridLevels: 20,
-      investmentPerGrid: 500,
-      totalInvestment: 10000,
+      upper_price: 105000,
+      lower_price: 85000,
+      grid_levels: 20,
+      grid_type: 'geometric',
+      quantity_per_grid: 0,
+      total_investment: 10000,
+      stop_loss_price: null,
+      take_profit_price: null,
+      max_open_orders: 20,
+      fee_rate: 0.001,
     },
 
     apiConfig: {
@@ -53,11 +58,16 @@ export const BOT_FLEET: Record<string, BotConfig> = {
     strategy: 'grid',
 
     gridConfig: {
-      upperPrice: 68500,
-      lowerPrice: 65000,
-      gridLevels: 40,
-      investmentPerGrid: 250,
-      totalInvestment: 10000,
+      upper_price: 68500,
+      lower_price: 65000,
+      grid_levels: 40,
+      grid_type: 'geometric',
+      quantity_per_grid: 0,
+      total_investment: 10000,
+      stop_loss_price: null,
+      take_profit_price: null,
+      max_open_orders: 40,
+      fee_rate: 0.001,
     },
 
     apiConfig: {
