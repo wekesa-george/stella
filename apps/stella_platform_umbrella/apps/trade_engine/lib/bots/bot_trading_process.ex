@@ -1048,10 +1048,12 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     else
       symbol = signal.symbol
       qty = signal.quantity_per_grid
+      is_spot = state.market_type in [nil, "spot"]
 
-      # Place buy orders below current price (closest first), then sell orders above
-      buy_levels = Enum.take(signal.buy_levels, div(available_slots, 2) + 1)
-      sell_levels = Enum.take(signal.sell_levels, div(available_slots, 2) + 1)
+      # On spot: only place BUY orders initially. Sell orders are placed
+      # as counter-orders when buys fill (you can't sell what you don't own).
+      # On futures: place both sides since you can short.
+      buy_levels = Enum.take(signal.buy_levels, available_slots)
 
       state = Enum.reduce(buy_levels, state, fn price_level, acc ->
         if map_size(acc.grid_orders) < max_orders do
@@ -1061,13 +1063,26 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         end
       end)
 
-      Enum.reduce(sell_levels, state, fn price_level, acc ->
-        if map_size(acc.grid_orders) < max_orders do
-          place_grid_limit_order(acc, symbol, "SELL", qty, price_level)
-        else
-          acc
-        end
-      end)
+      if is_spot do
+        # Spot: no upfront sells — they come from process_grid_fill counter-orders
+        BotLogger.debug(state.bot_id, :grid, "Spot mode: placed buy orders only", %{
+          buy_count: length(buy_levels),
+          sell_levels_skipped: length(signal.sell_levels)
+        })
+        state
+      else
+        # Futures: can place sells (shorts) upfront
+        remaining_slots = max(0, max_orders - map_size(state.grid_orders))
+        sell_levels = Enum.take(signal.sell_levels, remaining_slots)
+
+        Enum.reduce(sell_levels, state, fn price_level, acc ->
+          if map_size(acc.grid_orders) < max_orders do
+            place_grid_limit_order(acc, symbol, "SELL", qty, price_level)
+          else
+            acc
+          end
+        end)
+      end
     end
   end
 
