@@ -114,7 +114,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           # Grid bot state (only used when strategy is GridBot)
           is_grid: is_grid,
           grid_orders: %{},          # %{price_level => %{order_id, side, status}}
-          grid_initialized: false
+          grid_initialized: false,
+          grid_restart_pending: false  # Set true after stop-loss to trigger grid redeployment
         }
 
         # Step 5: Ready
@@ -366,6 +367,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   # ========================================================================
 
   defp process_candle(candle, state) do
+    # Grid restart: if stop-loss triggered, recenter grid before processing
+    state = if state.is_grid, do: maybe_restart_grid(state), else: state
+
     symbol = candle.symbol
     now = DateTime.utc_now()
     strategy = state.strategy_module
@@ -711,7 +715,23 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       |> Map.values()
       |> Enum.filter(&strategy.should_exit?(&1, context))
 
-    Enum.reduce(to_close, state, fn pos, acc -> close_position(pos, acc) end)
+    had_positions = map_size(state.positions) > 0
+    state = Enum.reduce(to_close, state, fn pos, acc -> close_position(pos, acc) end)
+    all_closed = had_positions and map_size(state.positions) == 0 and length(to_close) > 0
+
+    # Grid bot stop-loss restart: if all positions were closed and this is a grid bot
+    # with restart_on_stop_loss enabled, cancel pending grid orders and flag for restart
+    if all_closed and state.is_grid and get_strategy_param(state.config, "restart_on_stop_loss", true) do
+      BotLogger.info(state.bot_id, :grid, "Stop-loss triggered — cancelling grid orders and scheduling restart", %{
+        closed_count: length(to_close),
+        pending_grid_orders: map_size(state.grid_orders)
+      })
+
+      state = cancel_all_grid_orders(state)
+      %{state | grid_restart_pending: true, grid_initialized: false}
+    else
+      state
+    end
   end
 
   defp close_position(pos, state) do
@@ -1079,6 +1099,56 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           reason: inspect(reason)
         })
         state
+    end
+  end
+
+  # Cancel all pending grid limit orders on the exchange and clear local state
+  defp cancel_all_grid_orders(state) do
+    symbol = List.first(state.trading_pairs)
+
+    Enum.each(state.grid_orders, fn {_level, entry} ->
+      order_id = entry.order_id
+      if order_id do
+        case OrderManager.cancel_order(state.credential_id, symbol, order_id) do
+          {:ok, _} ->
+            BotLogger.debug(state.bot_id, :grid, "Cancelled grid order", %{order_id: order_id, price: entry.price})
+          {:error, reason} ->
+            BotLogger.warning(state.bot_id, :grid, "Failed to cancel grid order", %{order_id: order_id, reason: inspect(reason)})
+        end
+      end
+    end)
+
+    %{state | grid_orders: %{}}
+  end
+
+  # Restart grid after stop-loss: recenter around current price and redeploy
+  defp maybe_restart_grid(state) do
+    if not state.grid_restart_pending do
+      state
+    else
+      symbol = List.first(state.trading_pairs)
+      current_price = Map.get(state.price_cache, symbol, 0.0)
+
+      if current_price <= 0 do
+        # No price yet — wait for next tick
+        state
+      else
+        new_config = TradeEngine.Strategies.GridBot.recentered_config(state.config, current_price)
+
+        BotLogger.info(state.bot_id, :grid, "Grid restarting after stop-loss", %{
+          current_price: current_price,
+          new_lower: new_config["lower_price"],
+          new_upper: new_config["upper_price"],
+          new_stop_loss: new_config["stop_loss_price"]
+        })
+
+        %{state |
+          config: new_config,
+          grid_restart_pending: false,
+          grid_initialized: false,
+          grid_orders: %{}
+        }
+      end
     end
   end
 

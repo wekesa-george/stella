@@ -2548,6 +2548,9 @@ defmodule TradeEngine.Orchestrator.MarginScalper do
 
               log_trade_open(position)
 
+              # Persist to DB (async, fire-and-forget)
+              TradeEngine.Orchestrator.MarginScalperPersistence.persist_position_open(position)
+
               state
               |> HFTPerformance.record_latency(latency_us)
               |> HFTPerformance.increment_throughput()
@@ -2874,6 +2877,9 @@ defmodule TradeEngine.Orchestrator.MarginScalper do
           })
 
           log_trade_close(trade_record)
+
+          # Persist close to DB (async, fire-and-forget)
+          TradeEngine.Orchestrator.MarginScalperPersistence.persist_position_close(trade_record)
 
           new_balance = state.margin_balance + pnl
           balance_snapshot = {DateTime.utc_now(), new_balance}

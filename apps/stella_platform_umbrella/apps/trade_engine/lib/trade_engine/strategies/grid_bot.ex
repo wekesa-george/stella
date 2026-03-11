@@ -25,6 +25,8 @@ defmodule TradeEngine.Strategies.GridBot do
     - total_investment: float — total allocated capital (USD)
     - stop_loss_price: float — emergency exit below grid (optional)
     - take_profit_price: float — close all above this price (optional)
+    - restart_on_stop_loss: boolean (default true) — after stop-loss exit, redeploy
+      grid centered around current price instead of stopping
     - rebalance_on_breakout: boolean (default false)
     - max_open_orders: integer (default 20) — exchange order limit
   """
@@ -43,6 +45,7 @@ defmodule TradeEngine.Strategies.GridBot do
     "stop_loss_price" => nil,
     "take_profit_price" => nil,
     "rebalance_on_breakout" => false,
+    "restart_on_stop_loss" => true,
     "max_open_orders" => 20,
     "max_positions" => 20
   }
@@ -203,6 +206,49 @@ defmodule TradeEngine.Strategies.GridBot do
       nil -> length(sorted) - 1
       0 -> 0
       n -> n - 1
+    end
+  end
+
+  @doc """
+  Compute a new grid config centered around `current_price`, preserving the
+  original range width and all other parameters. Used for grid restart after
+  stop-loss exit.
+
+  The new grid keeps the same percentage range width as the original but
+  shifts it so `current_price` sits at 40% from the bottom (slightly bullish
+  bias — more room to run up than down).
+  """
+  def recentered_config(config, current_price) do
+    original_upper = config["upper_price"]
+    original_lower = config["lower_price"]
+
+    if original_upper <= original_lower or current_price <= 0 do
+      config
+    else
+      # Preserve the percentage width of the original range
+      range_pct = (original_upper - original_lower) / original_lower
+      half_range = current_price * range_pct
+
+      # Place current price at 40% from bottom (bullish bias)
+      new_lower = Float.round(current_price - half_range * 0.4, 2)
+      new_upper = Float.round(current_price + half_range * 0.6, 2)
+
+      # Ensure lower is positive
+      new_lower = max(new_lower, current_price * 0.5)
+
+      # Update stop-loss relative to new lower bound (same % gap as original)
+      new_stop = if config["stop_loss_price"] && original_lower > 0 do
+        sl_gap_pct = 1.0 - config["stop_loss_price"] / original_lower
+        Float.round(new_lower * (1.0 - sl_gap_pct), 2)
+      else
+        nil
+      end
+
+      config
+      |> Map.put("upper_price", new_upper)
+      |> Map.put("lower_price", new_lower)
+      |> Map.put("stop_loss_price", new_stop)
+      |> Map.put("take_profit_price", nil)  # Clear TP on restart
     end
   end
 
