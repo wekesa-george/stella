@@ -1735,7 +1735,7 @@ export default function BotDetailPage() {
 
           <div className="bdp-hdr-left">
             <div className="bdp-breadcrumb">
-              <button className="bdp-breadcrumb-link" onClick={() => router.push("/dashboard/mission-control")}>Dashboard</button>
+              <button className="bdp-breadcrumb-link" onClick={() => router.push("/dashboard/mission-critical")}>Dashboard</button>
               <span className="bdp-breadcrumb-sep">/</span>
               <button className="bdp-breadcrumb-link" onClick={() => router.push("/dashboard/bot-fleet")}>Bot Fleet</button>
               <span className="bdp-breadcrumb-sep">/</span>
