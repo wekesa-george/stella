@@ -1,10 +1,13 @@
 defmodule TradeEngine.Trading.PositionCloseManager do
   @moduledoc """
   Detects exit conditions (TP, SL, trailing stop, max hold time) for open
-  positions and closes them by updating DB status + broadcasting events.
+  positions and closes them via exchange order + DB update + event broadcast.
 
   Runs every 5 seconds. Loads positions with their SLTP config, checks
-  each against current price, and executes closes when conditions are met.
+  each against current price, and when an exit condition is met:
+  1. Sends a market close order to the exchange via OrderManager
+  2. Updates position status/PnL in DB using the executed price
+  3. Broadcasts position_closed event via PubSub
   """
 
   use GenServer
@@ -12,7 +15,7 @@ defmodule TradeEngine.Trading.PositionCloseManager do
   import Ecto.Query
 
   alias TradeEngine.Repo
-  alias TradeEngine.Trading.{Position, StopLossTakeProfit}
+  alias TradeEngine.Trading.{Position, StopLossTakeProfit, OrderManager}
 
   @pubsub TradeEngine.PubSub
   @tick_interval_ms 5_000
@@ -106,6 +109,9 @@ defmodule TradeEngine.Trading.PositionCloseManager do
           entry_price: p.entry_price,
           quantity: p.quantity,
           bot_id: p.bot_id,
+          user_id: p.user_id,
+          credential_id: p.credential_id,
+          strategy_id: p.strategy_id,
           entry_time: p.entry_time,
           highest_price: p.highest_price,
           lowest_price: p.lowest_price,
@@ -275,28 +281,24 @@ defmodule TradeEngine.Trading.PositionCloseManager do
     entry = to_float(pos.entry_price) || 0.0
     qty = to_float(pos.quantity) || 0.0
 
-    pnl =
-      case pos.position_type do
-        "long" -> (exit_price - entry) * qty
-        "short" -> (entry - exit_price) * qty
-        _ -> 0.0
-      end
+    # Step 1: Execute close order on the exchange
+    {final_exit_price, pnl} = execute_exchange_close(pos, entry, qty, exit_price, reason)
 
     now = NaiveDateTime.utc_now()
 
-    # Update position in DB
+    # Step 2: Update position in DB with actual execution price
     from(p in Position, where: p.id == ^pos.id)
     |> Repo.update_all(set: [
       status: "closed",
-      exit_price: Decimal.from_float(exit_price),
-      current_price: Decimal.from_float(exit_price),
+      exit_price: Decimal.from_float(final_exit_price),
+      current_price: Decimal.from_float(final_exit_price),
       profit_loss: Decimal.from_float(pnl),
       exit_time: now,
       exit_reason: reason,
       updated_at: now
     ])
 
-    # Mark SLTP as triggered
+    # Step 3: Mark SLTP as triggered
     from(s in StopLossTakeProfit,
       where: s.position_id == ^pos.id and s.status == "active"
     )
@@ -306,22 +308,73 @@ defmodule TradeEngine.Trading.PositionCloseManager do
       triggered_at: now
     ])
 
-    Logger.info("🔒 Closed position #{pos.id} (#{pos.symbol} #{pos.position_type}) — reason: #{reason}, P&L: $#{Float.round(pnl, 2)}")
+    Logger.info("🔒 Closed position #{pos.id} (#{pos.symbol} #{pos.position_type}) — reason: #{reason}, exit: $#{Float.round(final_exit_price, 2)}, P&L: $#{Float.round(pnl, 2)}")
 
-    # Broadcast close event
+    # Step 4: Broadcast close event
     Phoenix.PubSub.broadcast(@pubsub, "trading:positions", {:position_closed, %{
       id: pos.id,
       symbol: pos.symbol,
       side: pos.position_type,
-      exit_price: exit_price,
+      exit_price: final_exit_price,
       profit_loss: pnl,
       exit_reason: reason,
       bot_id: pos.bot_id
     }})
   rescue
     e ->
-      Logger.error("Failed to close position #{pos.id}: #{Exception.message(e)}")
+      Logger.error("❌ Failed to close position #{pos.id}: #{Exception.message(e)}")
   end
+
+  # Execute the close order on the exchange via OrderManager.
+  # Returns {actual_exit_price, pnl}.
+  # If no credential is available or the exchange call fails,
+  # falls back to the cached exit price (DB-only close).
+  defp execute_exchange_close(pos, entry, qty, cached_exit_price, reason) do
+    fallback_pnl = calculate_pnl(pos.position_type, entry, cached_exit_price, qty)
+
+    case pos.credential_id do
+      nil ->
+        Logger.warning("⚠️ Position #{pos.id} has no credential_id — DB-only close (#{reason})")
+        {cached_exit_price, fallback_pnl}
+
+      credential_id ->
+        opts = [
+          bot_id: pos.bot_id,
+          user_id: pos.user_id,
+          strategy_id: pos.strategy_id,
+          position_id: pos.id,
+          exit_reason: reason
+        ]
+
+        result =
+          case pos.position_type do
+            "long" ->
+              OrderManager.close_long(credential_id, pos.symbol, qty, entry, opts)
+
+            "short" ->
+              OrderManager.close_short(credential_id, pos.symbol, qty, entry, opts)
+
+            _ ->
+              {:error, :unknown_position_type}
+          end
+
+        case result do
+          {:ok, exec} ->
+            executed_price = exec[:executed_price] || cached_exit_price
+            executed_pnl = exec[:pnl] || calculate_pnl(pos.position_type, entry, executed_price, qty)
+            Logger.info("✅ Exchange close OK for #{pos.id} (#{pos.symbol}) — executed at $#{Float.round(executed_price, 2)}")
+            {executed_price, executed_pnl}
+
+          {:error, err} ->
+            Logger.error("❌ Exchange close FAILED for #{pos.id} (#{pos.symbol}): #{inspect(err)} — falling back to DB-only close at $#{Float.round(cached_exit_price, 2)}")
+            {cached_exit_price, fallback_pnl}
+        end
+    end
+  end
+
+  defp calculate_pnl("long", entry, exit_price, qty), do: (exit_price - entry) * qty
+  defp calculate_pnl("short", entry, exit_price, qty), do: (entry - exit_price) * qty
+  defp calculate_pnl(_, _entry, _exit_price, _qty), do: 0.0
 
   defp update_price_extremes(pos, price) do
     updates =
