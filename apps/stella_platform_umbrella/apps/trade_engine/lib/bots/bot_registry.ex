@@ -698,12 +698,16 @@ defmodule TradeEngine.Bots.BotRegistry do
   end
 
   defp db_bot_to_runtime(%Bot{} = bot) do
+    # Resolve strategy_type from the linked strategy record
+    strategy_type = resolve_strategy_type(bot.strategy_id)
+
     %{
       id: bot.id,
       name: bot.name,
       user_id: bot.user_id,
       service_account_id: bot.service_account_id,
       strategy_id: bot.strategy_id,
+      strategy_type: strategy_type,
       credential_id: bot.credential_id,
       market_type: bot.market_type || "spot",
       config: bot.config || %{},
@@ -728,6 +732,16 @@ defmodule TradeEngine.Bots.BotRegistry do
       elixir_pid: bot.elixir_pid,
       init_step: bot.init_step
     }
+  end
+
+  defp resolve_strategy_type(nil), do: nil
+  defp resolve_strategy_type(strategy_id) do
+    case Repo.get(SysAdmin.Strategies.Strategy, strategy_id) do
+      nil -> nil
+      strategy -> strategy.type
+    end
+  rescue
+    _ -> nil
   end
 
   defp update_bot_db(bot_id, attrs) do
