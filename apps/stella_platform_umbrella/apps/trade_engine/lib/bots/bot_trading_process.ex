@@ -995,6 +995,23 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     end
   end
 
+  # Price precision matching Binance tick sizes (PRICE_FILTER)
+  defp exchange_price_precision(symbol, _market_type) do
+    cond do
+      String.starts_with?(symbol, "BTC") -> 2
+      String.starts_with?(symbol, "ETH") -> 2
+      String.starts_with?(symbol, "BNB") -> 2
+      String.starts_with?(symbol, "SOL") -> 2
+      String.starts_with?(symbol, "XRP") -> 4
+      String.starts_with?(symbol, "DOGE") -> 5
+      String.starts_with?(symbol, "ADA") -> 4
+      String.starts_with?(symbol, "DOT") -> 3
+      String.starts_with?(symbol, "LINK") -> 3
+      String.starts_with?(symbol, "AVAX") -> 2
+      true -> 2
+    end
+  end
+
   # Quantity precision matching Binance step sizes
   defp exchange_qty_precision(symbol, market_type) do
     is_futures = market_type in ["usds_futures", "coinm_futures"]
@@ -1055,6 +1072,12 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   defp place_grid_limit_order(state, symbol, side, quantity, price_level) do
+    # Round price and quantity to exchange precision to avoid PRICE_FILTER errors
+    price_precision = exchange_price_precision(symbol, state.market_type)
+    qty_precision = exchange_qty_precision(symbol, state.market_type)
+    rounded_price = Float.round(price_level / 1, price_precision)
+    rounded_qty = Float.round(quantity / 1, qty_precision)
+
     bot_context = [
       user_id: state.user_id,
       bot_id: state.bot_id,
@@ -1065,7 +1088,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     ]
 
     case OrderManager.place_limit_order(
-      state.credential_id, symbol, side, quantity, price_level, bot_context
+      state.credential_id, symbol, side, rounded_qty, rounded_price, bot_context
     ) do
       {:ok, result} ->
         order_id = result[:order_id]
