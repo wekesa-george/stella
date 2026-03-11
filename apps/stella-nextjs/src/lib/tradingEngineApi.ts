@@ -614,6 +614,40 @@ export async function getExchangeHealth() {
   return request('/api/phoenix/infra/exchanges', {}, 'gateway');
 }
 
+// ==================== RISK MONITORING ====================
+
+export async function getRiskStatus() {
+  return request('/api/phoenix/risk/status', {}, 'gateway');
+}
+
+export async function getCircuitBreakerStatus() {
+  return request('/api/phoenix/risk/circuit-breaker', {}, 'gateway');
+}
+
+export async function resetCircuitBreaker() {
+  return request('/api/phoenix/risk/circuit-breaker/reset', { method: 'POST' }, 'gateway');
+}
+
+export async function getReconcilerStatus() {
+  return request('/api/phoenix/risk/reconciler', {}, 'gateway');
+}
+
+export async function triggerReconciliation() {
+  return request('/api/phoenix/risk/reconciler/check', { method: 'POST' }, 'gateway');
+}
+
+export async function getSlippageStats() {
+  return request('/api/phoenix/risk/slippage', {}, 'gateway');
+}
+
+export async function getCorrelationRisk() {
+  return request('/api/phoenix/risk/correlation', {}, 'gateway');
+}
+
+export async function getCredentialHealth() {
+  return request('/api/phoenix/risk/credentials', {}, 'gateway');
+}
+
 // ==================== WEBSOCKET HELPER ====================
 
 /**

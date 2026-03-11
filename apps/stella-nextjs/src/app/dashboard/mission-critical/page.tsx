@@ -796,20 +796,38 @@ function OpenPosCard({ count, runningBots }: { count: number; runningBots: numbe
   );
 }
 
-/* ─── CIRCUIT BREAKER CARD ─── */
-function CircuitBreakerCard({ bots: botList }: { bots: Bot[] }) {
+/* ─── CIRCUIT BREAKER CARD (Platform-Level) ─── */
+function CircuitBreakerCard({ bots: botList, platformStats }: { bots: Bot[], platformStats?: any }) {
   const cbBots = botList.filter(b => b.status === 'circuit_broken');
-  const active = cbBots.length;
+  const botLevel = cbBots.length;
+  const platform = platformStats?.risk?.circuit_breaker;
+  const platformTripped = platform?.tripped === true;
+  const active = botLevel > 0 || platformTripped;
+  const tripCount = platform?.trip_count ?? 0;
+
   return (
-    <div className={`mc-card mc-circuit-card ${active > 0 ? 'mc-cb-active' : ''}`}>
-      <div className="mc-card-accent" style={{ background: active > 0 ? "var(--r)" : "var(--g)" }}/>
+    <div className={`mc-card mc-circuit-card ${active ? 'mc-cb-active' : ''}`}>
+      <div className="mc-card-accent" style={{ background: active ? "var(--r)" : "var(--g)" }}/>
       <div className="mc-ch">
-        <div className="mc-ct" style={{ color: active > 0 ? "var(--r)" : undefined }}>Circuit Breakers</div>
-        {active > 0 ? <div className="mc-tag mc-tr">ACTIVE</div> : <div className="mc-tag mc-tg">CLEAR</div>}
+        <div className="mc-ct" style={{ color: active ? "var(--r)" : undefined }}>Circuit Breakers</div>
+        {active ? <div className="mc-tag mc-tr">ACTIVE</div> : <div className="mc-tag mc-tg">CLEAR</div>}
       </div>
       <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
-        <div className="mc-bigval mc-bv-xl" style={{ color: active > 0 ? "var(--r)" : "var(--g)", textAlign:"center", animation: active > 0 ? "mcErrBlink 1.5s step-end infinite" : undefined }}>{active}</div>
-        <div className="mc-sub">{active > 0 ? cbBots.map(b => b.id.slice(0,8)).join(', ') : 'no breakers triggered'}</div>
+        <div className="mc-bigval mc-bv-xl" style={{ color: active ? "var(--r)" : "var(--g)", textAlign:"center", animation: active ? "mcErrBlink 1.5s step-end infinite" : undefined }}>
+          {platformTripped ? 'TRIPPED' : botLevel > 0 ? botLevel : '0'}
+        </div>
+        <div className="mc-sub">
+          {platformTripped
+            ? `platform-level trip #${tripCount}`
+            : botLevel > 0
+              ? cbBots.map(b => b.id.slice(0,8)).join(', ')
+              : 'no breakers triggered'}
+        </div>
+        {platform?.current?.aggregate_pnl != null && (
+          <div className="mc-sub" style={{ fontSize: 7, marginTop: 2, color: 'var(--t2)' }}>
+            agg P&L: ${platform.current.aggregate_pnl?.toFixed?.(2) ?? '0'} | {platform.current.losing_bots ?? 0}/{platform.current.total_bots ?? 0} losing
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1747,15 +1765,37 @@ function FillRateCard({ orders: orderList }: { orders: any[] }) {
 }
 
 /* ─── SLIPPAGE AVG ─── */
-function SlippageCard() {
-  // Tier 4: requires Executor instrumentation (expected_price vs avg_fill_price)
+function SlippageCard({ platformStats }: { platformStats?: any }) {
+  const slippage = platformStats?.risk?.slippage;
+  const stats1h = slippage?.last_1h;
+  const avg = stats1h?.avg_slippage_bps;
+  const max = stats1h?.max_slippage_bps;
+  const cost = stats1h?.total_slippage_usd ?? 0;
+  const unfavorable = stats1h?.unfavorable_pct;
+  const hasData = avg != null && stats1h?.status === 'active';
+  const isCritical = avg != null && avg >= 15;
+  const isWarning = avg != null && avg >= 5;
+  const color = isCritical ? "var(--r)" : isWarning ? "var(--a)" : hasData ? "var(--g)" : "var(--t2)";
+
   return (
     <div className="mc-card mc-sharpe-card">
-      <div className="mc-card-accent" style={{ background:"var(--t3)" }}/>
-      <div className="mc-ch"><div className="mc-ct">Avg Slippage</div></div>
+      <div className="mc-card-accent" style={{ background: color }}/>
+      <div className="mc-ch">
+        <div className="mc-ct">Avg Slippage</div>
+        {isCritical && <div className="mc-tag mc-tr">HIGH</div>}
+        {isWarning && !isCritical && <div className="mc-tag mc-ta">ELEVATED</div>}
+      </div>
       <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
-        <div className="mc-bigval mc-bv-sm" style={{ color:"var(--t2)", textAlign:"center" }}>--</div>
-        <div className="mc-sub" style={{ fontSize:7 }}>requires execution tracking</div>
+        <div className="mc-bigval mc-bv-sm" style={{ color, textAlign:"center" }}>
+          {hasData ? `${avg.toFixed(1)} bps` : slippage?.status === 'not_started' ? '--' : '0.0 bps'}
+        </div>
+        <div className="mc-sub" style={{ fontSize:7 }}>
+          {hasData
+            ? `max ${max?.toFixed(1)} bps | cost $${cost.toFixed(2)} | ${unfavorable?.toFixed(0)}% unfavorable`
+            : stats1h?.total_orders
+              ? `${stats1h.total_orders} orders (no slippage data yet)`
+              : 'awaiting execution data'}
+        </div>
       </div>
     </div>
   );
@@ -1787,6 +1827,208 @@ function AvgExecCard() {
       <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
         <div className="mc-bigval mc-bv-sm" style={{ color:"var(--t2)", textAlign:"center" }}>--</div>
         <div className="mc-sub" style={{ fontSize:7 }}>requires execution tracking</div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── POSITION RECONCILIATION ─── */
+function ReconciliationCard({ platformStats }: { platformStats?: any }) {
+  const recon = platformStats?.risk?.reconciler;
+  const status = recon?.status ?? 'not_started';
+  const orphans = recon?.current_orphans ?? 0;
+  const totalClosed = recon?.orphans_closed_total ?? 0;
+  const lastCheck = recon?.last_orphan_check;
+  const isClean = status === 'clean';
+  const color = orphans > 0 ? "var(--a)" : isClean ? "var(--g)" : "var(--t2)";
+
+  return (
+    <div className="mc-card mc-recon-card">
+      <div className="mc-card-accent" style={{ background: color }}/>
+      <div className="mc-ch">
+        <div className="mc-ct">Reconciliation</div>
+        {orphans > 0 ? <div className="mc-tag mc-ta">{orphans} ORPHAN{orphans > 1 ? 'S' : ''}</div>
+          : isClean ? <div className="mc-tag mc-tg">CLEAN</div>
+          : null}
+      </div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
+        <div className="mc-bigval mc-bv-sm" style={{ color, textAlign:"center" }}>
+          {orphans > 0 ? orphans : isClean ? '0' : '--'}
+        </div>
+        <div className="mc-sub" style={{ fontSize: 7 }}>
+          {totalClosed > 0 ? `${totalClosed} reconciled total` : 'no orphaned positions'}
+          {lastCheck ? ` | last: ${new Date(lastCheck).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── CORRELATION RISK ─── */
+function CorrelationCard({ platformStats }: { platformStats?: any }) {
+  const corr = platformStats?.risk?.correlation;
+  const status = corr?.status ?? 'not_started';
+  const breaches = corr?.breaches ?? [];
+  const hasBreach = breaches.length > 0;
+  const isCritical = breaches.some((b: any) => b.severity === 'critical');
+  const dir = corr?.directional_exposure;
+  const color = isCritical ? "var(--r)" : hasBreach ? "var(--a)" : status === 'clear' ? "var(--g)" : "var(--t2)";
+
+  return (
+    <div className="mc-card mc-corr-card">
+      <div className="mc-card-accent" style={{ background: color }}/>
+      <div className="mc-ch">
+        <div className="mc-ct">Correlation Risk</div>
+        {isCritical ? <div className="mc-tag mc-tr">BREACH</div>
+          : hasBreach ? <div className="mc-tag mc-ta">WARNING</div>
+          : status === 'clear' ? <div className="mc-tag mc-tg">CLEAR</div>
+          : null}
+      </div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
+        {dir ? (
+          <>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--g)' }}>
+                L ${dir.long_usd?.toLocaleString?.() ?? '0'}
+              </div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--r)' }}>
+                S ${dir.short_usd?.toLocaleString?.() ?? '0'}
+              </div>
+            </div>
+            <div className="mc-sub" style={{ fontSize: 7, marginTop: 2 }}>
+              net {dir.net_direction}: {dir.net_pct_of_capital?.toFixed?.(1) ?? 0}% of capital
+              {hasBreach ? ` | ${breaches.length} breach${breaches.length > 1 ? 'es' : ''}` : ''}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mc-bigval mc-bv-sm" style={{ color: "var(--t2)", textAlign: "center" }}>
+              {status === 'no_positions' ? '0' : '--'}
+            </div>
+            <div className="mc-sub" style={{ fontSize: 7 }}>
+              {status === 'no_positions' ? 'no open positions' : 'awaiting data'}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── CREDENTIAL HEALTH ─── */
+function CredentialHealthCard({ platformStats }: { platformStats?: any }) {
+  const creds = platformStats?.risk?.credential_health ?? {};
+  const entries = Object.values(creds) as any[];
+  const total = entries.length;
+  const healthy = entries.filter((c: any) => c.status === 'healthy').length;
+  const failing = entries.filter((c: any) => c.status === 'failing').length;
+  const degraded = entries.filter((c: any) => c.status === 'degraded').length;
+
+  const color = failing > 0 ? "var(--r)" : degraded > 0 ? "var(--a)" : total > 0 ? "var(--g)" : "var(--t2)";
+  const statusLabel = failing > 0 ? 'FAILING' : degraded > 0 ? 'DEGRADED' : total > 0 ? 'HEALTHY' : 'NO DATA';
+  const tagClass = failing > 0 ? 'mc-tr' : degraded > 0 ? 'mc-ta' : 'mc-tg';
+
+  // Aggregate stats
+  const totalSuccess = entries.reduce((s: number, c: any) => s + (c.success_count ?? 0), 0);
+  const totalFail = entries.reduce((s: number, c: any) => s + (c.failure_count ?? 0), 0);
+  const successRate = totalSuccess + totalFail > 0
+    ? ((totalSuccess / (totalSuccess + totalFail)) * 100).toFixed(1)
+    : '--';
+
+  return (
+    <div className="mc-card mc-cred-card">
+      <div className="mc-card-accent" style={{ background: color }}/>
+      <div className="mc-ch">
+        <div className="mc-ct">Credentials</div>
+        {total > 0 && <div className={`mc-tag ${tagClass}`}>{statusLabel}</div>}
+      </div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
+        <div className="mc-bigval mc-bv-sm" style={{ color, textAlign:"center" }}>
+          {total > 0 ? `${healthy}/${total}` : '--'}
+        </div>
+        <div className="mc-sub" style={{ fontSize: 7 }}>
+          {total > 0
+            ? `${successRate}% success rate | ${totalSuccess} ok / ${totalFail} fail${failing > 0 ? ` | ${failing} credential${failing > 1 ? 's' : ''} failing` : ''}`
+            : 'no credential activity yet'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── EXCHANGE HEALTH ENFORCED ─── */
+function ExchangeHealthEnforcedCard({ platformStats }: { platformStats?: any }) {
+  const health = platformStats?.risk?.exchange_health ?? {};
+  const status = health?.status ?? 'unknown';
+  const wsConnected = health?.websocket_connected;
+  const cacheFresh = health?.cache_fresh;
+  const tickerSize = health?.ticker_cache_size ?? 0;
+  const checkedAt = health?.checked_at;
+
+  const color = status === 'healthy' ? "var(--g)"
+    : status === 'degraded' ? "var(--a)"
+    : status === 'disconnected' ? "var(--r)"
+    : "var(--t2)";
+
+  const tagClass = status === 'healthy' ? 'mc-tg'
+    : status === 'degraded' ? 'mc-ta'
+    : status === 'disconnected' ? 'mc-tr'
+    : '';
+
+  return (
+    <div className="mc-card mc-exhealth-card">
+      <div className="mc-card-accent" style={{ background: color }}/>
+      <div className="mc-ch">
+        <div className="mc-ct">Exchange Gate</div>
+        {status !== 'unknown' && <div className={`mc-tag ${tagClass}`}>{status.toUpperCase()}</div>}
+      </div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: wsConnected ? 'var(--g)' : 'var(--r)' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--t1)' }}>WS</span>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: cacheFresh ? 'var(--g)' : 'var(--a)', marginLeft: 4 }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--t1)' }}>Cache</span>
+        </div>
+        <div className="mc-sub" style={{ fontSize: 7, marginTop: 2 }}>
+          {status === 'disconnected'
+            ? 'TRADES BLOCKED — exchange offline'
+            : status === 'degraded'
+              ? `${tickerSize} tickers | WS up, cache stale`
+              : tickerSize > 0
+                ? `${tickerSize} tickers streaming`
+                : 'awaiting connection'}
+          {checkedAt ? ` | ${new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── FILL ACTIVITY ─── */
+function FillActivityCard({ platformStats }: { platformStats?: any }) {
+  const slippage = platformStats?.risk?.slippage;
+  const totalOrders = slippage?.last_1h?.total_orders ?? 0;
+  const withSlippage = slippage?.last_1h?.orders_with_slippage ?? 0;
+  const status = slippage?.status;
+  const hasData = status === 'active' && totalOrders > 0;
+  const color = hasData ? "var(--g)" : "var(--t2)";
+
+  return (
+    <div className="mc-card mc-fills-card">
+      <div className="mc-card-accent" style={{ background: color }}/>
+      <div className="mc-ch">
+        <div className="mc-ct">Fill Tracking</div>
+        {hasData && <div className="mc-tag mc-tg">ACTIVE</div>}
+      </div>
+      <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
+        <div className="mc-bigval mc-bv-sm" style={{ color, textAlign:"center" }}>
+          {hasData ? totalOrders : status === 'not_started' ? '--' : '0'}
+        </div>
+        <div className="mc-sub" style={{ fontSize: 7 }}>
+          {hasData
+            ? `${totalOrders} fills recorded | ${withSlippage} with slippage data`
+            : 'fills now written to trading.fills on every order'}
+        </div>
       </div>
     </div>
   );
@@ -2480,7 +2722,7 @@ function MissionCriticalDashboard() {
 
                   {botsError ? <CardError label="Circuit Breakers" /> :
                    !botsReady ? <CardSkeleton label="Circuit Breakers" /> :
-                   <CircuitBreakerCard bots={bots} />}
+                   <CircuitBreakerCard bots={bots} platformStats={platformStats} />}
 
                   <VolumeCard platformStats={platformStats} />
 
@@ -2488,9 +2730,14 @@ function MissionCriticalDashboard() {
                    !ordersReady ? <CardSkeleton label="Fill Rate" /> :
                    <FillRateCard orders={allRawOrders} />}
 
-                  <SlippageCard />
+                  <SlippageCard platformStats={platformStats} />
                   <DrawdownCard platformStats={platformStats} />
                   <AvgExecCard />
+                  <ReconciliationCard platformStats={platformStats} />
+                  <CorrelationCard platformStats={platformStats} />
+                  <CredentialHealthCard platformStats={platformStats} />
+                  <ExchangeHealthEnforcedCard platformStats={platformStats} />
+                  <FillActivityCard platformStats={platformStats} />
 
                   {botsError ? <CardError label="Heartbeats" /> :
                    !botsReady ? <CardSkeleton label="Heartbeats" /> :
