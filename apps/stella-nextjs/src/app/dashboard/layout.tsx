@@ -9,7 +9,6 @@ import { useAlerts } from "@/hooks/useQueries";
 
 const dashboardTabs = [
   { label: "Mission Critical", href: "/dashboard/mission-critical" },
-  { label: "Mission Control", href: "/dashboard/mission-control" },
   { label: "Bot Fleet", href: "/dashboard/bot-fleet" },
   { label: "Strategies", href: "/dashboard/strategies" },
   { label: "Alerts", href: "/dashboard/alerts", showBadge: true },
@@ -31,14 +30,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { stats: platformStats } = usePlatformChannel();
   const { bots: wsBots } = useBotChannel();
 
-  // Derived stats from WS (with defaults)
-  const totalEquity = platformStats?.total_equity;
-  const pnl24h = platformStats?.pnl_24h ?? platformStats?.total_pnl;
+  // Derived stats from WS — prefer platformStats, fallback to bot-derived (same logic as Mission Critical)
+  const botDerivedEquity = wsBots.length > 0
+    ? wsBots.reduce((s: number, b: any) => s + (b.allocated_capital || 0) + (b.total_pnl || b.pnl_usd || 0), 0)
+    : null;
+  const botDerivedPnl = wsBots.length > 0
+    ? wsBots.reduce((s: number, b: any) => s + (b.total_pnl || b.pnl_usd || 0), 0)
+    : null;
+
+  const totalEquity = (platformStats?.total_equity && platformStats.total_equity > 0)
+    ? platformStats.total_equity
+    : botDerivedEquity;
+  const pnl24h = (platformStats?.total_pnl && platformStats.total_pnl !== 0)
+    ? platformStats.total_pnl
+    : (platformStats?.pnl_24h ?? botDerivedPnl);
   const activeBots = wsBots.length > 0
     ? wsBots.filter((b: any) => b.status === 'running' || b.status === 'active').length
     : null;
   const totalBots = wsBots.length > 0 ? wsBots.length : null;
-  const openTrades = platformStats?.open_positions;
+  const openTrades = platformStats?.open_positions
+    ?? (wsBots.length > 0 ? wsBots.reduce((s: number, b: any) => s + (b.open_positions || 0), 0) : null);
 
   // Use React Query cached alerts (shared with alerts page — no duplicate request)
   const { data: cachedAlerts = [] } = useAlerts({ limit: 100 });
