@@ -1050,24 +1050,44 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       qty = signal.quantity_per_grid
       is_spot = state.market_type in [nil, "spot"]
 
+      # Cap buy orders by available capital: each buy locks up qty * price in USDT.
+      # Only place as many buy orders as the total_investment can cover.
+      total_investment = get_strategy_param(state.config, "total_investment", state.allocated_capital)
+      # Capital already locked in existing grid buy orders
+      locked_capital = state.grid_orders
+        |> Enum.filter(fn {_level, entry} -> entry.side == "BUY" end)
+        |> Enum.reduce(0.0, fn {_level, entry}, acc -> acc + entry.quantity * entry.price end)
+      remaining_capital = max(0.0, total_investment - locked_capital)
+
       # On spot: only place BUY orders initially. Sell orders are placed
       # as counter-orders when buys fill (you can't sell what you don't own).
       # On futures: place both sides since you can short.
       buy_levels = Enum.take(signal.buy_levels, available_slots)
 
-      state = Enum.reduce(buy_levels, state, fn price_level, acc ->
-        if map_size(acc.grid_orders) < max_orders do
-          place_grid_limit_order(acc, symbol, "BUY", qty, price_level)
+      {state, _capital_left} = Enum.reduce(buy_levels, {state, remaining_capital}, fn price_level, {acc, capital} ->
+        order_cost = qty * price_level
+        if map_size(acc.grid_orders) < max_orders and capital >= order_cost do
+          new_state = place_grid_limit_order(acc, symbol, "BUY", qty, price_level)
+          # Only deduct capital if order actually placed (grid_orders grew)
+          if map_size(new_state.grid_orders) > map_size(acc.grid_orders) do
+            {new_state, capital - order_cost}
+          else
+            {new_state, capital}
+          end
         else
-          acc
+          {acc, capital}
         end
       end)
 
+      placed_count = map_size(state.grid_orders) - current_order_count
+
       if is_spot do
-        # Spot: no upfront sells — they come from process_grid_fill counter-orders
-        BotLogger.debug(state.bot_id, :grid, "Spot mode: placed buy orders only", %{
-          buy_count: length(buy_levels),
-          sell_levels_skipped: length(signal.sell_levels)
+        BotLogger.info(state.bot_id, :grid, "Spot mode: placed buy orders only", %{
+          buy_orders_placed: placed_count,
+          buy_levels_available: length(buy_levels),
+          sell_levels_skipped: length(signal.sell_levels),
+          capital_allocated: Float.round(total_investment - remaining_capital + (placed_count * qty * signal.current_price), 2),
+          capital_remaining: Float.round(remaining_capital - (placed_count * qty * signal.current_price), 2)
         })
         state
       else
