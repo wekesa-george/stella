@@ -732,6 +732,72 @@ defmodule TradeEngine.API.Controller do
   end
 
   # ============================================================================
+  # MARGIN SCALPER LOGS
+  # ============================================================================
+
+  @scalper_log_dir "/var/www/umbrella_app/trade_logs"
+
+  get "/api/scalper/logs" do
+    date = conn.query_params["date"] || Date.utc_today() |> Date.to_string()
+    hour = conn.query_params["hour"]
+    type = conn.query_params["type"] || "log"
+    tail = (conn.query_params["tail"] || "500") |> parse_number() |> trunc()
+
+    filename = case {hour, type} do
+      {nil, "csv"} -> "trades_#{date}.csv"
+      {nil, _}     -> "trades_#{date}.log"
+      {h, "csv"}   -> "trades_#{date}_#{String.pad_leading(h, 2, "0")}h.csv"
+      {h, _}       -> "trades_#{date}_#{String.pad_leading(h, 2, "0")}h.log"
+    end
+
+    path = Path.join(@scalper_log_dir, filename)
+
+    case File.read(path) do
+      {:ok, content} ->
+        lines = content |> String.split("\n") |> Enum.reject(&(&1 == ""))
+        total = length(lines)
+        taken = lines |> Enum.take(-tail) |> Enum.join("\n")
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(%{
+          ok: true,
+          data: %{
+            file: filename,
+            total_lines: total,
+            returned_lines: min(tail, total),
+            content: taken
+          }
+        }))
+      {:error, :enoent} ->
+        json_response(conn, {:error, "Log file not found: #{filename}"})
+      {:error, reason} ->
+        json_response(conn, {:error, "Failed to read log: #{inspect(reason)}"})
+    end
+  end
+
+  get "/api/scalper/logs/files" do
+    case File.ls(@scalper_log_dir) do
+      {:ok, files} ->
+        grouped = files
+          |> Enum.sort()
+          |> Enum.group_by(fn f ->
+            cond do
+              String.ends_with?(f, ".csv") -> "csv"
+              String.ends_with?(f, ".log") -> "log"
+              true -> "other"
+            end
+          end)
+
+        json_response(conn, {:ok, %{directory: @scalper_log_dir, files: grouped}})
+      {:error, :enoent} ->
+        json_response(conn, {:error, "Log directory not found"})
+      {:error, reason} ->
+        json_response(conn, {:error, "Failed to list logs: #{inspect(reason)}"})
+    end
+  end
+
+  # ============================================================================
   # CATCH-ALL
   # ============================================================================
 
