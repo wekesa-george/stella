@@ -602,6 +602,241 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   end
 
   # ========================================================================
+  # POSITION & ORDER QUERIES — for reconciliation and analytics
+  # ========================================================================
+
+  @doc """
+  Get futures position risk for all positions or a specific symbol.
+  Calls /fapi/v2/positionRisk (USDS-M futures).
+  Returns list of positions with entry price, position amount, unrealized PnL.
+  """
+  def get_position_risk(credentials, opts \\ []) do
+    futures_url = resolve_futures_base_url(credentials)
+
+    if futures_url == "" do
+      {:error, :no_futures_url_configured}
+    else
+      params = case Keyword.get(opts, :symbol) do
+        nil -> %{}
+        sym -> %{"symbol" => normalize_symbol(sym, :trading)}
+      end
+
+      case signed_request(:get, futures_url <> "/v2/positionRisk", params, credentials) do
+        {:ok, positions} when is_list(positions) ->
+          parsed = positions
+          |> Enum.filter(fn p ->
+            amt = parse_float_safe(p["positionAmt"])
+            amt != 0.0
+          end)
+          |> Enum.map(fn p ->
+            %{
+              symbol: p["symbol"],
+              position_side: p["positionSide"],
+              position_amount: parse_float_safe(p["positionAmt"]),
+              entry_price: parse_float_safe(p["entryPrice"]),
+              mark_price: parse_float_safe(p["markPrice"]),
+              unrealized_pnl: parse_float_safe(p["unRealizedProfit"]),
+              liquidation_price: parse_float_safe(p["liquidationPrice"]),
+              leverage: parse_float_safe(p["leverage"]),
+              margin_type: p["marginType"],
+              notional: parse_float_safe(p["notional"])
+            }
+          end)
+
+          {:ok, parsed}
+
+        {:ok, %{"code" => code, "msg" => msg}} ->
+          {:error, %{code: code, message: msg}}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  @doc """
+  Get all orders for a symbol (including historical).
+  Calls /fapi/v1/allOrders (futures) or /api/v3/allOrders (spot).
+  """
+  def get_all_orders(symbol, credentials, opts \\ []) do
+    trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = Keyword.get(opts, :market_type, "spot")
+    limit = Keyword.get(opts, :limit, 50)
+
+    url = case market_type do
+      "usds_futures" -> resolve_futures_base_url(credentials) <> "/v1/allOrders"
+      _ -> spot_url(credentials) <> "/v3/allOrders"
+    end
+
+    params = %{
+      "symbol" => trading_symbol,
+      "limit" => limit
+    }
+
+    case signed_request(:get, url, params, credentials) do
+      {:ok, orders} when is_list(orders) ->
+        parsed = Enum.map(orders, fn order ->
+          %{
+            order_id: order["orderId"],
+            client_order_id: order["clientOrderId"],
+            symbol: order["symbol"],
+            side: order["side"],
+            type: order["type"],
+            status: order["status"],
+            price: parse_float_safe(order["price"]),
+            avg_price: parse_float_safe(order["avgPrice"]),
+            quantity: parse_float_safe(order["origQty"]),
+            executed_qty: parse_float_safe(order["executedQty"]),
+            cumulative_quote_qty: parse_float_safe(order["cumQuote"] || order["cummulativeQuoteQty"]),
+            time: order["time"],
+            update_time: order["updateTime"]
+          }
+        end)
+        {:ok, parsed}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Get recent trades (fills) for a symbol.
+  Calls /fapi/v1/userTrades (futures) or /api/v3/myTrades (spot).
+  """
+  def get_user_trades(symbol, credentials, opts \\ []) do
+    trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = Keyword.get(opts, :market_type, "spot")
+    limit = Keyword.get(opts, :limit, 50)
+
+    url = case market_type do
+      "usds_futures" -> resolve_futures_base_url(credentials) <> "/v1/userTrades"
+      _ -> spot_url(credentials) <> "/v3/myTrades"
+    end
+
+    params = %{
+      "symbol" => trading_symbol,
+      "limit" => limit
+    }
+
+    case signed_request(:get, url, params, credentials) do
+      {:ok, trades} when is_list(trades) ->
+        parsed = Enum.map(trades, fn t ->
+          %{
+            trade_id: t["id"],
+            order_id: t["orderId"],
+            symbol: t["symbol"],
+            side: t["side"],
+            price: parse_float_safe(t["price"]),
+            quantity: parse_float_safe(t["qty"]),
+            quote_qty: parse_float_safe(t["quoteQty"]),
+            commission: parse_float_safe(t["commission"]),
+            commission_asset: t["commissionAsset"],
+            realized_pnl: parse_float_safe(t["realizedPnl"]),
+            maker: t["maker"] || t["isMaker"],
+            time: t["time"]
+          }
+        end)
+        {:ok, parsed}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Get 24hr ticker statistics for a symbol.
+  Calls /fapi/v1/ticker/24hr (futures) or /api/v3/ticker/24hr (spot).
+  """
+  def get_24h_ticker(symbol, credentials, opts \\ []) do
+    trading_symbol = normalize_symbol(symbol, :trading)
+    market_type = Keyword.get(opts, :market_type, "spot")
+
+    url = case market_type do
+      "usds_futures" -> resolve_futures_base_url(credentials) <> "/v1/ticker/24hr"
+      _ -> spot_url(credentials) <> "/v3/ticker/24hr"
+    end
+
+    params = %{"symbol" => trading_symbol}
+
+    case signed_request(:get, url, params, credentials) do
+      {:ok, data} when is_map(data) ->
+        {:ok, %{
+          symbol: data["symbol"],
+          price_change: parse_float_safe(data["priceChange"]),
+          price_change_pct: parse_float_safe(data["priceChangePercent"]),
+          weighted_avg_price: parse_float_safe(data["weightedAvgPrice"]),
+          last_price: parse_float_safe(data["lastPrice"]),
+          open_price: parse_float_safe(data["openPrice"]),
+          high_price: parse_float_safe(data["highPrice"]),
+          low_price: parse_float_safe(data["lowPrice"]),
+          volume: parse_float_safe(data["volume"]),
+          quote_volume: parse_float_safe(data["quoteVolume"]),
+          open_time: data["openTime"],
+          close_time: data["closeTime"],
+          count: data["count"]
+        }}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Get exchange info with filters for specific symbols.
+  Returns price filter, lot size, min notional for each symbol.
+  """
+  def get_exchange_info(credentials, opts \\ []) do
+    market_type = Keyword.get(opts, :market_type, "spot")
+
+    url = case market_type do
+      "usds_futures" -> resolve_futures_base_url(credentials) <> "/v1/exchangeInfo"
+      _ -> spot_url(credentials) <> "/v3/exchangeInfo"
+    end
+
+    # exchangeInfo doesn't need signing
+    case HTTPoison.get(url, [], timeout: 15_000, recv_timeout: 15_000) do
+      {:ok, %{status_code: 200, body: body}} ->
+        case Jason.decode(body) do
+          {:ok, %{"symbols" => symbols}} ->
+            parsed = Enum.map(symbols, fn s ->
+              filters = s["filters"] || []
+
+              price_filter = Enum.find(filters, fn f -> f["filterType"] == "PRICE_FILTER" end)
+              lot_size = Enum.find(filters, fn f -> f["filterType"] == "LOT_SIZE" end)
+              min_notional = Enum.find(filters, fn f -> f["filterType"] in ["MIN_NOTIONAL", "NOTIONAL"] end)
+
+              %{
+                symbol: s["symbol"],
+                status: s["status"],
+                base_asset: s["baseAsset"],
+                quote_asset: s["quoteAsset"],
+                price_precision: s["pricePrecision"],
+                quantity_precision: s["quantityPrecision"],
+                tick_size: price_filter && parse_float_safe(price_filter["tickSize"]),
+                min_price: price_filter && parse_float_safe(price_filter["minPrice"]),
+                max_price: price_filter && parse_float_safe(price_filter["maxPrice"]),
+                step_size: lot_size && parse_float_safe(lot_size["stepSize"]),
+                min_qty: lot_size && parse_float_safe(lot_size["minQty"]),
+                max_qty: lot_size && parse_float_safe(lot_size["maxQty"]),
+                min_notional: min_notional && parse_float_safe(min_notional["minNotional"] || min_notional["notional"])
+              }
+            end)
+
+            {:ok, parsed}
+
+          _ ->
+            {:error, :decode_error}
+        end
+
+      {:ok, %{status_code: code, body: body}} ->
+        {:error, {code, body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # ========================================================================
   # PRIVATE — HMAC-signed requests
   # ========================================================================
 

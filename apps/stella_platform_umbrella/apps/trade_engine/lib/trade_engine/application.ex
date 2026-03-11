@@ -98,6 +98,13 @@ defmodule TradeEngine.Application do
       # Per-bot structured logging persistence
       {TradeEngine.Bots.BotLogPersister, []},
 
+      # Binance User Data Stream infrastructure (real-time fills + account updates)
+      {Registry, keys: :unique, name: :binance_user_data_registry},
+      {TradeEngine.Exchanges.Binance.UserDataStreamSupervisor, []},
+
+      # Exchange info cache (symbol filters, precisions — refreshes every 6h)
+      {TradeEngine.Exchanges.Binance.ExchangeInfoCache, []},
+
       # OHLCV candle persistence (ETS → TimescaleDB)
       {TradeEngine.MarketData.CandlePersister, []},
 

@@ -209,6 +209,61 @@ defmodule TradeEngine.Exchanges.Executor do
     end
   end
 
+  @doc "Get futures position risk (open positions on exchange)"
+  def get_position_risk(credential_id, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_position_risk, 2) do
+        adapter.get_position_risk(creds, opts)
+      else
+        {:error, :position_risk_not_supported}
+      end
+    end
+  end
+
+  @doc "Get all orders (including historical) for a symbol"
+  def get_all_orders(credential_id, symbol, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_all_orders, 3) do
+        adapter.get_all_orders(symbol, creds, opts)
+      else
+        {:error, :all_orders_not_supported}
+      end
+    end
+  end
+
+  @doc "Get user trades (fills) for a symbol"
+  def get_user_trades(credential_id, symbol, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_user_trades, 3) do
+        adapter.get_user_trades(symbol, creds, opts)
+      else
+        {:error, :user_trades_not_supported}
+      end
+    end
+  end
+
+  @doc "Get 24hr ticker statistics"
+  def get_24h_ticker(credential_id, symbol, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_24h_ticker, 3) do
+        adapter.get_24h_ticker(symbol, creds, opts)
+      else
+        {:error, :ticker_24h_not_supported}
+      end
+    end
+  end
+
+  @doc "Get exchange info (symbol filters, precisions)"
+  def get_exchange_info(credential_id, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_exchange_info, 2) do
+        adapter.get_exchange_info(creds, opts)
+      else
+        {:error, :exchange_info_not_supported}
+      end
+    end
+  end
+
   @doc "Normalize a symbol for a specific purpose"
   def normalize_symbol(credential_id, symbol, purpose) do
     with {:ok, adapter, _creds} <- resolve(credential_id) do

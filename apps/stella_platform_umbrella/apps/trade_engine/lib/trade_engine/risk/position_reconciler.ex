@@ -378,9 +378,107 @@ defmodule TradeEngine.Risk.PositionReconciler do
   # ---------------------------------------------------------------------------
 
   defp run_ghost_check(state) do
-    # For now, ghost detection is logged but not auto-acted on
-    # Full implementation requires iterating all active credentials
-    %{state | last_ghost_check: DateTime.utc_now()}
+    ghosts_found = detect_ghost_positions()
+
+    new_state = %{state |
+      ghosts_found: state.ghosts_found + length(ghosts_found),
+      last_ghost_check: DateTime.utc_now()
+    }
+
+    if ghosts_found != [] do
+      Logger.warning("PositionReconciler: #{length(ghosts_found)} ghost position(s) detected on exchange")
+
+      Enum.each(ghosts_found, fn ghost ->
+        event = %{
+          type: "ghost_detected",
+          symbol: ghost.symbol,
+          credential_id: ghost.credential_id,
+          position_amount: ghost.position_amount,
+          entry_price: ghost.entry_price,
+          unrealized_pnl: ghost.unrealized_pnl,
+          action: "alert_created",
+          timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+        }
+
+        broadcast_reconciliation(%{event |
+          type: "ghost_detected",
+          position_id: nil,
+          bot_id: nil,
+          symbol: ghost.symbol,
+          action: "ghost_on_exchange"
+        })
+      end)
+    end
+
+    update_cache(new_state, [], 0)
+    new_state
+  rescue
+    e ->
+      Logger.warning("PositionReconciler ghost check error: #{Exception.message(e)}")
+      %{state | last_ghost_check: DateTime.utc_now()}
+  end
+
+  defp detect_ghost_positions do
+    # Get all active credential IDs from running bots
+    active_credentials = try do
+      BotRegistry.list_bots()
+      |> Enum.map(fn bot -> Map.get(bot, :credential_id) end)
+      |> Enum.uniq()
+      |> Enum.reject(&is_nil/1)
+    rescue
+      _ -> []
+    end
+
+    if active_credentials == [] do
+      []
+    else
+      # For each credential, check exchange positions vs DB
+      active_credentials
+      |> Enum.take(@max_api_calls_per_cycle)
+      |> Enum.flat_map(fn cred_id ->
+        check_credential_ghosts(cred_id)
+      end)
+    end
+  end
+
+  defp check_credential_ghosts(credential_id) do
+    # Get exchange positions
+    exchange_positions = case Executor.get_position_risk(credential_id) do
+      {:ok, positions} -> positions
+      _ -> []
+    end
+
+    if exchange_positions == [] do
+      []
+    else
+      # Get DB open positions for this credential
+      db_symbols = from(p in Position,
+        where: p.status == "open" and p.credential_id == ^credential_id,
+        select: p.symbol
+      )
+      |> Repo.all(timeout: 10_000)
+      |> Enum.map(fn sym ->
+        sym
+        |> String.split(":")
+        |> List.first()
+        |> String.replace("/", "")
+        |> String.upcase()
+      end)
+      |> MapSet.new()
+
+      # Find exchange positions not tracked in DB
+      exchange_positions
+      |> Enum.filter(fn ep ->
+        not MapSet.member?(db_symbols, ep.symbol)
+      end)
+      |> Enum.map(fn ep ->
+        Map.put(ep, :credential_id, credential_id)
+      end)
+    end
+  rescue
+    e ->
+      Logger.debug("PositionReconciler: ghost check for credential #{credential_id} failed: #{Exception.message(e)}")
+      []
   end
 
   # ---------------------------------------------------------------------------

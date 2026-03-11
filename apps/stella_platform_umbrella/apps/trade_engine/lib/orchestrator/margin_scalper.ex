@@ -33,6 +33,7 @@ defmodule TradeEngine.Orchestrator.MarginScalper do
   alias TradeEngine.Risk.VirtualBalanceManager
   alias TradeEngine.Analytics.HFTPerformance
   alias TradeEngine.AI.Brain
+  alias TradeEngine.Bots.BotLogger
   @pubsub TradeEngine.PubSub
 
   # ═══════════════════════════════════════════════════════════════════════════════
@@ -391,22 +392,104 @@ defmodule TradeEngine.Orchestrator.MarginScalper do
   defp log_to_file(event_type, data) when @enable_file_logging do
     ensure_log_directory()
     timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
-    
+
     log_entry = %{
       timestamp: timestamp,
       event: event_type,
       data: data
     }
-    
+
     line = Jason.encode!(log_entry) <> "\n"
-    
+
     # Write to daily aggregate log
     File.write!(get_log_file_path(), line, [:append])
-    
+
     # Write to hourly granular log
     File.write!(get_hourly_log_file_path(), line, [:append])
+
+    # Broadcast to PubSub for real-time dashboard delivery
+    broadcast_bot_log(event_type, data)
   end
   defp log_to_file(_, _), do: :ok
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # 📡 PUBSUB BROADCAST - Real-time log delivery to dashboard
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  defp get_bot_uuid do
+    System.get_env("BOT_UUID")
+  end
+
+  @event_category_map %{
+    "TRADE_OPEN" => :trade,
+    "TRADE_CLOSE" => :trade,
+    "AI_DECISION" => :signal,
+    "REJECTED" => :signal,
+    "HOURLY_SUMMARY" => :system,
+    "SESSION_START" => :lifecycle,
+    "SESSION_END" => :lifecycle,
+    "PROFIT_LOCKED" => :trade,
+    "RELAX_ENTER" => :signal,
+    "RELAX_FLIP" => :signal
+  }
+
+  @event_level_map %{
+    "TRADE_OPEN" => :info,
+    "TRADE_CLOSE" => :info,
+    "AI_DECISION" => :debug,
+    "REJECTED" => :debug,
+    "HOURLY_SUMMARY" => :info,
+    "SESSION_START" => :info,
+    "SESSION_END" => :info,
+    "PROFIT_LOCKED" => :info,
+    "RELAX_ENTER" => :debug,
+    "RELAX_FLIP" => :info
+  }
+
+  defp broadcast_bot_log(event_type, data) do
+    case get_bot_uuid() do
+      nil -> :ok
+      "" -> :ok
+      bot_uuid ->
+        category = Map.get(@event_category_map, event_type, :system)
+        level = Map.get(@event_level_map, event_type, :info)
+        message = format_broadcast_message(event_type, data)
+        BotLogger.log(bot_uuid, level, category, message, %{event: event_type, data: data})
+    end
+  end
+
+  defp format_broadcast_message("TRADE_OPEN", data) do
+    "Opened #{data[:direction] || data.direction} #{data[:symbol] || data.symbol} @ $#{data[:entry_price] || data.entry_price}"
+  end
+
+  defp format_broadcast_message("TRADE_CLOSE", data) do
+    pnl = data[:pnl] || data.pnl
+    symbol = data[:symbol] || data.symbol
+    reason = data[:exit_reason] || data.exit_reason
+    "Closed #{symbol} #{reason}: #{if pnl >= 0, do: "+", else: ""}$#{Float.round(pnl * 1.0, 2)}"
+  end
+
+  defp format_broadcast_message("AI_DECISION", data) do
+    "AI #{data[:decision] || data.decision} #{data[:symbol] || data.symbol}: signal=#{data[:signal_direction] || data.signal_direction} ai=#{data[:ai_direction] || data.ai_direction} @ #{Float.round((data[:ai_confidence] || data.ai_confidence || 0) * 100, 1)}%"
+  end
+
+  defp format_broadcast_message("REJECTED", data) do
+    "Rejected #{data[:symbol] || data.symbol} #{data[:direction] || data.direction}: #{data[:reason] || data.reason}"
+  end
+
+  defp format_broadcast_message("HOURLY_SUMMARY", data) do
+    "Hourly: PnL $#{data[:total_pnl] || 0} | Trades #{data[:total_trades] || 0} | Win #{data[:win_rate] || 0}%"
+  end
+
+  defp format_broadcast_message("PROFIT_LOCKED", data) do
+    "Profit locked: $#{data[:amount] || data[:lock_amount] || 0}"
+  end
+
+  defp format_broadcast_message("SESSION_START", _data), do: "MarginScalper session started"
+  defp format_broadcast_message("SESSION_END", _data), do: "MarginScalper session ended"
+  defp format_broadcast_message("RELAX_ENTER", data), do: "Relax window: #{data[:symbol] || data.symbol} observing #{data[:expected_direction] || ""}"
+  defp format_broadcast_message("RELAX_FLIP", data), do: "Relax flip: #{data[:symbol] || data.symbol} confirmed #{data[:expected_direction] || ""}"
+  defp format_broadcast_message(event_type, _data), do: "#{event_type}"
 
   defp log_trade_open(position) when @log_trades do
     log_to_file("TRADE_OPEN", %{
