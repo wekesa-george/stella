@@ -16,7 +16,7 @@ defmodule TradeEngine.Physics.SignalGenerator do
   Generate complete trading signal from candles.
   Returns {:ok, signal} or {:error, reason}.
   """
-  def generate_signal(candles, order_flow \\ nil, symbol \\ "UNKNOWN") when is_list(candles) do
+  def generate_signal(candles, order_flow \\ nil, symbol \\ "UNKNOWN", asset_opts \\ %{}) when is_list(candles) do
     case TradeEngine.Physics.MarketProjectile.analyze_projectile(candles, order_flow) do
       {:ok, physics} ->
         try do

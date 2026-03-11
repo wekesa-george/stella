@@ -103,8 +103,13 @@ defmodule TradeEngine.Physics.MarketProjectile do
             "60m" => predict_clamped(current_price, momentum, gravity, 12, atr_pct)
           }
 
-          # 10. REGIME DETECTION
-          regime = RegimeDetector.detect(candles)
+          # 10. REGIME DETECTION — wrapped for safety
+          regime =
+            try do
+              RegimeDetector.detect(candles)
+            rescue
+              _ -> %{regime: :unknown, strength: 0.0, details: %{}}
+            end
 
           result = %{
             current_price: safe_round(current_price, 2),

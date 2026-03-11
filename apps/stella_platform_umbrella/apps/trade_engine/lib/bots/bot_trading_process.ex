@@ -565,99 +565,127 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           # Get impulse target from signal
           impulse_target = get_signal_target(signal) || current_price
 
-          position_id = Ecto.UUID.generate()
-
-          bot_context = [
-            user_id: state.user_id,
-            bot_id: state.bot_id,
-            credential_id: state.credential_id,
-            strategy_id: state.strategy_id,
-            market_type: state.market_type,
-            position_id: position_id,
-            confidence: signal.confidence,
-            peak_price: impulse_target,
-            peak_time: max_hold,
-            expected_price: current_price
-          ]
-
-          # Reserve virtual balance
-          vb_reserved = if VirtualBalanceManager.running?() do
-            case VirtualBalanceManager.reserve_for_position(state.user_id, position_id, position_value) do
-              {:ok, _} -> true
-              _ -> false
-            end
-          else
-            false
-          end
-
-          BotLogger.info(state.bot_id, :trade, "Opening position", %{
-            symbol: signal.symbol,
+          # ML pre-trade filter: check if classifier predicts a win
+          classifier_features = %{
+            confidence: signal.confidence || 65,
+            momentum: signal[:momentum] || context[:momentum] || 0.0,
+            gravity: signal[:gravity] || context[:gravity] || 0.0,
+            atr_pct: signal[:atr_pct] || context[:atr_pct] || 0.003,
+            momentum_acceleration: signal[:momentum_acceleration] || context[:momentum_acceleration] || 0.0,
+            trajectory_angle: signal[:trajectory_angle] || context[:trajectory_angle] || 0.0,
+            kinetic_energy: signal[:kinetic_energy] || context[:kinetic_energy] || 0.0,
+            entry_price: current_price,
+            stop_loss: stop_loss || current_price,
+            impulse_target: impulse_target,
+            position_value: position_value,
             direction: signal.direction,
-            quantity: Float.round(quantity, 6),
-            price: current_price
-          })
+            energy_state: signal[:energy_state] || context[:energy_state] || :medium,
+            regime: signal[:regime] || context[:regime] || :unknown
+          }
 
-          exchange_result = case signal.direction do
-            :long ->
-              Logger.info("Bot #{state.bot_id} BUY: #{signal.symbol} qty=#{Float.round(quantity, 6)} via #{inspect(strategy)}")
-              OrderManager.execute_long(state.credential_id, signal.symbol, quantity, bot_context)
-            :short ->
-              Logger.info("Bot #{state.bot_id} SHORT: #{signal.symbol} qty=#{Float.round(quantity, 6)} via #{inspect(strategy)}")
-              OrderManager.execute_short(state.credential_id, signal.symbol, quantity, bot_context)
+          case TradeEngine.AI.TradeClassifier.should_trade?(classifier_features) do
+            {:blocked, reason} ->
+              Logger.info("[BotTrading] ML classifier blocked trade: #{reason}")
+              BotLogger.info(state.bot_id, :trade, "Trade blocked by ML classifier", %{
+                symbol: signal.symbol, direction: signal.direction, reason: reason
+              })
+              {:error, :ml_classifier_blocked}
+
             _ ->
-              {:error, :invalid_direction}
-          end
+              position_id = Ecto.UUID.generate()
 
-          case exchange_result do
-            {:ok, order_result} ->
-              executed_price = order_result[:executed_price] || current_price
-              executed_qty = order_result[:executed_qty] || quantity
-
-              position = %{
-                id: position_id,
-                bot_id: state.bot_id,
+              bot_context = [
                 user_id: state.user_id,
+                bot_id: state.bot_id,
                 credential_id: state.credential_id,
                 strategy_id: state.strategy_id,
+                market_type: state.market_type,
+                position_id: position_id,
+                confidence: signal.confidence,
+                peak_price: impulse_target,
+                peak_time: max_hold,
+                expected_price: current_price
+              ]
+
+              # Reserve virtual balance
+              vb_reserved = if VirtualBalanceManager.running?() do
+                case VirtualBalanceManager.reserve_for_position(state.user_id, position_id, position_value) do
+                  {:ok, _} -> true
+                  _ -> false
+                end
+              else
+                false
+              end
+
+              BotLogger.info(state.bot_id, :trade, "Opening position", %{
                 symbol: signal.symbol,
                 direction: signal.direction,
-                quantity: executed_qty,
-                entry_price: executed_price,
-                current_price: executed_price,
-                impulse_target: impulse_target,
-                impulse_size: abs(impulse_target - executed_price),
-                stop_loss: stop_loss,
-                confidence: signal.confidence,
-                entry_time: DateTime.utc_now(),
-                target_exit_time: DateTime.add(DateTime.utc_now(), max_hold * 60, :second),
-                status: :open,
-                position_value: position_value,
-                virtual_balance_user: vb_reserved,
-                exchange_order_id: order_result[:order_id]
-              }
-
-              BotRegistry.update_position_count(state.bot_id, map_size(state.positions) + 1)
-
-              # Persist position to DB
-              persist_position_open(position)
-
-              new_state = %{state |
-                positions: Map.put(state.positions, position.id, position),
-                total_trades: state.total_trades + 1,
-                price_cache: Map.put(state.price_cache, signal.symbol, executed_price)
-              }
-
-              {:ok, position, new_state}
-
-            {:error, reason} ->
-              if vb_reserved, do: VirtualBalanceManager.release_reservation(state.user_id, position_id)
-              Logger.error("Bot #{state.bot_id} trade failed: #{inspect(reason)}")
-              BotLogger.error(state.bot_id, :trade, "Trade execution failed", %{
-                symbol: signal.symbol,
-                reason: inspect(reason)
+                quantity: Float.round(quantity, 6),
+                price: current_price
               })
-              BotRegistry.report_error(state.bot_id, "Trade failed: #{inspect(reason)}")
-              {:error, reason}
+
+              exchange_result = case signal.direction do
+                :long ->
+                  Logger.info("Bot #{state.bot_id} BUY: #{signal.symbol} qty=#{Float.round(quantity, 6)} via #{inspect(strategy)}")
+                  OrderManager.execute_long(state.credential_id, signal.symbol, quantity, bot_context)
+                :short ->
+                  Logger.info("Bot #{state.bot_id} SHORT: #{signal.symbol} qty=#{Float.round(quantity, 6)} via #{inspect(strategy)}")
+                  OrderManager.execute_short(state.credential_id, signal.symbol, quantity, bot_context)
+                _ ->
+                  {:error, :invalid_direction}
+              end
+
+              case exchange_result do
+                {:ok, order_result} ->
+                  executed_price = order_result[:executed_price] || current_price
+                  executed_qty = order_result[:executed_qty] || quantity
+
+                  position = %{
+                    id: position_id,
+                    bot_id: state.bot_id,
+                    user_id: state.user_id,
+                    credential_id: state.credential_id,
+                    strategy_id: state.strategy_id,
+                    symbol: signal.symbol,
+                    direction: signal.direction,
+                    quantity: executed_qty,
+                    entry_price: executed_price,
+                    current_price: executed_price,
+                    impulse_target: impulse_target,
+                    impulse_size: abs(impulse_target - executed_price),
+                    stop_loss: stop_loss,
+                    confidence: signal.confidence,
+                    entry_time: DateTime.utc_now(),
+                    target_exit_time: DateTime.add(DateTime.utc_now(), max_hold * 60, :second),
+                    status: :open,
+                    position_value: position_value,
+                    virtual_balance_user: vb_reserved,
+                    exchange_order_id: order_result[:order_id]
+                  }
+
+                  BotRegistry.update_position_count(state.bot_id, map_size(state.positions) + 1)
+
+                  # Persist position to DB
+                  persist_position_open(position)
+
+                  new_state = %{state |
+                    positions: Map.put(state.positions, position.id, position),
+                    total_trades: state.total_trades + 1,
+                    price_cache: Map.put(state.price_cache, signal.symbol, executed_price)
+                  }
+
+                  {:ok, position, new_state}
+
+                {:error, reason} ->
+                  if vb_reserved, do: VirtualBalanceManager.release_reservation(state.user_id, position_id)
+                  Logger.error("Bot #{state.bot_id} trade failed: #{inspect(reason)}")
+                  BotLogger.error(state.bot_id, :trade, "Trade execution failed", %{
+                    symbol: signal.symbol,
+                    reason: inspect(reason)
+                  })
+                  BotRegistry.report_error(state.bot_id, "Trade failed: #{inspect(reason)}")
+                  {:error, reason}
+              end
           end
         end
 

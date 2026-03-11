@@ -28,7 +28,10 @@ defmodule TradeEngine.AI.Supervisor do
     children = [
       # Main RL Brain - critical for trading decisions
       {TradeEngine.AI.Brain, []},
-      
+
+      # Trade classifier — pre-trade ML filter (12-month trained model)
+      {TradeEngine.AI.TradeClassifier, []},
+
       # Training data worker - processes samples in background
       {TradeEngine.AI.TrainingWorker, []}
     ]
