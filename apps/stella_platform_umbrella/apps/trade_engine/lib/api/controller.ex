@@ -828,6 +828,48 @@ defmodule TradeEngine.API.Controller do
     end
   end
 
+  # ── RISK MONITORING ──────────────────────────────────────────────────────────
+
+  get "/api/phoenix/risk/status" do
+    json_response(conn, {:ok, %{
+      circuit_breaker: TradeEngine.Risk.PlatformCircuitBreaker.status(),
+      reconciler: TradeEngine.Risk.PositionReconciler.stats(),
+      slippage: TradeEngine.Risk.SlippageMonitor.stats(),
+      correlation: TradeEngine.Risk.CorrelationMonitor.stats(),
+      credential_health: TradeEngine.Exchanges.Executor.credential_health_stats()
+    }})
+  end
+
+  get "/api/phoenix/risk/circuit-breaker" do
+    json_response(conn, {:ok, TradeEngine.Risk.PlatformCircuitBreaker.status()})
+  end
+
+  post "/api/phoenix/risk/circuit-breaker/reset" do
+    TradeEngine.Risk.PlatformCircuitBreaker.reset()
+    json_response(conn, {:ok, %{status: "reset", message: "Circuit breaker reset — bots may be restarted"}})
+  end
+
+  get "/api/phoenix/risk/reconciler" do
+    json_response(conn, {:ok, TradeEngine.Risk.PositionReconciler.stats()})
+  end
+
+  post "/api/phoenix/risk/reconciler/check" do
+    TradeEngine.Risk.PositionReconciler.check_now()
+    json_response(conn, {:ok, %{status: "triggered", message: "Reconciliation check queued"}})
+  end
+
+  get "/api/phoenix/risk/slippage" do
+    json_response(conn, {:ok, TradeEngine.Risk.SlippageMonitor.stats()})
+  end
+
+  get "/api/phoenix/risk/correlation" do
+    json_response(conn, {:ok, TradeEngine.Risk.CorrelationMonitor.stats()})
+  end
+
+  get "/api/phoenix/risk/credentials" do
+    json_response(conn, {:ok, TradeEngine.Exchanges.Executor.credential_health_stats()})
+  end
+
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, ""), do: map
   defp maybe_put(map, key, val), do: Map.put(map, key, val)

@@ -18,6 +18,12 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
 
       # Run on raw candles directly
       TradeEngine.Analytics.PhysicsBacktest.backtest("ETHUSDT", candles, config)
+
+      # Export per-trade features to CSV for ML training
+      TradeEngine.Analytics.PhysicsBacktest.export_features("ETHUSDT", months: 6)
+
+      # Export multiple symbols into one CSV
+      TradeEngine.Analytics.PhysicsBacktest.export_multi(["ETHUSDT", "BTCUSDT"], path: "priv/ml/combined.csv")
   """
 
   require Logger
@@ -27,14 +33,14 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
 
   @default_config %{
     "target_profit_usd" => 0.50,
-    "min_impulse_pct" => 0.001,
-    "max_hold_minutes" => 5,
+    "min_impulse_pct" => 0.002,       # 0.2% minimum move to enter
+    "max_hold_minutes" => 120,         # 24 candles at 5m — give trades room to play out
     "golden_ratio" => 0.618,
     "min_notional" => 10.0,
     "min_trade_value" => 12.0,
-    "min_confidence_long" => 55,
-    "min_confidence_short" => 60,
-    "max_positions" => 3,
+    "min_confidence_long" => 60,       # Data: conf 50-59 worst, 60-69 mixed but acceptable with R:R fix
+    "min_confidence_short" => 70,      # Keep strict — shorts need high confidence
+    "max_positions" => 1,              # One at a time for clean measurement
     "max_position_pct" => 0.15
   }
 
@@ -45,6 +51,73 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
   # ========================================================================
   # PUBLIC API
   # ========================================================================
+
+  @doc """
+  Export per-trade features + outcomes to CSV for ML training.
+
+  Runs the backtest for the given symbol, then writes one CSV row per closed trade
+  with physics features, trade params, and outcome (win column as ML target).
+
+  ## Options
+    - `:months` — lookback period (default 6)
+    - `:timeframe` — candle timeframe (default "5m")
+    - `:path` — output CSV path (default "priv/ml/features_{symbol}.csv")
+    - `:config` — backtest config overrides
+
+  ## Returns
+    `{:ok, path, trade_count}` or `{:error, reason}`
+  """
+  def export_features(symbol, opts \\ []) do
+    months = Keyword.get(opts, :months, 6)
+    timeframe = Keyword.get(opts, :timeframe, "5m")
+    default_path = "priv/ml/features_#{String.downcase(symbol)}.csv"
+    path = Keyword.get(opts, :path, default_path)
+    user_config = Keyword.get(opts, :config, %{})
+
+    case run(symbol, months: months, timeframe: timeframe, config: user_config) do
+      {:ok, result} ->
+        write_features_csv(result.trades, path)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Export features for multiple symbols into a single combined CSV.
+
+  ## Options
+    Same as `export_features/2`, plus:
+    - `:path` — output CSV path (default "priv/ml/features_multi.csv")
+
+  ## Returns
+    `{:ok, path, total_trades}` or `{:error, reason}`
+  """
+  def export_multi(symbols, opts \\ []) when is_list(symbols) do
+    default_path = "priv/ml/features_multi.csv"
+    path = Keyword.get(opts, :path, default_path)
+    months = Keyword.get(opts, :months, 6)
+    timeframe = Keyword.get(opts, :timeframe, "5m")
+    user_config = Keyword.get(opts, :config, %{})
+
+    all_trades =
+      Enum.reduce(symbols, [], fn symbol, acc ->
+        case run(symbol, months: months, timeframe: timeframe, config: user_config) do
+          {:ok, result} ->
+            acc ++ result.trades
+
+          {:error, reason} ->
+            Logger.warning("Skipping #{symbol}: #{inspect(reason)}")
+            acc
+        end
+      end)
+
+    if Enum.empty?(all_trades) do
+      {:error, :no_trades}
+    else
+      write_features_csv(all_trades, path)
+    end
+  end
 
   @doc """
   Load candles from DB and run backtest.
@@ -192,25 +265,40 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
     impulse_ok = has_tradeable_impulse?(signal, config)
     position_ok = count < max_positions and not has_symbol
 
-    confidence_ok and impulse_ok and position_ok
+    # Additional quality filter: momentum must overcome gravity by at least 1.5x
+    # This ensures the move has enough fuel to reach the target
+    physics = signal.physics
+    mom_gravity_ok = if physics && physics[:gravity] && physics[:gravity] > 0 do
+      abs(physics[:momentum] || 0) / physics[:gravity] >= 1.5
+    else
+      false
+    end
+
+    confidence_ok and impulse_ok and position_ok and mom_gravity_ok
   end
 
   defp attempt_entry(signal, current_price, current_time, candle_idx, state) do
     config = state.config
     entry_price = current_price
 
-    # Position sizing (mirrors PhysicsImpulse.calculate_position_size)
-    impulse_target = get_impulse_target(signal)
-    impulse_size = if impulse_target, do: abs(impulse_target - entry_price), else: 0
+    # Use the signal's ATR-based SL/TP directly (already calibrated per-asset)
+    signal_sl = decimal_to_float(signal.stop_loss)
+    signal_tp = decimal_to_float(signal.take_profit)
+    impulse_target = signal_tp
 
-    if impulse_size <= 0 do
+    sl_distance = abs(entry_price - signal_sl)
+    tp_distance = abs(signal_tp - entry_price)
+
+    if sl_distance <= 0 or tp_distance <= 0 do
       %{state | entries_rejected: state.entries_rejected + 1}
     else
-      target_profit = config["target_profit_usd"]
+      # Position sizing based on SL risk — risk $target_profit_usd per trade
+      # qty = risk_amount / sl_distance → if SL hit, lose ~$risk_amount
+      risk_per_trade = config["target_profit_usd"]
       max_pct = config["max_position_pct"]
       min_trade = config["min_trade_value"]
 
-      ideal_qty = target_profit / impulse_size
+      ideal_qty = risk_per_trade / sl_distance
       ideal_value = ideal_qty * entry_price
       max_value = state.balance * max_pct
       position_value = ideal_value |> min(max_value) |> max(min_trade)
@@ -222,13 +310,7 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
       if position_value + entry_fee > state.balance do
         %{state | entries_rejected: state.entries_rejected + 1}
       else
-        # Stop loss (mirrors PhysicsImpulse.calculate_stop_loss)
-        golden = config["golden_ratio"]
-        stop_loss = case signal.direction do
-          :long -> entry_price - (impulse_size * golden)
-          :short -> entry_price + (impulse_size * golden)
-          _ -> entry_price
-        end
+        stop_loss = signal_sl
 
         # Max hold time
         max_hold = config["max_hold_minutes"]
@@ -518,7 +600,7 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
       ORDER BY time ASC
       """
 
-      case Repo.query(sql, [symbol, start_date]) do
+      case Repo.query(sql, [symbol, start_date], timeout: 300_000) do
         {:ok, %{rows: rows}} when rows != [] ->
           candles = Enum.map(rows, fn [time, open, high, low, close, volume, quote_vol, trades] ->
             %{
@@ -605,6 +687,9 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
     Signals Generated: #{result.total_signals}
     Entries Attempted: #{result.entries_attempted}
     Entries Rejected:  #{result.entries_rejected}
+
+    ── CONFIDENCE BREAKDOWN ──────────────────────────────────────
+    #{format_confidence_breakdown(result.trades)}
     ══════════════════════════════════════════════════════════════
     """)
   end
@@ -614,6 +699,109 @@ defmodule TradeEngine.Analytics.PhysicsBacktest do
     |> Enum.map(fn {reason, count} -> "    #{reason}: #{count}" end)
     |> Enum.join("\n")
   end
+
+  defp format_confidence_breakdown(trades) do
+    # Group trades by confidence bucket and show win rate for each
+    buckets = [
+      {"50-59", fn t -> t.confidence >= 50 and t.confidence < 60 end},
+      {"60-69", fn t -> t.confidence >= 60 and t.confidence < 70 end},
+      {"70-79", fn t -> t.confidence >= 70 and t.confidence < 80 end},
+      {"80-89", fn t -> t.confidence >= 80 and t.confidence < 90 end},
+      {"90+",   fn t -> t.confidence >= 90 end}
+    ]
+
+    Enum.map(buckets, fn {label, filter_fn} ->
+      bucket_trades = Enum.filter(trades, filter_fn)
+      total = length(bucket_trades)
+      wins = Enum.count(bucket_trades, &(&1.net_pnl > 0))
+      win_rate = if total > 0, do: Float.round(wins / total * 100, 1), else: 0.0
+      total_pnl = Enum.reduce(bucket_trades, 0.0, &(&1.net_pnl + &2))
+      long_count = Enum.count(bucket_trades, &(&1.direction == :long))
+      short_count = total - long_count
+      "    Conf #{label}: #{total} trades (#{long_count}L/#{short_count}S) | WR: #{win_rate}% | PnL: $#{Float.round(total_pnl, 2)}"
+    end)
+    |> Enum.join("\n")
+  end
+
+  # ========================================================================
+  # CSV FEATURE EXPORT
+  # ========================================================================
+
+  @csv_header [
+    "symbol", "direction", "confidence",
+    "momentum", "gravity", "atr_pct", "momentum_acceleration",
+    "trajectory_angle", "kinetic_energy", "energy_state",
+    "regime",
+    "entry_price", "stop_loss", "impulse_target", "position_value",
+    "net_pnl", "pnl_pct", "reason", "duration_minutes",
+    "win"
+  ]
+
+  defp write_features_csv(trades, path) do
+    dir = Path.dirname(path)
+    File.mkdir_p!(dir)
+
+    header_line = Enum.join(@csv_header, ",")
+
+    rows =
+      Enum.map(trades, fn trade ->
+        physics = trade.physics || %{}
+
+        regime_val =
+          case physics[:regime] do
+            %{regime: r} -> r
+            r when is_atom(r) -> r
+            r when is_binary(r) -> r
+            _ -> ""
+          end
+
+        win = if trade.net_pnl > 0, do: 1, else: 0
+
+        [
+          trade.symbol,
+          trade.direction,
+          trade.confidence,
+          physics[:momentum] || "",
+          physics[:gravity] || "",
+          physics[:atr_pct] || "",
+          physics[:momentum_acceleration] || "",
+          physics[:trajectory_angle] || "",
+          physics[:kinetic_energy] || "",
+          physics[:energy_state] || "",
+          regime_val,
+          trade.entry_price,
+          trade.stop_loss,
+          trade.impulse_target,
+          trade.position_value,
+          trade.net_pnl,
+          trade.pnl_pct,
+          trade.reason,
+          trade.duration_minutes,
+          win
+        ]
+        |> Enum.map(&csv_escape/1)
+        |> Enum.join(",")
+      end)
+
+    content = [header_line | rows] |> Enum.join("\n")
+    File.write!(path, content <> "\n")
+
+    trade_count = length(trades)
+    Logger.info("Exported #{trade_count} trades to #{path}")
+    {:ok, path, trade_count}
+  end
+
+  defp csv_escape(val) when is_float(val), do: :erlang.float_to_binary(val, decimals: 8)
+  defp csv_escape(val) when is_integer(val), do: Integer.to_string(val)
+  defp csv_escape(val) when is_atom(val), do: Atom.to_string(val)
+  defp csv_escape(val) when is_binary(val) do
+    if String.contains?(val, [",", "\"", "\n"]) do
+      "\"" <> String.replace(val, "\"", "\"\"") <> "\""
+    else
+      val
+    end
+  end
+  defp csv_escape(val), do: to_string(val)
 
   # ========================================================================
   # UTILITY

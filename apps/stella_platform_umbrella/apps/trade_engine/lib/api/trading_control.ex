@@ -109,12 +109,127 @@ defmodule TradeEngine.API.TradingControl do
     {:ok, %{status: :stopped, timestamp: DateTime.utc_now()}}
   end
 
-  @doc "Emergency: close all positions then stop"
+  @doc "Emergency: close ALL positions (SignalTrader + BotRegistry bots), cancel pending orders, stop everything"
   def emergency_stop do
-    result = SignalTrader.close_all_positions()
-    SignalTrader.stop_trading()
-    {:ok, %{status: :emergency_stopped, positions_closed: result, timestamp: DateTime.utc_now()}}
+    Logger.error("EMERGENCY STOP triggered — closing all positions and stopping all bots")
+
+    # 1. Close SignalTrader positions (legacy orchestrator)
+    signal_result = try do
+      SignalTrader.close_all_positions()
+    rescue
+      _ -> {:error, :signal_trader_unavailable}
+    end
+
+    # 2. Stop all BotRegistry bots and close their DB positions
+    bot_results = try do
+      bots = BotRegistry.list_bots()
+      running = Enum.filter(bots, fn b -> Map.get(b, :status) in ["running", "paused"] end)
+
+      Enum.map(running, fn bot ->
+        bot_id = Map.get(bot, :bot_id) || bot.id
+        # Stop bot (triggers terminate/2 which tries to close positions)
+        try do
+          BotRegistry.stop_bot(bot_id)
+        rescue
+          _ -> :ok
+        end
+        bot_id
+      end)
+    rescue
+      _ -> []
+    end
+
+    # 3. Force-close all open positions in DB via exchange
+    db_closed = try do
+      import Ecto.Query
+      open_positions = Repo.all(
+        from(p in TradeEngine.Trading.Position,
+          where: p.status == "open",
+          select: %{
+            id: p.id,
+            bot_id: p.bot_id,
+            credential_id: p.credential_id,
+            symbol: p.symbol,
+            side: p.position_type,
+            quantity: p.quantity,
+            entry_price: p.entry_price
+          },
+          limit: 100
+        ),
+        timeout: 10_000
+      )
+
+      Enum.map(open_positions, fn pos ->
+        if pos.credential_id do
+          qty = decimal_to_float(pos.quantity)
+          entry = decimal_to_float(pos.entry_price)
+
+          close_result = case pos.side do
+            side when side in ["long", "buy"] ->
+              TradeEngine.Exchanges.Executor.close_long(pos.credential_id, pos.symbol, qty, entry, [])
+            side when side in ["short", "sell"] ->
+              TradeEngine.Exchanges.Executor.close_short(pos.credential_id, pos.symbol, qty, entry, [])
+            _ ->
+              TradeEngine.Exchanges.Executor.close_long(pos.credential_id, pos.symbol, qty, entry, [])
+          end
+
+          # Mark position as closed in DB regardless
+          now = NaiveDateTime.utc_now()
+          Repo.query(
+            "UPDATE trading.positions SET status = 'closed', exit_reason = 'emergency_stop', closed_at = $1, updated_at = $1 WHERE id = $2 AND status = 'open'",
+            [now, pos.id],
+            timeout: 5_000
+          )
+
+          %{position_id: pos.id, symbol: pos.symbol, exchange_result: inspect(close_result)}
+        else
+          Repo.query(
+            "UPDATE trading.positions SET status = 'closed', exit_reason = 'emergency_stop_no_cred', closed_at = $1, updated_at = $1 WHERE id = $2 AND status = 'open'",
+            [NaiveDateTime.utc_now(), pos.id],
+            timeout: 5_000
+          )
+          %{position_id: pos.id, symbol: pos.symbol, exchange_result: "no_credential"}
+        end
+      end)
+    rescue
+      e ->
+        Logger.error("Emergency stop DB close error: #{Exception.message(e)}")
+        []
+    end
+
+    # 4. Stop SignalTrader
+    try do
+      SignalTrader.stop_trading()
+    rescue
+      _ -> :ok
+    end
+
+    # 5. Broadcast emergency alert
+    Phoenix.PubSub.broadcast(TradeEngine.PubSub, "alerts:new", {:new_alert, %{
+      id: Ecto.UUID.generate(),
+      alert_type: "kill_switch",
+      category: "risk",
+      severity: "critical",
+      title: "Emergency Stop Executed",
+      message: "All bots stopped, #{length(db_closed)} positions force-closed",
+      metadata: %{bots_stopped: length(bot_results), positions_closed: length(db_closed)},
+      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+    }})
+
+    {:ok, %{
+      status: :emergency_stopped,
+      signal_trader: signal_result,
+      bots_stopped: length(bot_results),
+      positions_closed: length(db_closed),
+      position_details: db_closed,
+      timestamp: DateTime.utc_now()
+    }}
   end
+
+  defp decimal_to_float(nil), do: 0.0
+  defp decimal_to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp decimal_to_float(n) when is_number(n), do: n * 1.0
+  defp decimal_to_float(_), do: 0.0
 
   # ============================================================================
   # 2. LIVE SIGNALS — Entry/Exit Points

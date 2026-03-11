@@ -1,52 +1,44 @@
 defmodule TradeEngine.Physics.EnergyModel do
-# ============================================================================
-# MODULE 4: ENERGY MODEL
-# ============================================================================
   @moduledoc """
-  Kinetic energy analysis:
-  E_k = ½·m·v²
-  
-  In trading context:
-  E_k = market_mass × momentum²
-  
+  Kinetic energy analysis for normalized momentum.
+
+  E_k = ½ · m · v²
+  With normalized momentum (% per candle), we use a dimensionless mass
+  so energy is directly comparable across price levels.
+
   Energy states:
-  - :high (>0.7): Strong momentum
-  - :medium (0.3-0.7): Moderate momentum
-  - :low (<0.3): Exhausted momentum
+  - :high — strong momentum, likely to reach target
+  - :medium — moderate momentum
+  - :low — weak/exhausted momentum
   """
 
-  def calculate_kinetic_energy(momentum, price) do
-    # Market "mass" proportional to price
-    market_mass = price / 100.0
-    
-    # Kinetic energy: E_k = ½·m·v²
-    kinetic_energy = 0.5 * market_mass * (momentum ** 2)
-    
+  def calculate_kinetic_energy(momentum, _price) do
+    # With normalized momentum (e.g., 0.002 = 0.2%/candle),
+    # use a fixed mass so energy is purely about momentum strength.
+    # Scale factor 1e6 puts typical values in a useful range:
+    # momentum=0.001 → E=0.5, momentum=0.002 → E=2.0, momentum=0.003 → E=4.5
+    kinetic_energy = 0.5 * 1_000_000 * (momentum ** 2)
+
     Float.round(kinetic_energy, 4)
   end
 
   def classify_energy(kinetic_energy) do
     cond do
-      kinetic_energy > 0.7 -> :high
-      kinetic_energy > 0.3 -> :medium
+      kinetic_energy > 2.0 -> :high      # momentum > ~0.002 (0.2%/candle)
+      kinetic_energy > 0.5 -> :medium    # momentum > ~0.001 (0.1%/candle)
       true -> :low
     end
   end
 
   @doc "Calculate bounce energy from peak to support"
   def calculate_bounce_energy(peak_price, support_price, retention_alpha \\ 0.4) do
-    # E_bounce = α·(P_peak - P_support)
-    # α typical range: 0.25 - 0.60 (market retention)
-    
     energy_available = peak_price - support_price
     bounce_energy = energy_available * retention_alpha
-    
     Float.round(bounce_energy, 4)
   end
 
   @doc "Calculate energy decay over time"
   def energy_decay_at_time(initial_energy, decay_rate, time) do
-    # E(t) = E₀ · e^(-decay_rate·t)
     decayed = initial_energy * :math.exp(-decay_rate * time)
     Float.round(decayed, 4)
   end

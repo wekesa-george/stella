@@ -606,6 +606,20 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   # ========================================================================
 
   defp signed_request(method, url, params, credentials) do
+    # Enforce rate limits before making the request
+    weight = if String.contains?(url, "/order"), do: 1, else: 5
+    rate_type = if String.contains?(url, "/order") and method == :post, do: :orders_second, else: :weight
+
+    case acquire_rate_limit(rate_type, weight) do
+      :ok -> do_signed_request(method, url, params, credentials)
+      {:error, :rate_limited, wait_ms} ->
+        Logger.warning("Binance rate limited — waiting #{wait_ms}ms before retry")
+        Process.sleep(min(wait_ms, 5_000))
+        do_signed_request(method, url, params, credentials)
+    end
+  end
+
+  defp do_signed_request(method, url, params, credentials) do
     timestamp = System.system_time(:millisecond)
 
     params_with_ts = Map.put(params, "timestamp", timestamp)
@@ -635,8 +649,32 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
     end
 
     case result do
+      {:ok, %{status_code: 200, body: body, headers: resp_headers}} ->
+        # Update rate limiter with actual usage from response headers
+        try do
+          TradeEngine.Exchanges.Binance.RateLimiter.update_from_headers(resp_headers)
+        rescue
+          _ -> :ok
+        end
+        Jason.decode(body)
+
       {:ok, %{status_code: 200, body: body}} ->
         Jason.decode(body)
+
+      {:ok, %{status_code: code, body: body}} when code in [401, 403] ->
+        Logger.error("Binance AUTH error [#{code}]: #{body} — invalidating credential cache")
+        # Immediately invalidate cached credentials so next call re-fetches from DB
+        try do
+          credential_id = Map.get(credentials, :credential_id)
+          if credential_id, do: TradeEngine.Exchanges.Executor.invalidate_cache(credential_id)
+        rescue
+          _ -> :ok
+        end
+        {:error, %{code: code, body: body, auth_failed: true}}
+
+      {:ok, %{status_code: 429, body: body}} ->
+        Logger.warning("Binance rate limited [429]: #{body}")
+        {:error, %{code: 429, body: body, rate_limited: true}}
 
       {:ok, %{status_code: code, body: body}} ->
         Logger.error("Binance API error [#{code}]: #{body}")
@@ -644,6 +682,14 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
       {:error, %HTTPoison.Error{reason: reason}} ->
         {:error, reason}
+    end
+  end
+
+  defp acquire_rate_limit(type, count) do
+    try do
+      TradeEngine.Exchanges.Binance.RateLimiter.acquire(type, count)
+    rescue
+      _ -> :ok  # Don't block trading if rate limiter is down
     end
   end
 

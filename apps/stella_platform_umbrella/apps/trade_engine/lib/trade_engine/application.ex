@@ -85,6 +85,11 @@ defmodule TradeEngine.Application do
       {TradeEngine.Bots.HeartbeatTracker, []},
       {TradeEngine.Risk.RiskMonitor, []},
 
+      # Phase 3: Advanced risk monitors
+      {TradeEngine.Risk.PlatformCircuitBreaker, []},
+      {TradeEngine.Risk.PositionReconciler, []},
+      {TradeEngine.Risk.SlippageMonitor, []},
+
       # Phase: Alert persistence, notification, and incident auto-creation
       {TradeEngine.Alerts.AlertPersister, []},
       {TradeEngine.Alerts.NotificationDispatcher, []},

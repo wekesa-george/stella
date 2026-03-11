@@ -19,7 +19,10 @@ defmodule TradeEngine.Exchanges.Executor do
   alias TradeEngine.Repo
 
   @ets_table :executor_credential_cache
+  @credential_health_table :executor_credential_health
   @cache_ttl_ms 300_000  # 5 minutes
+  @health_check_interval_ms 600_000  # 10 minutes
+  @stale_credential_threshold_ms 86_400_000  # 24 hours without successful use
 
   @adapter_modules %{
     "alpaca" => TradeEngine.Exchanges.Adapters.Alpaca,
@@ -40,6 +43,7 @@ defmodule TradeEngine.Exchanges.Executor do
     with {:ok, adapter, creds} <- resolve(credential_id) do
       trading_symbol = adapter.normalize_symbol(symbol, :trading)
       adapter.execute_long(trading_symbol, quantity, creds, opts)
+      |> track_result(credential_id)
     end
   end
 
@@ -48,6 +52,7 @@ defmodule TradeEngine.Exchanges.Executor do
     with {:ok, adapter, creds} <- resolve(credential_id) do
       trading_symbol = adapter.normalize_symbol(symbol, :trading)
       adapter.execute_short(trading_symbol, quantity, creds, opts)
+      |> track_result(credential_id)
     end
   end
 
@@ -56,6 +61,7 @@ defmodule TradeEngine.Exchanges.Executor do
     with {:ok, adapter, creds} <- resolve(credential_id) do
       trading_symbol = adapter.normalize_symbol(symbol, :trading)
       adapter.close_long(trading_symbol, quantity, entry_price, creds, opts)
+      |> track_result(credential_id)
     end
   end
 
@@ -64,6 +70,7 @@ defmodule TradeEngine.Exchanges.Executor do
     with {:ok, adapter, creds} <- resolve(credential_id) do
       trading_symbol = adapter.normalize_symbol(symbol, :trading)
       adapter.close_short(trading_symbol, quantity, entry_price, creds, opts)
+      |> track_result(credential_id)
     end
   end
 
@@ -213,9 +220,31 @@ defmodule TradeEngine.Exchanges.Executor do
   def invalidate_cache(credential_id) do
     try do
       :ets.delete(@ets_table, credential_id)
+      record_credential_event(credential_id, :invalidated)
       :ok
     rescue
       _ -> :ok
+    end
+  end
+
+  @doc "Record a successful API call for a credential"
+  def record_success(credential_id) do
+    record_credential_event(credential_id, :success)
+  end
+
+  @doc "Record a failed API call for a credential"
+  def record_failure(credential_id, reason \\ :unknown) do
+    record_credential_event(credential_id, {:failure, reason})
+  end
+
+  @doc "Get credential health stats for dashboard"
+  def credential_health_stats do
+    try do
+      :ets.tab2list(@credential_health_table)
+      |> Enum.map(fn {cred_id, health} -> {cred_id, health} end)
+      |> Map.new()
+    rescue
+      _ -> %{}
     end
   end
 
@@ -226,9 +255,20 @@ defmodule TradeEngine.Exchanges.Executor do
   @impl true
   def init(_opts) do
     :ets.new(@ets_table, [:named_table, :set, :public, read_concurrency: true])
+    :ets.new(@credential_health_table, [:named_table, :set, :public, read_concurrency: true])
+    Process.send_after(self(), :check_credential_health, @health_check_interval_ms)
     Logger.info("Executor started — config-driven exchange dispatcher")
     {:ok, %{}}
   end
+
+  @impl true
+  def handle_info(:check_credential_health, state) do
+    Process.send_after(self(), :check_credential_health, @health_check_interval_ms)
+    check_stale_credentials()
+    {:noreply, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
 
   # ========================================================================
   # CREDENTIAL RESOLUTION
@@ -355,6 +395,151 @@ defmodule TradeEngine.Exchanges.Executor do
         creds = merge_overrides(creds, row.config_overrides || %{}, adapter_code)
 
         {:ok, adapter_module, creds}
+    end
+  end
+
+  defp track_result({:ok, _} = result, credential_id) do
+    record_credential_event(credential_id, :success)
+    result
+  end
+
+  defp track_result({:error, reason} = result, credential_id) do
+    record_credential_event(credential_id, {:failure, reason})
+    result
+  end
+
+  defp track_result(other, _credential_id), do: other
+
+  # ========================================================================
+  # CREDENTIAL HEALTH TRACKING
+  # ========================================================================
+
+  defp record_credential_event(credential_id, event) do
+    now = System.system_time(:millisecond)
+
+    existing = try do
+      case :ets.lookup(@credential_health_table, credential_id) do
+        [{^credential_id, health}] -> health
+        _ -> nil
+      end
+    rescue
+      _ -> nil
+    end
+
+    health = case {existing, event} do
+      {nil, :success} ->
+        %{
+          credential_id: credential_id,
+          first_seen: now,
+          last_success: now,
+          last_failure: nil,
+          success_count: 1,
+          failure_count: 0,
+          consecutive_failures: 0,
+          last_failure_reason: nil,
+          status: :healthy
+        }
+
+      {nil, {:failure, reason}} ->
+        %{
+          credential_id: credential_id,
+          first_seen: now,
+          last_success: nil,
+          last_failure: now,
+          success_count: 0,
+          failure_count: 1,
+          consecutive_failures: 1,
+          last_failure_reason: inspect(reason),
+          status: :degraded
+        }
+
+      {nil, :invalidated} ->
+        %{
+          credential_id: credential_id,
+          first_seen: now,
+          last_success: nil,
+          last_failure: now,
+          success_count: 0,
+          failure_count: 0,
+          consecutive_failures: 0,
+          last_failure_reason: "invalidated",
+          status: :invalidated
+        }
+
+      {h, :success} ->
+        %{h |
+          last_success: now,
+          success_count: h.success_count + 1,
+          consecutive_failures: 0,
+          status: :healthy
+        }
+
+      {h, {:failure, reason}} ->
+        consecutive = h.consecutive_failures + 1
+        status = if consecutive >= 3, do: :failing, else: :degraded
+
+        %{h |
+          last_failure: now,
+          failure_count: h.failure_count + 1,
+          consecutive_failures: consecutive,
+          last_failure_reason: inspect(reason),
+          status: status
+        }
+
+      {h, :invalidated} ->
+        %{h | status: :invalidated, last_failure: now, last_failure_reason: "invalidated"}
+    end
+
+    :ets.insert(@credential_health_table, {credential_id, health})
+  rescue
+    _ -> :ok
+  end
+
+  defp check_stale_credentials do
+    now = System.system_time(:millisecond)
+
+    try do
+      :ets.tab2list(@credential_health_table)
+      |> Enum.each(fn {cred_id, health} ->
+        # Check for credentials that haven't been used successfully in 24h
+        stale? = case health.last_success do
+          nil -> health.first_seen && (now - health.first_seen) > @stale_credential_threshold_ms
+          ts -> (now - ts) > @stale_credential_threshold_ms
+        end
+
+        if stale? do
+          Logger.warning("Executor: credential #{cred_id} has not been used successfully in 24h (status: #{health.status})")
+
+          Phoenix.PubSub.broadcast(TradeEngine.PubSub, "alerts:new", {:new_alert, %{
+            id: Ecto.UUID.generate(),
+            alert_type: "credential_stale",
+            category: "infrastructure",
+            severity: "warning",
+            title: "Stale Exchange Credential",
+            message: "Credential #{String.slice(to_string(cred_id), 0, 8)}... unused for 24h+ (#{health.failure_count} failures)",
+            metadata: %{credential_id: cred_id, status: health.status, last_success: health.last_success},
+            timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+          }})
+        end
+
+        # Check for credentials with 3+ consecutive failures
+        if health.consecutive_failures >= 3 and health.status == :failing do
+          Logger.error("Executor: credential #{cred_id} has #{health.consecutive_failures} consecutive failures: #{health.last_failure_reason}")
+
+          Phoenix.PubSub.broadcast(TradeEngine.PubSub, "alerts:new", {:new_alert, %{
+            id: Ecto.UUID.generate(),
+            alert_type: "credential_failing",
+            category: "infrastructure",
+            severity: "critical",
+            title: "Exchange Credential Failing",
+            message: "Credential #{String.slice(to_string(cred_id), 0, 8)}... has #{health.consecutive_failures} consecutive failures",
+            metadata: %{credential_id: cred_id, reason: health.last_failure_reason},
+            timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+          }})
+        end
+      end)
+    rescue
+      _ -> :ok
     end
   end
 

@@ -26,6 +26,8 @@ defmodule AdminGatewayWeb.AlertChannel do
   def handle_info(:after_join, socket) do
     Phoenix.PubSub.subscribe(@pubsub, "alerts:new")
     Phoenix.PubSub.subscribe(@pubsub, "alerts:risk_breach")
+    Phoenix.PubSub.subscribe(@pubsub, "platform:circuit_breaker")
+    Phoenix.PubSub.subscribe(@pubsub, "platform:reconciliation")
 
     # Push recent unacknowledged alerts as snapshot on join
     alerts =
@@ -44,6 +46,17 @@ defmodule AdminGatewayWeb.AlertChannel do
 
   def handle_info({:risk_breach, alert}, socket) do
     push(socket, "new_alert", serialize_alert(Map.put(alert, :severity, "critical")))
+    {:noreply, socket}
+  end
+
+  def handle_info({:circuit_breaker_tripped, alert}, socket) do
+    push(socket, "circuit_breaker_tripped", serialize_alert(alert))
+    push(socket, "new_alert", serialize_alert(alert))
+    {:noreply, socket}
+  end
+
+  def handle_info({:position_reconciled, event}, socket) do
+    push(socket, "position_reconciled", event)
     {:noreply, socket}
   end
 

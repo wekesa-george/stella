@@ -1,27 +1,28 @@
 defmodule TradeEngine.Physics.SignalGenerator do
   @moduledoc """
-  ✅ FINAL FIX: Signal Generator - Complete Signal Structure
-  
-  KEY FIXES:
-  1. ✅ Pass symbol through to function (not from physics)
-  2. ✅ Properly generates all required signal fields
-  3. ✅ Handles edge cases (zero momentum, neutral signals)
-  4. ✅ Graceful error handling
+  Signal Generator — Volatility-Aware with Realistic Confidence
+
+  Key principles:
+  1. Momentum is normalized (% per candle) — comparable across price levels
+  2. Direction requires momentum > 1x ATR per candle (not noise)
+  3. Confidence is relative to volatility — strong means significantly above noise
+  4. Take profit based on physics peak, clamped to ATR multiples
+  5. Stop loss based on ATR, not arbitrary percentages
   """
 
   require Logger
 
   @doc """
-  Generate complete trading signal from candles
-  Pass symbol as parameter to avoid dependency on physics.symbol
+  Generate complete trading signal from candles.
+  Returns {:ok, signal} or {:error, reason}.
   """
   def generate_signal(candles, order_flow \\ nil, symbol \\ "UNKNOWN") when is_list(candles) do
     case TradeEngine.Physics.MarketProjectile.analyze_projectile(candles, order_flow) do
       {:ok, physics} ->
         try do
-          # Extract all physics values
           momentum = physics.momentum
           gravity = physics.gravity
+          atr_pct = physics.atr_pct
           peak_price = physics.peak_price
           peak_time = physics.peak_time
           trajectory_angle = physics.trajectory_angle
@@ -30,96 +31,70 @@ defmodule TradeEngine.Physics.SignalGenerator do
           current_price = physics.current_price
           velocity = physics.velocity
 
-          # Determine direction and confidence
-          {direction, confidence} = determine_direction_and_confidence(physics)
+          momentum_acceleration = physics.momentum_acceleration
+          regime = physics.regime
 
-          # Calculate entry and exit levels
-          {entry_price, stop_loss, take_profit} = calculate_levels(
-            current_price,
-            direction,
-            peak_price,
-            momentum,
-            gravity
-          )
+          # Direction and confidence — volatility-relative
+          {direction, confidence} =
+            determine_direction_and_confidence(momentum, gravity, trajectory_angle, energy_state, atr_pct, momentum_acceleration, regime)
 
-          # Calculate balance point
+          # Entry/exit levels — ATR-based
+          {entry_price, stop_loss, take_profit} =
+            calculate_levels(current_price, direction, peak_price, atr_pct)
+
+          # Balance point
           balance_point = calculate_balance_point(current_price, momentum, gravity)
 
-          # Classify energy zones
+          # Energy zones
           energy_zones = classify_energy_zones(physics, balance_point, current_price)
 
-          # Format recommendation
+          # Recommendation
           recommendation = format_recommendation(direction, confidence, physics)
 
-          # Build complete signal
           signal = %{
             symbol: symbol,
             direction: direction,
             type: determine_signal_type(direction, confidence),
             confidence: confidence,
-            
-            # ========================================================================
-            # PHYSICS FIELDS
-            # ========================================================================
             physics: %{
               momentum: momentum,
               velocity: velocity,
               gravity: gravity,
+              atr_pct: atr_pct,
+              momentum_acceleration: momentum_acceleration,
               peak_time: peak_time,
               peak_price: peak_price,
               trajectory_angle: trajectory_angle,
               kinetic_energy: kinetic_energy,
               energy_state: energy_state,
-              current_price: current_price
+              current_price: current_price,
+              regime: regime
             },
-            
-            # ========================================================================
-            # PRICE LEVELS - CRITICAL FOR TRADING
-            # ========================================================================
             current_price: Decimal.from_float(current_price),
             entry_price: Decimal.from_float(entry_price),
             stop_loss: Decimal.from_float(stop_loss),
             take_profit: Decimal.from_float(take_profit),
-            
-            # ========================================================================
-            # ENHANCED FIELDS (Steps 2 & 3)
-            # ========================================================================
             balance_point: balance_point,
             distance_from_balance: current_price - balance_point,
             energy_zones: energy_zones,
-            
-            # ========================================================================
-            # PREDICTIONS
-            # ========================================================================
             predictions: %{
               "5m" => physics.prediction["5m"],
               "15m" => physics.prediction["15m"],
               "30m" => physics.prediction["30m"],
               "60m" => physics.prediction["60m"]
             },
-            
-            # ========================================================================
-            # ORDER FLOW (if available)
-            # ========================================================================
             order_flow: order_flow,
-            
-            # ========================================================================
-            # METADATA
-            # ========================================================================
             recommendation: recommendation,
             timestamp: DateTime.utc_now()
           }
 
           Logger.debug("""
-          ✅ Signal generated: #{signal.symbol} #{signal.direction}
-             Entry: $#{entry_price}
-             TP: $#{take_profit}
-             SL: $#{stop_loss}
-             Confidence: #{confidence}%
+          ✅ Signal: #{symbol} #{direction} conf=#{confidence}%
+             Entry: $#{Float.round(entry_price, 2)} | TP: $#{Float.round(take_profit, 2)} | SL: $#{Float.round(stop_loss, 2)}
+             Momentum: #{Float.round(momentum, 6)} | ATR: #{Float.round(atr_pct, 5)} | m/ATR: #{Float.round(abs(momentum) / max(atr_pct, 0.0001), 2)}x
           """)
 
           {:ok, signal}
-
         rescue
           e ->
             Logger.error("❌ Exception in signal generation: #{inspect(e)}")
@@ -127,73 +102,139 @@ defmodule TradeEngine.Physics.SignalGenerator do
         end
 
       {:error, reason} ->
-        Logger.error("❌ Physics analysis failed: #{reason}")
         {:error, reason}
     end
   end
 
   # ========================================================================
-  # DIRECTION & CONFIDENCE DETERMINATION
+  # DIRECTION & CONFIDENCE — Volatility-Relative
   # ========================================================================
 
-  defp determine_direction_and_confidence(physics) do
-    momentum = physics.momentum
-    gravity = physics.gravity
-    angle = physics.trajectory_angle
-    energy = physics.energy_state
+  defp determine_direction_and_confidence(momentum, gravity, angle, energy_state, atr_pct, momentum_acceleration, regime) do
+    # Momentum-to-ATR ratio: how many ATRs per candle is momentum moving?
+    # This is the core measure of signal strength
+    momentum_atr_ratio = abs(momentum) / max(atr_pct, 0.0001)
 
-    # Determine direction
-    direction = cond do
-      momentum > 0.0001 -> :long
-      momentum < -0.0001 -> :short
-      true -> :neutral
-    end
+    # Direction: require momentum > 0.3x ATR per candle to have a direction
+    # Keep threshold at 0.3 (data median MAR is 0.37 — 0.4 cuts 65% of signals)
+    # Instead, use MAR in scoring to penalize weak signals via confidence
+    direction =
+      cond do
+        momentum > atr_pct * 0.3 -> :long
+        momentum < -(atr_pct * 0.3) -> :short
+        true -> :neutral
+      end
 
-    # Base confidence
-    base_confidence = 50
+    # Confidence scoring — data-driven from 1133 trades across 6 assets, 12 months
+    #
+    # Key data insights:
+    # - Angle >= 75° = 40.4% WR vs < 75° = 44.8% WR → penalize steep angles
+    # - Gravity < 0.0003 = 40.0% WR (too thin/noisy) vs 0.0003-0.0005 = 44.0%
+    # - KE 0.5-1.0 = 45.1% WR (sweet spot), KE >= 5.0 = 55.6% WR (strong breakout)
+    # - KE 1.0-2.0 = 40.8% WR (overextended moderate)
+    # - Decelerating momentum = 41.5% WR vs accelerating = 43.6%
+    # - MAR 0.3-0.35 weakest, 0.5-0.7 best
 
-    # Momentum boost
-    speed = abs(momentum)
-    momentum_boost = cond do
-      speed > 0.01 -> 25
-      speed > 0.005 -> 15
-      speed > 0.001 -> 8
-      true -> 0
-    end
+    # 1. Momentum strength — data: MAR 0.5-0.7 = 45.7% WR, 0.3-0.5 = 43.1% (0-20 points)
+    # Penalize sub-0.35 MAR trades hard (weakest noise bucket)
+    momentum_score =
+      cond do
+        momentum_atr_ratio >= 3.0 -> -5    # Overextended — data shows mean reversion
+        momentum_atr_ratio >= 2.0 -> 5     # Strong but risky
+        momentum_atr_ratio >= 1.0 -> 15    # Good
+        momentum_atr_ratio >= 0.7 -> 20    # Sweet spot — best bucket in data
+        momentum_atr_ratio >= 0.5 -> 18    # Also strong
+        momentum_atr_ratio >= 0.4 -> 10    # Moderate
+        momentum_atr_ratio >= 0.35 -> 5    # Weak — barely above noise
+        true -> -5                          # Sub-0.35 — penalize, likely noise
+      end
 
-    # Angle boost
+    # 2. Gravity assessment — data shows 0.0003-0.001 is the productive range (0-20 points)
+    # Very low gravity (<0.0003) = 40% WR — too thin, erratic moves
+    # 0.0003-0.0005 = 44% WR — best. Moderate structure.
+    # >= 0.001 = insufficient data but high gravity = choppy
+    gravity_score =
+      cond do
+        gravity < 0.0003 -> 5     # Too low — erratic, no structure
+        gravity < 0.0005 -> 20    # Sweet spot — enough structure, not too resistant
+        gravity < 0.001 -> 12     # Moderate — acceptable
+        gravity < 0.002 -> 0      # High resistance
+        true -> -15               # Very high — strongly avoid
+      end
+
+    # 3. Momentum/gravity ratio — can the move sustain? (0-15 points)
+    mom_gravity_ratio = if gravity > 0, do: abs(momentum) / gravity, else: 0
+    sustainability_score =
+      cond do
+        mom_gravity_ratio >= 5.0 -> 15    # Momentum dominates gravity
+        mom_gravity_ratio >= 3.0 -> 10
+        mom_gravity_ratio >= 1.5 -> 5
+        true -> -5                         # Gravity dominates — likely stalls
+      end
+
+    # 4. Trajectory angle — data: angle < 75° = 44.8% WR, >= 75° = 40.4% WR
+    # Steep angles = overextended, moderate = sustainable
     abs_angle = abs(angle)
-    angle_boost = cond do
-      abs_angle >= 25 -> 15
-      abs_angle >= 20 -> 10
-      abs_angle >= 15 -> 5
-      true -> 0
-    end
+    angle_score =
+      cond do
+        abs_angle >= 75 -> -10    # Nearly vertical — data shows 40.4% WR, penalize hard
+        abs_angle >= 65 -> 0      # Steep but not extreme
+        abs_angle >= 45 -> 10     # Strong but sustainable — best zone
+        abs_angle >= 25 -> 8      # Moderate — good continuation
+        abs_angle >= 10 -> 4      # Gentle trend
+        true -> 0
+      end
 
-    # Energy boost
-    energy_boost = case energy do
-      :high -> 10
-      :medium -> 5
-      :low -> 0
-      _ -> 0
-    end
+    # 5. Energy state — data: KE 0.5-1.0 = 45.1%, KE <0.5 = 47.1%, KE 1.0-2.0 = 40.8%
+    # Lower energy actually performs better (less overextension)
+    energy_score =
+      case energy_state do
+        :high -> 0       # KE > 2.0 = 42-55% depending on extreme. Neutral.
+        :medium -> 8     # KE 0.5-2.0 range — decent
+        :low -> 10       # KE < 0.5 = 47.1% — best WR, not overextended
+        _ -> 0
+      end
 
-    # Gravity penalty
-    gravity_penalty = cond do
-      gravity > 0.01 -> -10
-      gravity > 0.005 -> -5
-      true -> 0
-    end
+    # 6. Momentum acceleration — penalty-only (−10 to +0 points)
+    # Data: decelerating = 41.5% vs accelerating = 43.6% — modest but real
+    acceleration_score =
+      cond do
+        # Acceleration opposing momentum — trend is DECELERATING
+        (momentum > 0 and momentum_acceleration < -0.00005) or
+          (momentum < 0 and momentum_acceleration > 0.00005) -> -10
 
-    # Calculate final confidence
-    confidence = base_confidence + momentum_boost + angle_boost + energy_boost + gravity_penalty
-    confidence = min(max(confidence, 10), 100)
+        # Everything else — no adjustment
+        true -> 0
+      end
+
+    # 7. Regime score — data: ranging = 28.6% WR, trending_up longs = 40.9%
+    # Counter-trend and ranging are clear losers
+    regime_type = if is_map(regime), do: regime.regime, else: :unknown
+
+    regime_score =
+      cond do
+        # Ranging market — 28.6% WR, strongly avoid
+        regime_type == :ranging -> -20
+        # Counter-trend trades — penalize
+        regime_type == :trending_up and direction == :short -> -10
+        regime_type == :trending_down and direction == :long -> -10
+        # Everything else — no boost
+        true -> 0
+      end
+
+    # 8. Neutral penalty
+    neutral_penalty = if direction == :neutral, do: -25, else: 0
+
+    base = 25
+    confidence = base + momentum_score + gravity_score + sustainability_score +
+                 angle_score + energy_score + acceleration_score + regime_score + neutral_penalty
+    confidence = min(max(confidence, 5), 95)
 
     {direction, confidence}
   end
 
   # ========================================================================
-  # SIGNAL TYPE DETERMINATION
+  # SIGNAL TYPE
   # ========================================================================
 
   defp determine_signal_type(direction, confidence) do
@@ -209,111 +250,106 @@ defmodule TradeEngine.Physics.SignalGenerator do
   end
 
   # ========================================================================
-  # LEVEL CALCULATIONS
+  # LEVEL CALCULATIONS — ATR-based
   # ========================================================================
 
-  defp calculate_levels(current_price, direction, peak_price, momentum, gravity) do
-    # Ensure we have valid numbers
-    current_price = if is_number(current_price), do: current_price, else: 0.0
-    peak_price = if is_number(peak_price), do: peak_price, else: current_price
-    
-    # Prevent division by zero and invalid prices
-    current_price = max(current_price, 0.00001)
-    peak_price = max(peak_price, 0.00001)
+  defp calculate_levels(current_price, direction, peak_price, atr_pct) do
+    current_price = if is_number(current_price), do: max(current_price, 0.00001), else: 0.00001
+    peak_price = if is_number(peak_price), do: max(peak_price, 0.00001), else: current_price
+    atr_pct = if is_number(atr_pct) and atr_pct > 0, do: atr_pct, else: 0.005
+
+    # ATR-based levels — data shows 27% of SL hits in first 10min (noise stops)
+    # Widening SL from 1.2x to 1.5x ATR gives trades room to breathe
+    # R:R at 1.8x balances hit rate vs payoff (2.0x too aggressive, 1.5x too thin)
+    sl_distance = current_price * atr_pct * 1.5
+    min_tp_distance = sl_distance * 1.8
 
     case direction do
       :long ->
-        # Long entry: at current, SL below, TP at peak
         entry = current_price
-        stop_loss = current_price * 0.98
-        take_profit = peak_price * 0.96
+        stop_loss = current_price - sl_distance
+        # TP at peak, but enforce minimum R:R
+        take_profit = if peak_price > entry do
+          max(peak_price, entry + min_tp_distance)
+        else
+          entry + min_tp_distance
+        end
         {entry, stop_loss, take_profit}
 
       :short ->
-        # Short entry: at current, SL above, TP at trough (peak for shorts is trough)
         entry = current_price
-        stop_loss = current_price * 1.02
-        take_profit = peak_price  # Already the trough after peak price fix
+        stop_loss = current_price + sl_distance
+        # TP at trough, but enforce minimum R:R
+        take_profit = if peak_price < entry do
+          min(peak_price, entry - min_tp_distance)
+        else
+          entry - min_tp_distance
+        end
         {entry, stop_loss, take_profit}
 
       :neutral ->
-        # Neutral: tight stop/profit
         entry = current_price
-        stop_loss = current_price * 0.99
-        take_profit = current_price * 1.01
+        stop_loss = current_price - sl_distance
+        take_profit = current_price + sl_distance
         {entry, stop_loss, take_profit}
     end
   end
 
   # ========================================================================
-  # BALANCE POINT CALCULATION
+  # BALANCE POINT
   # ========================================================================
 
   defp calculate_balance_point(current_price, momentum, gravity) do
     if gravity > 0 and is_number(current_price) do
-      peak_distance = (momentum ** 2) / (2 * gravity)
+      peak_distance_pct = momentum ** 2 / (2 * gravity)
 
-      balance = if momentum >= 0 do
-        current_price + (peak_distance / 2)
-      else
-        current_price - (peak_distance / 2)
-      end
-      balance = max(balance, current_price * 0.5)
-      balance = min(balance, current_price * 2.0)
+      balance =
+        if momentum >= 0 do
+          current_price * (1 + peak_distance_pct / 2)
+        else
+          current_price * (1 - peak_distance_pct / 2)
+        end
+
+      balance = max(balance, current_price * 0.9)
+      balance = min(balance, current_price * 1.1)
       Float.round(balance, 2)
     else
       current_price
     end
   end
 
-
-
-
-  # Fix 2: Clamp predictions to prevent negatives
-  defp predict_at_time(p0, v0, g, t) when t >= 0 do
-    prediction = p0 + (v0 * t) - (0.5 * g * (t ** 2))
-    
-    # ✅ NEW: Floor at minimum valid price
-    prediction = max(prediction, 0.0001)
-    
-    Float.round(prediction, 2)
-  end
   # ========================================================================
-  # ENERGY ZONE CLASSIFICATION
+  # ENERGY ZONES
   # ========================================================================
 
   defp classify_energy_zones(physics, balance_point, current_price) do
     momentum = physics.momentum
-    gravity = physics.gravity
     peak_price = physics.peak_price
     kinetic_energy = physics.kinetic_energy
 
     peak_distance = abs(peak_price - current_price)
-
-    # Avoid division by zero
     peak_distance = if peak_distance < 0.00001, do: 0.00001, else: peak_distance
 
-    injection_boundary = if momentum > 0 do
-      current_price + (peak_distance * 0.33)
-    else
-      current_price - (peak_distance * 0.33)
-    end
+    injection_boundary =
+      if momentum > 0,
+        do: current_price + peak_distance * 0.33,
+        else: current_price - peak_distance * 0.33
 
-    peak_boundary = if momentum > 0 do
-      current_price + (peak_distance * 0.67)
-    else
-      current_price - (peak_distance * 0.67)
-    end
+    peak_boundary =
+      if momentum > 0,
+        do: current_price + peak_distance * 0.67,
+        else: current_price - peak_distance * 0.67
 
-    current_zone = cond do
-      momentum > 0 and current_price < injection_boundary -> :injection
-      momentum > 0 and current_price < peak_boundary -> :rising
-      momentum > 0 and current_price < peak_price -> :peaking
-      momentum < 0 and current_price > injection_boundary -> :injection
-      momentum < 0 and current_price > peak_boundary -> :falling
-      momentum < 0 and current_price > peak_price -> :bottoming
-      true -> :neutral
-    end
+    current_zone =
+      cond do
+        momentum > 0 and current_price < injection_boundary -> :injection
+        momentum > 0 and current_price < peak_boundary -> :rising
+        momentum > 0 and current_price < peak_price -> :peaking
+        momentum < 0 and current_price > injection_boundary -> :injection
+        momentum < 0 and current_price > peak_boundary -> :falling
+        momentum < 0 and current_price > peak_price -> :bottoming
+        true -> :neutral
+      end
 
     %{
       current_zone: current_zone,
@@ -333,7 +369,7 @@ defmodule TradeEngine.Physics.SignalGenerator do
   end
 
   # ========================================================================
-  # RECOMMENDATION FORMATTING
+  # RECOMMENDATION
   # ========================================================================
 
   defp format_recommendation(direction, confidence, physics) do
@@ -344,49 +380,20 @@ defmodule TradeEngine.Physics.SignalGenerator do
     case direction do
       :long ->
         if confidence >= 70 do
-          """
-          ✅ STRONG LONG SIGNAL
-          ├─ Momentum: #{Float.round(momentum, 6)} (positive, uptrend)
-          ├─ Angle: #{angle}° (trajectory steep)
-          ├─ Energy: #{energy} (potential strong)
-          ├─ Confidence: #{confidence}%
-          └─ Action: BUY at current, target peak
-          """
+          "STRONG LONG | momentum=#{Float.round(momentum, 6)} angle=#{angle}° energy=#{energy} conf=#{confidence}%"
         else
-          """
-          🟢 MODERATE LONG SIGNAL
-          ├─ Momentum: #{Float.round(momentum, 6)}
-          ├─ Confidence: #{confidence}%
-          └─ Action: Consider entry with caution
-          """
+          "MODERATE LONG | momentum=#{Float.round(momentum, 6)} conf=#{confidence}%"
         end
 
       :short ->
         if confidence >= 70 do
-          """
-          ❌ STRONG SHORT SIGNAL
-          ├─ Momentum: #{Float.round(momentum, 6)} (negative, downtrend)
-          ├─ Angle: #{angle}° (trajectory steep downward)
-          ├─ Energy: #{energy}
-          ├─ Confidence: #{confidence}%
-          └─ Action: SHORT/MARGIN CALL, target trough
-          """
+          "STRONG SHORT | momentum=#{Float.round(momentum, 6)} angle=#{angle}° energy=#{energy} conf=#{confidence}%"
         else
-          """
-          🔴 MODERATE SHORT SIGNAL
-          ├─ Momentum: #{Float.round(momentum, 6)}
-          ├─ Confidence: #{confidence}%
-          └─ Action: Consider short with caution
-          """
+          "MODERATE SHORT | momentum=#{Float.round(momentum, 6)} conf=#{confidence}%"
         end
 
       :neutral ->
-        """
-        ➖ NEUTRAL SIGNAL
-        ├─ Momentum: Near zero
-        ├─ Confidence: #{confidence}%
-        └─ Action: WAIT for clarity
-        """
+        "NEUTRAL — no clear direction | momentum=#{Float.round(momentum, 6)} conf=#{confidence}%"
     end
   end
 end

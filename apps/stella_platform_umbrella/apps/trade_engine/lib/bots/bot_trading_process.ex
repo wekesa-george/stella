@@ -16,7 +16,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   require Logger
 
   alias TradeEngine.Bots.{BotRegistry, BotLogger}
-  alias TradeEngine.Exchanges.Executor
+  alias TradeEngine.Exchanges.{Executor, HealthMonitor}
   alias TradeEngine.Trading.{OrderManager, Position}
   alias TradeEngine.Risk.{AssetTierManager, VirtualBalanceManager}
   alias TradeEngine.Strategies.Behaviour, as: StrategyBehaviour
@@ -468,33 +468,62 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     balance = get_balance(state)
     context = build_strategy_context(state, signal.symbol)
 
-    if balance <= 0 do
-      {:error, :no_balance}
-    else
-      # Normalize symbol to Binance format for tier check (tier lists use "BTCUSDT" format)
-      base_pair = signal.symbol |> String.split(":") |> List.first()
-      tier_symbol = base_pair |> String.replace("/", "") |> String.upcase()
-      tier_symbol = tier_symbol |> String.split("_") |> List.first()
-      tier_symbol = if String.ends_with?(tier_symbol, "USDT"), do: tier_symbol, else: tier_symbol <> "T"
+    cond do
+      balance <= 0 ->
+        {:error, :no_balance}
 
-      # Use DB-backed tier check via adapter code (falls back to hardcoded if no DB config)
-      config = AssetTierManager.get_config_by_code("binance")
-      allowed = AssetTierManager.is_allowed_by_code?(tier_symbol, balance, "binance")
-      Logger.info("[BotTrading] Tier check: symbol=#{tier_symbol} balance=$#{Float.round(balance, 2)} allowed=#{allowed} | thresholds=#{inspect(config.tier_thresholds)} | tier_assets=#{inspect(Map.values(config.tier_assets) |> List.flatten() |> Enum.member?(tier_symbol))}")
+      # Exchange health gate: block trades if exchange is disconnected
+      check_exchange_health() != :ok ->
+        Logger.warning("[BotTrading] Exchange disconnected — halting trade")
+        {:error, :exchange_disconnected}
 
-      if not allowed do
-        account_tier = AssetTierManager.get_account_tier_by_code(balance, "binance")
-        Logger.warning("[BotTrading] ❌ ASSET BLOCKED: #{tier_symbol} | balance=$#{Float.round(balance, 2)} account_tier=#{account_tier} | allocated_capital=#{state.allocated_capital} | bot=#{state.bot_id}")
-        {:error, :asset_not_in_tier}
-      else
-        case Executor.get_price(state.credential_id, signal.symbol, market_type: state.market_type) do
-          {:ok, price} ->
-            current_price = Decimal.to_float(price)
-            execute_with_strategy(signal, state, strategy, context, current_price)
-          _ ->
-            {:error, :price_error}
+      true ->
+        # Normalize symbol to Binance format for tier check (tier lists use "BTCUSDT" format)
+        base_pair = signal.symbol |> String.split(":") |> List.first()
+        tier_symbol = base_pair |> String.replace("/", "") |> String.upcase()
+        tier_symbol = tier_symbol |> String.split("_") |> List.first()
+        tier_symbol = if String.ends_with?(tier_symbol, "USDT"), do: tier_symbol, else: tier_symbol <> "T"
+
+        # Use DB-backed tier check via adapter code (falls back to hardcoded if no DB config)
+        config = AssetTierManager.get_config_by_code("binance")
+        allowed = AssetTierManager.is_allowed_by_code?(tier_symbol, balance, "binance")
+        Logger.info("[BotTrading] Tier check: symbol=#{tier_symbol} balance=$#{Float.round(balance, 2)} allowed=#{allowed} | thresholds=#{inspect(config.tier_thresholds)} | tier_assets=#{inspect(Map.values(config.tier_assets) |> List.flatten() |> Enum.member?(tier_symbol))}")
+
+        if not allowed do
+          account_tier = AssetTierManager.get_account_tier_by_code(balance, "binance")
+          Logger.warning("[BotTrading] ❌ ASSET BLOCKED: #{tier_symbol} | balance=$#{Float.round(balance, 2)} account_tier=#{account_tier} | allocated_capital=#{state.allocated_capital} | bot=#{state.bot_id}")
+          {:error, :asset_not_in_tier}
+        else
+          # Stale price guard: verify we have a fresh price before trading
+          case get_fresh_price(state.credential_id, signal.symbol, state.market_type) do
+            {:ok, price} ->
+              current_price = Decimal.to_float(price)
+
+              # Pre-trade balance verification against exchange
+              case verify_exchange_balance(state.credential_id, signal.symbol, balance, signal.direction, current_price) do
+                {:error, :insufficient_balance, details} ->
+                  Logger.warning("[BotTrading] Insufficient exchange balance: need #{details.required}, have #{details.available} #{details.asset}")
+                  {:error, :insufficient_exchange_balance}
+
+                _ ->
+                  # Pre-entry correlation/concentration check
+                  case TradeEngine.Risk.CorrelationMonitor.can_open?(signal.symbol, signal.direction, current_price * 100) do
+                    :ok ->
+                      execute_with_strategy(signal, state, strategy, context, current_price)
+                    {:blocked, reason} ->
+                      Logger.warning("[BotTrading] Blocked by correlation monitor: #{reason}")
+                      {:error, :correlation_blocked}
+                  end
+              end
+
+            {:error, :stale_price} ->
+              Logger.warning("[BotTrading] Stale price for #{signal.symbol} — skipping trade")
+              {:error, :stale_price}
+
+            _ ->
+              {:error, :price_error}
+          end
         end
-      end
     end
   end
 
@@ -547,7 +576,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             position_id: position_id,
             confidence: signal.confidence,
             peak_price: impulse_target,
-            peak_time: max_hold
+            peak_time: max_hold,
+            expected_price: current_price
           ]
 
           # Reserve virtual balance
@@ -715,6 +745,134 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       :long -> (exit_price - pos.entry_price) * pos.quantity
       :short -> (pos.entry_price - exit_price) * pos.quantity
       _ -> 0.0
+    end
+  end
+
+  # ========================================================================
+  # STALE PRICE GUARD
+  # ========================================================================
+
+  @max_price_age_ms 60_000  # 60 seconds — reject trades with older prices
+
+  defp check_exchange_health do
+    case HealthMonitor.get_health("binance") do
+      {:ok, %{status: "healthy"}} -> :ok
+      {:ok, %{status: "degraded"}} ->
+        Logger.warning("[BotTrading] Exchange degraded — proceeding with caution")
+        :ok
+      {:ok, %{status: "disconnected"}} -> {:error, :exchange_disconnected}
+      {:error, :not_found} -> :ok  # Monitor not tracking this exchange yet
+      {:error, :not_started} -> :ok  # Monitor hasn't started yet
+      _ -> :ok
+    end
+  rescue
+    _ -> :ok  # Don't block trading if health check itself fails
+  end
+
+  defp verify_exchange_balance(credential_id, symbol, quantity, side, current_price) do
+    # Use Executor.get_balance instead of legacy BinanceClient
+    market_type = "spot"
+    case Executor.get_balance(credential_id, market_type: market_type) do
+      {:ok, balance_data} ->
+        assets = balance_data[:assets] || []
+
+        case side do
+          :long ->
+            # Buying: need quote currency (USDT)
+            usdt = Enum.find(assets, fn a ->
+              asset_name = to_string(a[:asset] || a["asset"] || "")
+              String.upcase(asset_name) == "USDT"
+            end)
+            available = parse_balance(usdt[:wallet_balance] || usdt["wallet_balance"] || 0)
+            required = quantity * current_price
+
+            if available >= required do
+              {:ok, %{required: required, available: available}}
+            else
+              {:error, :insufficient_balance, %{required: required, available: available, asset: "USDT"}}
+            end
+
+          :short ->
+            # Selling: need base currency
+            norm = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+            base = Enum.find_value(["USDT", "USDC", "BUSD"], norm, fn q ->
+              if String.ends_with?(norm, q), do: String.replace_suffix(norm, q, "")
+            end)
+
+            asset = Enum.find(assets, fn a ->
+              asset_name = to_string(a[:asset] || a["asset"] || "")
+              String.upcase(asset_name) == base
+            end)
+            available = parse_balance(asset[:wallet_balance] || asset["wallet_balance"] || 0)
+
+            if available >= quantity do
+              {:ok, %{required: quantity, available: available, asset: base}}
+            else
+              {:error, :insufficient_balance, %{required: quantity, available: available, asset: base}}
+            end
+
+          _ -> {:ok, %{}}
+        end
+
+      {:error, _reason} ->
+        # Can't verify — proceed with trade (don't block on balance check failure)
+        {:ok, %{}}
+    end
+  rescue
+    _ -> {:ok, %{}}
+  end
+
+  defp parse_balance(v) when is_number(v), do: v * 1.0
+  defp parse_balance(v) when is_binary(v) do
+    case Float.parse(v) do
+      {f, _} -> f
+      :error -> 0.0
+    end
+  end
+  defp parse_balance(%Decimal{} = d), do: Decimal.to_float(d)
+  defp parse_balance(_), do: 0.0
+
+  defp get_fresh_price(credential_id, symbol, market_type) do
+    # Try ETS cache first and check freshness
+    norm = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+
+    cached_result = try do
+      case :ets.lookup(:binance_ticker_cache, norm) do
+        [{_, %{last_price: p, updated_at: ts}}] when is_number(p) ->
+          age = System.system_time(:millisecond) - ts
+          if age < @max_price_age_ms, do: {:ok, p, age}, else: {:stale, age}
+
+        [{_, %{"last_price" => p}}] when is_number(p) ->
+          # No timestamp — treat as potentially stale, fall through to REST
+          {:no_ts, p}
+
+        _ -> :miss
+      end
+    rescue
+      _ -> :miss
+    end
+
+    case cached_result do
+      {:ok, price, _age} ->
+        {:ok, Decimal.from_float(price)}
+
+      {:stale, age} ->
+        Logger.warning("[BotTrading] ETS price for #{norm} is #{div(age, 1000)}s old — fetching fresh from REST")
+        fetch_rest_price(credential_id, symbol, market_type)
+
+      {:no_ts, _price} ->
+        # No timestamp in cache — fetch fresh to be safe
+        fetch_rest_price(credential_id, symbol, market_type)
+
+      :miss ->
+        fetch_rest_price(credential_id, symbol, market_type)
+    end
+  end
+
+  defp fetch_rest_price(credential_id, symbol, market_type) do
+    case Executor.get_price(credential_id, symbol, market_type: market_type) do
+      {:ok, price} -> {:ok, price}
+      error -> error
     end
   end
 

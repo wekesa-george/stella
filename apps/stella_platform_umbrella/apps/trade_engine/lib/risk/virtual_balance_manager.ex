@@ -34,6 +34,8 @@ defmodule TradeEngine.Risk.VirtualBalanceManager do
   require Logger
 
   @ets_table :virtual_balances
+  @cleanup_interval_ms 300_000  # 5 minutes
+  @max_position_age_hours 48    # Positions older than 48h are considered stale
 
   # ============================================================================
   # CLIENT API
@@ -221,9 +223,12 @@ defmodule TradeEngine.Risk.VirtualBalanceManager do
   def init(_opts) do
     # Create ETS table for fast lookups
     :ets.new(@ets_table, [:named_table, :public, :set, read_concurrency: true])
-    
+
+    # Schedule periodic cleanup of stale position reservations
+    Process.send_after(self(), :cleanup_stale_positions, @cleanup_interval_ms)
+
     Logger.info("💰 VirtualBalanceManager started")
-    
+
     {:ok, %{}}
   end
 
@@ -344,5 +349,95 @@ defmodule TradeEngine.Risk.VirtualBalanceManager do
   end
 
   @impl true
+  def handle_info(:cleanup_stale_positions, state) do
+    Process.send_after(self(), :cleanup_stale_positions, @cleanup_interval_ms)
+    cleanup_stale_positions()
+    {:noreply, state}
+  end
+
   def handle_info(_, state), do: {:noreply, state}
+
+  # ============================================================================
+  # STALE POSITION CLEANUP
+  # ============================================================================
+
+  defp cleanup_stale_positions do
+    now = DateTime.utc_now()
+    cutoff = DateTime.add(now, -@max_position_age_hours * 3600, :second)
+
+    # Check each user's positions map for stale entries
+    :ets.tab2list(@ets_table)
+    |> Enum.each(fn {user_id, info} ->
+      # Find position IDs that are stale (reserved but position no longer open in DB)
+      stale_ids = info.positions
+      |> Map.keys()
+      |> Enum.filter(fn pos_id ->
+        # Check if position is still open in DB
+        case check_position_status(pos_id) do
+          :open -> false
+          :closed -> true
+          :not_found -> true
+          :error -> false  # Don't clean up if we can't check
+        end
+      end)
+
+      if stale_ids != [] do
+        # Release all stale reservations back to available balance
+        total_released = Enum.reduce(stale_ids, 0.0, fn pos_id, acc ->
+          acc + Map.get(info.positions, pos_id, 0.0)
+        end)
+
+        new_positions = Map.drop(info.positions, stale_ids)
+        new_info = %{info |
+          available: info.available + total_released,
+          reserved: max(0.0, info.reserved - total_released),
+          positions: new_positions,
+          updated_at: now
+        }
+
+        :ets.insert(@ets_table, {user_id, new_info})
+        Logger.warning("VirtualBalanceManager: cleaned #{length(stale_ids)} stale positions for user #{user_id}, released $#{Float.round(total_released, 2)}")
+      end
+
+      # Also cap the positions map size as a safety valve
+      if map_size(info.positions) > 500 do
+        Logger.warning("VirtualBalanceManager: user #{user_id} has #{map_size(info.positions)} position entries — forcing cleanup of oldest")
+
+        # Keep only the 200 most recent (by position_id sort as proxy)
+        kept = info.positions
+        |> Enum.sort_by(fn {_id, _amt} -> :rand.uniform() end)
+        |> Enum.take(200)
+        |> Map.new()
+
+        released_amount = Enum.reduce(Map.drop(info.positions, Map.keys(kept)), 0.0, fn {_id, amt}, acc -> acc + amt end)
+
+        new_info = %{info |
+          available: info.available + released_amount,
+          reserved: max(0.0, info.reserved - released_amount),
+          positions: kept,
+          updated_at: now
+        }
+
+        :ets.insert(@ets_table, {user_id, new_info})
+      end
+    end)
+  rescue
+    e -> Logger.warning("VirtualBalanceManager cleanup error: #{Exception.message(e)}")
+  end
+
+  defp check_position_status(position_id) do
+    import Ecto.Query
+    alias TradeEngine.Trading.Position
+
+    case TradeEngine.Repo.one(
+      from(p in Position, where: p.id == ^position_id, select: p.status),
+      timeout: 5_000
+    ) do
+      nil -> :not_found
+      "open" -> :open
+      _ -> :closed
+    end
+  rescue
+    _ -> :error
+  end
 end

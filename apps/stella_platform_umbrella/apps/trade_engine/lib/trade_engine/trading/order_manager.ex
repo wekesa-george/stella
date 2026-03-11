@@ -19,6 +19,7 @@ defmodule TradeEngine.Trading.OrderManager do
 
   alias TradeEngine.Repo
   alias TradeEngine.Trading.Order
+  alias TradeEngine.Trading.Transaction
   alias TradeEngine.Exchanges.Executor
 
   @pubsub TradeEngine.PubSub
@@ -126,6 +127,9 @@ defmodule TradeEngine.Trading.OrderManager do
       :close_short -> "buy"
     end
 
+    # Capture expected price for slippage tracking
+    expected_price = Keyword.get(opts, :expected_price) || fetch_current_price(credential_id, symbol, opts)
+
     order_attrs = %{
       symbol: symbol,
       side: side,
@@ -142,7 +146,8 @@ defmodule TradeEngine.Trading.OrderManager do
         action: to_string(action),
         market_type: Keyword.get(opts, :market_type, "spot"),
         manual: Keyword.get(opts, :manual, false),
-        confidence: Keyword.get(opts, :confidence)
+        confidence: Keyword.get(opts, :confidence),
+        expected_price: expected_price
       }
     }
 
@@ -181,18 +186,44 @@ defmodule TradeEngine.Trading.OrderManager do
     exchange_order_id = result[:order_id]
     now = DateTime.utc_now()
 
+    # Calculate slippage in basis points
+    expected_price = deep_get(order.metadata || %{}, ["expected_price"])
+    slippage_bps = compute_slippage_bps(expected_price, executed_price)
+
+    # Merge slippage data into metadata
+    slippage_meta = if slippage_bps do
+      %{"slippage_bps" => slippage_bps, "expected_price" => expected_price}
+    else
+      %{}
+    end
+
+    # Detect partial fills: if executed_qty < order.quantity, mark as partially_filled
+    order_qty = safe_decimal_to_float(order.quantity)
+    status = if executed_qty > 0 and executed_qty < order_qty * 0.99 do
+      "partially_filled"
+    else
+      "filled"
+    end
+
+    remaining = if status == "partially_filled", do: to_decimal(order_qty - executed_qty), else: Decimal.new(0)
+
     update_attrs = %{
-      status: "filled",
+      status: status,
       execution_price: to_decimal(executed_price),
       filled_quantity: to_decimal(executed_qty),
+      remaining_quantity: remaining,
       execution_time: now,
       first_fill_at: now,
       exchange_order_id: to_string(exchange_order_id || ""),
-      exchange_response: sanitize_exchange_response(result)
+      exchange_response: sanitize_exchange_response(result),
+      metadata: Map.merge(order.metadata || %{}, slippage_meta)
     }
 
     case Repo.update(Order.changeset(order, update_attrs)) do
       {:ok, filled_order} ->
+        # Record fill in trading.fills table
+        record_fill(filled_order, executed_price, executed_qty, exchange_order_id, result)
+
         broadcast({:order_filled, filled_order})
         broadcast_bot(filled_order.bot_id, {:order_filled, filled_order})
         {:ok, result}
@@ -221,6 +252,51 @@ defmodule TradeEngine.Trading.OrderManager do
 
     {:error, reason}
   end
+
+  defp record_fill(order, executed_price, executed_qty, exchange_order_id, result) do
+    action = deep_get(order.metadata || %{}, ["action"]) || order.side
+
+    fill_attrs = %{
+      transaction_type: "trade",
+      symbol: order.symbol,
+      direction: order.side,
+      action: action,
+      quantity: to_decimal(executed_qty),
+      price: to_decimal(executed_price),
+      amount: to_decimal((executed_qty || 0) * (executed_price || 0)),
+      order_id: to_string(exchange_order_id || ""),
+      status: "completed",
+      executed_at: DateTime.utc_now(),
+      exchange: "binance",
+      user_id: order.user_id,
+      position_id: order.position_id,
+      fee_amount: to_decimal(result[:commission] || result[:fee] || 0),
+      fee_asset: result[:commission_asset] || result[:fee_asset],
+      description: "#{action} #{order.symbol} qty=#{executed_qty}"
+    }
+
+    # Also set entry_price for exit fills (enables P&L calc in Transaction schema)
+    fill_attrs = if action in ["close_long", "close_short", "exit"] do
+      entry_price = deep_get(order.metadata || %{}, ["entry_price"])
+      Map.put(fill_attrs, :entry_price, to_decimal(entry_price))
+    else
+      fill_attrs
+    end
+
+    case Repo.insert(Transaction.changeset(%Transaction{}, fill_attrs)) do
+      {:ok, fill} ->
+        Phoenix.PubSub.broadcast(@pubsub, "fills:updates", {:fill_recorded, fill})
+      {:error, err} ->
+        Logger.warning("OrderManager: failed to record fill: #{inspect(err)}")
+    end
+  rescue
+    e -> Logger.warning("OrderManager: fill record error: #{Exception.message(e)}")
+  end
+
+  defp safe_decimal_to_float(nil), do: 0.0
+  defp safe_decimal_to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp safe_decimal_to_float(n) when is_number(n), do: n * 1.0
+  defp safe_decimal_to_float(_), do: 0.0
 
   defp broadcast(msg) do
     Phoenix.PubSub.broadcast(@pubsub, "orders:updates", msg)
@@ -254,4 +330,60 @@ defmodule TradeEngine.Trading.OrderManager do
   defp sanitize_value(v) when is_function(v), do: "function"
   defp sanitize_value(%Decimal{} = d), do: Decimal.to_float(d)
   defp sanitize_value(v), do: v
+
+  defp fetch_current_price(credential_id, symbol, opts) do
+    market_type = Keyword.get(opts, :market_type, "spot")
+
+    # Try ETS cache first (fastest)
+    cached = try do
+      norm = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+      case :ets.lookup(:binance_ticker_cache, norm) do
+        [{_, %{last_price: p}}] when is_number(p) -> p
+        [{_, %{"last_price" => p}}] when is_number(p) -> p
+        _ -> nil
+      end
+    rescue
+      _ -> nil
+    end
+
+    if cached do
+      cached
+    else
+      case Executor.get_price(credential_id, symbol, market_type: market_type) do
+        {:ok, price} when is_number(price) -> price * 1.0
+        {:ok, %Decimal{} = d} -> Decimal.to_float(d)
+        _ -> nil
+      end
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp compute_slippage_bps(nil, _), do: nil
+  defp compute_slippage_bps(_, nil), do: nil
+  defp compute_slippage_bps(expected, actual) do
+    exp = to_float(expected)
+    act = to_float(actual)
+
+    if exp > 0 and act > 0 do
+      Float.round(abs(act - exp) / exp * 10_000, 2)
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp to_float(n) when is_float(n), do: n
+  defp to_float(n) when is_integer(n), do: n * 1.0
+  defp to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp to_float(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, _} -> f
+      :error -> 0.0
+    end
+  end
+  defp to_float(_), do: 0.0
+
+  defp deep_get(map, [key]) when is_map(map), do: Map.get(map, key)
+  defp deep_get(map, [key | rest]) when is_map(map), do: deep_get(Map.get(map, key, %{}), rest)
+  defp deep_get(_, _), do: nil
 end

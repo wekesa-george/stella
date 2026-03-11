@@ -156,17 +156,17 @@ defmodule TradeEngine.MarketData.CandlePersister do
   # Convert a Candle struct from KlineStream into a map suitable for persistence
   defp candle_to_persist_map(%{} = candle) do
     %{
-      time: candle[:timestamp] || candle.timestamp,
-      exchange_code: to_string(candle[:exchange] || candle.exchange || "binance"),
-      trading_pair: candle[:symbol] || candle.symbol,
-      open: candle[:open] || candle.open,
-      high: candle[:high] || candle.high,
-      low: candle[:low] || candle.low,
-      close: candle[:close] || candle.close,
-      volume: candle[:volume] || candle.volume || 0,
-      quote_volume: candle[:quote_volume] || candle.quote_volume || 0,
-      trade_count: candle[:trade_count] || candle.trade_count || 0,
-      is_complete: candle[:closed] || candle.closed || true
+      time: Map.get(candle, :timestamp),
+      exchange_code: to_string(Map.get(candle, :exchange, "binance")),
+      trading_pair: Map.get(candle, :symbol),
+      open: Map.get(candle, :open),
+      high: Map.get(candle, :high),
+      low: Map.get(candle, :low),
+      close: Map.get(candle, :close),
+      volume: Map.get(candle, :volume, 0),
+      quote_volume: Map.get(candle, :quote_volume, 0),
+      trade_count: Map.get(candle, :trade_count, 0),
+      is_complete: Map.get(candle, :closed, true)
     }
   end
 

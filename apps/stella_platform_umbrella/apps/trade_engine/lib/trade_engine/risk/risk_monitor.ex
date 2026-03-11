@@ -61,7 +61,7 @@ defmodule TradeEngine.Risk.RiskMonitor do
     limits = load_risk_limits()
     running_bots = get_running_bots()
 
-    Enum.reduce(running_bots, state, fn bot, st ->
+    state = Enum.reduce(running_bots, state, fn bot, st ->
       case check_bot_risk(bot, limits) do
         :ok ->
           st
@@ -75,10 +75,39 @@ defmodule TradeEngine.Risk.RiskMonitor do
           }
       end
     end)
+
+    # Correlation risk check across all positions
+    check_correlation_risk()
+
+    state
   rescue
     e ->
       Logger.warning("RiskMonitor error: #{Exception.message(e)}")
       state
+  end
+
+  defp check_correlation_risk do
+    case TradeEngine.Risk.CorrelationMonitor.assess() do
+      :ok ->
+        :ok
+
+      {:breach, details} ->
+        Logger.warning("Correlation risk breach: #{inspect(details.breaches)}")
+        Enum.each(details.breaches, fn breach ->
+          Phoenix.PubSub.broadcast(@pubsub, "alerts:new", {:new_alert, %{
+            id: Ecto.UUID.generate(),
+            alert_type: "correlation",
+            category: "risk",
+            severity: breach.severity,
+            title: "Correlation Risk: #{breach.type}",
+            message: breach.reason,
+            metadata: breach,
+            timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+          }})
+        end)
+    end
+  rescue
+    e -> Logger.warning("Correlation check error: #{Exception.message(e)}")
   end
 
   defp check_bot_risk(bot, limits) do

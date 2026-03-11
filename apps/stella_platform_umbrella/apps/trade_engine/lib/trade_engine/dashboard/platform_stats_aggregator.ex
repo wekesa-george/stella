@@ -63,6 +63,7 @@ defmodule TradeEngine.Dashboard.PlatformStatsAggregator do
       capital: capital,
       total_equity: capital.total_capital + pnl.total_realized,
       open_positions: position_stats_count(),
+      risk: risk_stats(),
       collected_at: DateTime.utc_now() |> DateTime.to_iso8601()
     }
   rescue
@@ -164,6 +165,30 @@ defmodule TradeEngine.Dashboard.PlatformStatsAggregator do
     Repo.one(from(p in Position, where: p.status == "open", select: count(p.id)), timeout: 5_000) || 0
   rescue
     _ -> 0
+  end
+
+  defp risk_stats do
+    %{
+      circuit_breaker: safe_call(fn -> TradeEngine.Risk.PlatformCircuitBreaker.status() end, %{}),
+      reconciler: safe_call(fn -> TradeEngine.Risk.PositionReconciler.stats() end, %{}),
+      slippage: safe_call(fn -> TradeEngine.Risk.SlippageMonitor.stats() end, %{}),
+      correlation: safe_call(fn -> TradeEngine.Risk.CorrelationMonitor.stats() end, %{}),
+      credential_health: safe_call(fn -> TradeEngine.Exchanges.Executor.credential_health_stats() end, %{}),
+      exchange_health: safe_call(fn ->
+        case TradeEngine.Exchanges.HealthMonitor.get_health("binance") do
+          {:ok, data} -> data
+          _ -> %{status: "unknown"}
+        end
+      end, %{status: "unknown"})
+    }
+  rescue
+    _ -> %{}
+  end
+
+  defp safe_call(fun, default) do
+    fun.()
+  rescue
+    _ -> default
   end
 
   defp decimal_to_float(nil), do: 0.0
