@@ -490,9 +490,11 @@ function EquityTooltip({ active, payload }: any) {
   const val = payload[0].value;
   const startVal = payload[0]?.payload?.startVal ?? val;
   const diff = val - startVal;
+  const ts = payload[0]?.payload?.t;
+  const timeLabel = ts ? new Date(ts).toLocaleString([], { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "";
   return (
     <div style={{ background:"var(--bg1)", border:"1px solid var(--border2)", borderRadius:3, padding:"6px 10px", fontFamily:"var(--mono)", fontSize:9 }}>
-      <div style={{ color:"var(--text2)", marginBottom:2 }}>{payload[0]?.payload?.t}</div>
+      <div style={{ color:"var(--text2)", marginBottom:2 }}>{timeLabel}</div>
       <div style={{ color: diff >= 0 ? "var(--green)" : "var(--red)", fontWeight:600 }}>${val.toFixed(2)}</div>
       <div style={{ color: diff >= 0 ? "var(--green)" : "var(--red)", fontSize:8, opacity:.8 }}>
         {diff >= 0 ? "+" : ""}{diff.toFixed(2)} ({startVal > 0 ? ((diff / startVal) * 100).toFixed(2) : "0.00"}%)
@@ -808,7 +810,14 @@ function TabOverview({ bot, botId, equity, positions, onClosePosition, logEvents
                 </defs>
                 <CartesianGrid strokeDasharray="3 4" stroke="#1e2d40" vertical={false} />
                 <XAxis dataKey="t" tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} interval={Math.max(1, Math.floor(equity.length / 8))}
-                  tickFormatter={(t: number) => new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })} />
+                  tickFormatter={(t: number) => {
+                    const d = new Date(t);
+                    const spanMs = equity.length > 1 ? equity[equity.length-1].t - equity[0].t : 0;
+                    if (spanMs > 86400000) {
+                      return d.toLocaleDateString([], { month:"short", day:"numeric" }) + " " + d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+                    }
+                    return d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+                  }} />
                 <YAxis tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${(v/1000).toFixed(1)}k`} domain={["auto","auto"]} />
                 {startVal > 0 && <ReferenceLine y={startVal} stroke="#253550" strokeDasharray="4 3" />}
                 <Tooltip content={<EquityTooltip />} />
@@ -1325,6 +1334,7 @@ export default function BotDetailPage() {
   const [bot, setBot] = useState<Bot | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [equityCurve, setEquityCurve] = useState<any[]>([]);
+  const [equityRange, setEquityRange] = useState<"1h"|"6h"|"24h"|"7d"|"all">("24h");
   const [chartMode, setChartMode] = useState<"equity" | "candles">("equity");
   const [closeModal, setCloseModal] = useState<Position | null>(null);
   const [deleteModal, setDeleteModal] = useState(false);
@@ -1403,8 +1413,11 @@ export default function BotDetailPage() {
 
   useEffect(() => {
     (async () => {
+      setEquityLoading(true);
       try {
-        const curveResult = await getBotEquityCurve(botId);
+        const rangeMs: Record<string, number> = { "1h": 3600000, "6h": 21600000, "24h": 86400000, "7d": 604800000 };
+        const since = equityRange !== "all" ? new Date(Date.now() - rangeMs[equityRange]).toISOString() : undefined;
+        const curveResult = await getBotEquityCurve(botId, since);
         if (curveResult.data && Array.isArray(curveResult.data) && curveResult.data.length > 0) {
           const meaningful = curveResult.data
             .map((s: any) => ({
@@ -1420,7 +1433,7 @@ export default function BotDetailPage() {
         setEquityLoading(false);
       }
     })();
-  }, [botId]);
+  }, [botId, equityRange]);
 
   // Set equity fallback once bot loads (if equity curve is empty/default)
   useEffect(() => {
@@ -1849,9 +1862,7 @@ export default function BotDetailPage() {
             </div>
 
             {/* Chart — toggle between Equity Curve and Candlestick */}
-            {equityLoading && chartMode === "equity" ? (
-              <BdpSectionSkeleton label="Session Equity Curve" />
-            ) : equityError && chartMode === "equity" ? (
+            {equityError && chartMode === "equity" ? (
               <BdpSectionError label="Session Equity Curve" />
             ) : (
               <div className="bdp-card">
@@ -1862,14 +1873,24 @@ export default function BotDetailPage() {
                       <button className={`bdp-tf-btn ${chartMode === "candles" ? "bdp-on" : ""}`} onClick={() => setChartMode("candles")}>Candlestick</button>
                     </div>
                     {chartMode === "equity" && (
-                      <span style={{ fontFamily:"var(--mono)", fontSize:9, color: profitable ? "var(--green)" : "var(--red)", marginLeft:8 }}>
-                        {profitable ? "▲" : "▼"} {profitable ? "+" : ""}${(lastEquity - firstEquity).toFixed(2)}
-                      </span>
+                      <>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:9, color: profitable ? "var(--green)" : "var(--red)", marginLeft:8 }}>
+                          {profitable ? "▲" : "▼"} {profitable ? "+" : ""}${(lastEquity - firstEquity).toFixed(2)}
+                        </span>
+                        {equityLoading && <div className="bdp-spinner" style={{ width:12, height:12 }} />}
+                      </>
                     )}
                     {chartMode === "candles" && (
                       <span className="bdp-card-title" style={{ marginLeft:4 }}>{bot?.pair || "--"} · {bot?.exchange || "--"}</span>
                     )}
                   </div>
+                  {chartMode === "equity" && (
+                    <div className="bdp-tf-bar">
+                      {(["1h","6h","24h","7d","all"] as const).map(r => (
+                        <button key={r} className={`bdp-tf-btn ${equityRange === r ? "bdp-on" : ""}`} onClick={() => setEquityRange(r)}>{r}</button>
+                      ))}
+                    </div>
+                  )}
                   {chartMode === "candles" && (
                     <div className="bdp-tf-bar">
                       {TIMEFRAMES.map(t => (
@@ -1892,7 +1913,14 @@ export default function BotDetailPage() {
                           </defs>
                           <CartesianGrid strokeDasharray="3 4" stroke="#1e2d40" vertical={false} />
                           <XAxis dataKey="t" tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} interval={Math.max(1, Math.floor(equityCurve.length / 8))}
-                            tickFormatter={(t: number) => new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })} />
+                            tickFormatter={(t: number) => {
+                              const d = new Date(t);
+                              const spanMs = equityCurve.length > 1 ? equityCurve[equityCurve.length-1].t - equityCurve[0].t : 0;
+                              if (spanMs > 86400000) {
+                                return d.toLocaleDateString([], { month:"short", day:"numeric" }) + " " + d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+                              }
+                              return d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+                            }} />
                           <YAxis tick={{ fontSize:8, fontFamily:"IBM Plex Mono", fill:"#5a7090" }} tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${(v/1000).toFixed(1)}k`} domain={["auto","auto"]} />
                           {startVal > 0 && <ReferenceLine y={startVal} stroke="#253550" strokeDasharray="4 3" />}
                           <Tooltip content={<EquityTooltip />} />
@@ -1900,6 +1928,9 @@ export default function BotDetailPage() {
                             fill={`url(#${gradId})`} dot={false} activeDot={{ r:3, fill: profitable ? "#00e5a0" : "#ff4757" }} />
                         </AreaChart>
                       </ResponsiveContainer>
+                    </div>
+                    <div style={{ textAlign:"right", fontFamily:"var(--mono)", fontSize:7, color:"var(--text2)", opacity:.6, padding:"2px 4px 0" }}>
+                      {Intl.DateTimeFormat().resolvedOptions().timeZone} ({new Date().toLocaleTimeString([], { timeZoneName:"short" }).split(" ").pop()})
                     </div>
                   </div>
                 ) : (
