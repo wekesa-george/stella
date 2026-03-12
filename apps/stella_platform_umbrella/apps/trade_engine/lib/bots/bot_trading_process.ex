@@ -722,16 +722,30 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     state = Enum.reduce(to_close, state, fn pos, acc -> close_position(pos, acc) end)
     all_closed = had_positions and map_size(state.positions) == 0 and length(to_close) > 0
 
-    # Grid bot stop-loss restart: if all positions were closed and this is a grid bot
-    # with restart_on_stop_loss enabled, cancel pending grid orders and flag for restart
-    if all_closed and state.is_grid and get_strategy_param(state.config, "restart_on_stop_loss", true) do
-      BotLogger.info(state.bot_id, :grid, "Stop-loss triggered — cancelling grid orders and scheduling restart", %{
-        closed_count: length(to_close),
-        pending_grid_orders: map_size(state.grid_orders)
-      })
+    # Grid bot stop-loss: if all positions were closed and this is a grid bot,
+    # either restart with recentered grid or stop entirely based on config
+    if all_closed and state.is_grid do
+      restart_enabled = get_strategy_param(state.config, "restart_on_stop_loss", false)
 
-      state = cancel_all_grid_orders(state)
-      %{state | grid_restart_pending: true, grid_initialized: false}
+      if restart_enabled do
+        BotLogger.info(state.bot_id, :grid, "Stop-loss triggered — cancelling grid orders and scheduling restart", %{
+          closed_count: length(to_close),
+          pending_grid_orders: map_size(state.grid_orders)
+        })
+
+        state = cancel_all_grid_orders(state)
+        %{state | grid_restart_pending: true, grid_initialized: false}
+      else
+        BotLogger.info(state.bot_id, :grid, "Stop-loss triggered — stopping bot (restart_on_stop_loss=false)", %{
+          closed_count: length(to_close),
+          pending_grid_orders: map_size(state.grid_orders)
+        })
+
+        state = cancel_all_grid_orders(state)
+        # Request bot stop via registry so it transitions properly
+        spawn(fn -> BotRegistry.stop_bot(state.bot_id) end)
+        state
+      end
     else
       state
     end

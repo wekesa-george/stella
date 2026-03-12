@@ -25,7 +25,7 @@ defmodule TradeEngine.Strategies.GridBot do
     - total_investment: float — total allocated capital (USD)
     - stop_loss_price: float — emergency exit below grid (optional)
     - take_profit_price: float — close all above this price (optional)
-    - restart_on_stop_loss: boolean (default true) — after stop-loss exit, redeploy
+    - restart_on_stop_loss: boolean (default false) — after stop-loss exit, redeploy
       grid centered around current price instead of stopping
     - rebalance_on_breakout: boolean (default false)
     - max_open_orders: integer (default 20) — exchange order limit
@@ -45,7 +45,7 @@ defmodule TradeEngine.Strategies.GridBot do
     "stop_loss_price" => nil,
     "take_profit_price" => nil,
     "rebalance_on_breakout" => false,
-    "restart_on_stop_loss" => true,
+    "restart_on_stop_loss" => false,
     "max_open_orders" => 20,
     "max_positions" => 20
   }
