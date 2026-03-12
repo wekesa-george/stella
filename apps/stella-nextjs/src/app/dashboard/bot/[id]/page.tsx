@@ -1341,6 +1341,9 @@ export default function BotDetailPage() {
   const [capitalModal, setCapitalModal] = useState(false);
   const [capitalInput, setCapitalInput] = useState("");
   const [capitalSaving, setCapitalSaving] = useState(false);
+  const [gridConfigModal, setGridConfigModal] = useState(false);
+  const [gridConfigSaving, setGridConfigSaving] = useState(false);
+  const [gridConfigDraft, setGridConfigDraft] = useState<Record<string, any>>({});
   const [botLoading, setBotLoading] = useState(true);
   const [botError, setBotError] = useState(false);
   const [positionsLoading, setPositionsLoading] = useState(true);
@@ -1672,6 +1675,61 @@ export default function BotDetailPage() {
     setCapitalModal(false);
   };
 
+  const isGridBot = bot?.strategy?.toLowerCase().includes("grid") || bot?.config?.grid_levels != null;
+
+  const openGridConfigModal = () => {
+    if (!bot) return;
+    setGridConfigDraft({
+      upper_price: bot.config.upper_price ?? "",
+      lower_price: bot.config.lower_price ?? "",
+      grid_levels: bot.config.grid_levels ?? 20,
+      grid_type: bot.config.grid_type ?? "geometric",
+      total_investment: bot.config.total_investment ?? bot.allocatedCapital ?? "",
+      max_open_orders: bot.config.max_open_orders ?? 15,
+      stop_loss_price: bot.config.stop_loss_price ?? "",
+      take_profit_price: bot.config.take_profit_price ?? "",
+      fee_rate: bot.config.fee_rate ?? 0.0004,
+      quantity_per_grid: bot.config.quantity_per_grid ?? 0,
+      restart_on_stop_loss: bot.config.restart_on_stop_loss ?? true,
+    });
+    setGridConfigModal(true);
+  };
+
+  const handleGridConfigSave = async () => {
+    if (!bot) return;
+    setGridConfigSaving(true);
+    try {
+      const newConfig = { ...bot.config };
+      for (const [k, v] of Object.entries(gridConfigDraft)) {
+        if (typeof v === "string" && v.trim() === "") {
+          newConfig[k] = null;
+        } else if (typeof v === "string") {
+          newConfig[k] = parseFloat(v);
+        } else {
+          newConfig[k] = v;
+        }
+      }
+      // Also sync allocated_capital with total_investment
+      const totalInv = newConfig.total_investment;
+      const payload: Record<string, any> = { config: newConfig };
+      if (totalInv && totalInv > 0) {
+        payload.allocated_capital = totalInv;
+      }
+      const result = await updateBot(botId, payload);
+      if (result && !result.error) {
+        setBot(prev => prev ? {
+          ...prev,
+          config: newConfig,
+          allocatedCapital: totalInv || prev.allocatedCapital,
+        } : prev);
+        setGridConfigModal(false);
+      }
+    } catch (e) {
+      console.error("Failed to update grid config:", e);
+    }
+    setGridConfigSaving(false);
+  };
+
   const handleClosePosition = (pos: Position) => { setCloseModal(pos); };
   const confirmClose = (posId: string) => {
     wsClosePosition(posId);
@@ -1805,8 +1863,39 @@ export default function BotDetailPage() {
                       title={editable ? "Click to edit" : undefined}>{v}{editable && <span style={{ fontSize:7, marginLeft:3, opacity:.6 }}>&#9998;</span>}</span>
                   </span>
                 ))}
+                {isGridBot && (
+                  <span
+                    onClick={openGridConfigModal}
+                    style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase", cursor:"pointer", color:"var(--blue)", fontWeight:500, marginLeft:4 }}
+                    title="Edit grid bot configuration"
+                  >
+                    Grid Config <span style={{ fontSize:7, opacity:.6 }}>&#9998;</span>
+                  </span>
+                )}
               </div>
             ) : null}
+
+            {/* Grid Config Summary — only for grid bots */}
+            {!botLoading && bot && isGridBot && bot.config.upper_price && (
+              <div style={{ display:"flex", flexWrap:"wrap", gap:"4px 14px", padding:"6px 12px", background:"var(--bg0)", border:"1px solid var(--border)", borderRadius:4, fontFamily:"var(--mono)", fontSize:8, color:"var(--text2)", cursor:"pointer" }}
+                onClick={openGridConfigModal} title="Click to edit grid config">
+                {([
+                  ["Range", `$${Number(bot.config.lower_price).toLocaleString()} — $${Number(bot.config.upper_price).toLocaleString()}`],
+                  ["Levels", bot.config.grid_levels],
+                  ["Type", bot.config.grid_type],
+                  ["Investment", `$${Number(bot.config.total_investment).toLocaleString()}`],
+                  ["Max Orders", bot.config.max_open_orders],
+                  ["Stop Loss", bot.config.stop_loss_price ? `$${Number(bot.config.stop_loss_price).toLocaleString()}` : "--"],
+                  ["Take Profit", bot.config.take_profit_price ? `$${Number(bot.config.take_profit_price).toLocaleString()}` : "--"],
+                  ["Fee", bot.config.fee_rate ? `${(bot.config.fee_rate * 100).toFixed(2)}%` : "--"],
+                  ["Restart on SL", bot.config.restart_on_stop_loss ? "Yes" : "No"],
+                ] as [string, any][]).map(([k, v]) => (
+                  <span key={k} style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase" }}>
+                    {k}: <span style={{ color:"var(--text1)", fontWeight:500 }}>{v}</span>
+                  </span>
+                ))}
+              </div>
+            )}
 
             {/* Metrics */}
             <div className="bdp-metrics-grid">
@@ -2116,6 +2205,136 @@ export default function BotDetailPage() {
           </div>
         </div>
       )}
+      {gridConfigModal && (
+        <div className="bdp-modal-backdrop" onClick={() => setGridConfigModal(false)}>
+          <div className="bdp-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="bdp-modal-hdr">
+              <span className="bdp-modal-title">Grid Bot Configuration</span>
+              <button className="bdp-modal-close" onClick={() => setGridConfigModal(false)}><IcoClose size={14} /></button>
+            </div>
+            <div className="bdp-modal-body" style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: "70vh", overflowY: "auto" }}>
+              {/* Price Range */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <GridConfigField label="Lower Price" field="lower_price" type="number" draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+                <GridConfigField label="Upper Price" field="upper_price" type="number" draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+              </div>
+              {/* Grid Settings */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <GridConfigField label="Grid Levels" field="grid_levels" type="number" step={1} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+                <div>
+                  <label style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text2)", textTransform: "uppercase", letterSpacing: ".06em", display: "block", marginBottom: 4 }}>
+                    Grid Type
+                  </label>
+                  <select
+                    value={gridConfigDraft.grid_type ?? "geometric"}
+                    onChange={e => setGridConfigDraft(p => ({ ...p, grid_type: e.target.value }))}
+                    style={{
+                      background: "var(--bg0)", border: "1px solid var(--border2)", borderRadius: 4,
+                      padding: "8px 12px", fontFamily: "var(--mono)", fontSize: 12, color: "var(--text0)",
+                      outline: "none", width: "100%"
+                    }}
+                  >
+                    <option value="geometric">Geometric</option>
+                    <option value="arithmetic">Arithmetic</option>
+                  </select>
+                </div>
+              </div>
+              {/* Investment */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <GridConfigField label="Total Investment ($)" field="total_investment" type="number" step={100} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+                <GridConfigField label="Max Open Orders" field="max_open_orders" type="number" step={1} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+              </div>
+              {/* Risk */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <GridConfigField label="Stop Loss Price" field="stop_loss_price" type="number" placeholder="Optional" draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+                <GridConfigField label="Take Profit Price" field="take_profit_price" type="number" placeholder="Optional" draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+              </div>
+              {/* Advanced */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <GridConfigField label="Fee Rate" field="fee_rate" type="number" step={0.0001} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+                <GridConfigField label="Qty Per Grid (0=auto)" field="quantity_per_grid" type="number" step={0.001} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
+              </div>
+              {/* Toggle */}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={gridConfigDraft.restart_on_stop_loss ?? true}
+                  onChange={e => setGridConfigDraft(p => ({ ...p, restart_on_stop_loss: e.target.checked }))}
+                  style={{ accentColor: "var(--blue)" }}
+                />
+                <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text1)" }}>Restart on Stop Loss (recenter grid)</span>
+              </label>
+              {/* Computed Info */}
+              {gridConfigDraft.upper_price && gridConfigDraft.lower_price && gridConfigDraft.grid_levels > 0 && (
+                <div style={{ background: "var(--bg0)", border: "1px solid var(--border)", borderRadius: 4, padding: "8px 12px", fontFamily: "var(--mono)", fontSize: 9, color: "var(--text2)" }}>
+                  {(() => {
+                    const upper = parseFloat(gridConfigDraft.upper_price) || 0;
+                    const lower = parseFloat(gridConfigDraft.lower_price) || 0;
+                    const levels = parseInt(gridConfigDraft.grid_levels) || 1;
+                    const total = parseFloat(gridConfigDraft.total_investment) || 0;
+                    const fee = parseFloat(gridConfigDraft.fee_rate) || 0;
+                    const perGrid = total / levels;
+                    const spacing = gridConfigDraft.grid_type === "geometric"
+                      ? ((Math.pow(upper / lower, 1 / levels) - 1) * 100)
+                      : ((upper - lower) / levels / lower * 100);
+                    const roundTripFee = fee * 2 * 100;
+                    const netProfit = spacing - roundTripFee;
+                    return (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px" }}>
+                        <span>Spacing: <b style={{ color: "var(--text1)" }}>{spacing.toFixed(2)}%</b></span>
+                        <span>Per Grid: <b style={{ color: "var(--text1)" }}>${perGrid.toFixed(0)}</b></span>
+                        <span>Round-trip Fee: <b style={{ color: "var(--text1)" }}>{roundTripFee.toFixed(2)}%</b></span>
+                        <span>Net/Grid: <b style={{ color: netProfit > 0 ? "var(--green, #22c55e)" : "var(--red, #ef4444)" }}>{netProfit.toFixed(2)}%</b></span>
+                        {netProfit <= 0 && <span style={{ color: "var(--red, #ef4444)", fontWeight: 600 }}>Grid spacing too tight — will lose money on fees!</span>}
+                        {perGrid < 70 && upper > 50000 && <span style={{ color: "var(--yellow, #eab308)", fontWeight: 600 }}>Per-grid ${perGrid.toFixed(0)} may be too small for BTC (min ~$70)</span>}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+                <button onClick={() => setGridConfigModal(false)}
+                  style={{ padding: "6px 14px", borderRadius: 3, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--text1)", fontFamily: "var(--mono)", fontSize: 10, cursor: "pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={handleGridConfigSave} disabled={gridConfigSaving}
+                  style={{ padding: "6px 14px", borderRadius: 3, border: "none", background: "var(--blue)", color: "#fff", fontFamily: "var(--mono)", fontSize: 10, fontWeight: 600, cursor: "pointer", opacity: gridConfigSaving ? 0.6 : 1 }}>
+                  {gridConfigSaving ? "Saving..." : "Save Config"}
+                </button>
+              </div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text2)", opacity: 0.7 }}>
+                Note: Bot must be stopped &amp; restarted for config changes to take effect.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GridConfigField({ label, field, type = "text", step, placeholder, draft, setDraft }: {
+  label: string; field: string; type?: string; step?: number; placeholder?: string;
+  draft: Record<string, any>; setDraft: React.Dispatch<React.SetStateAction<Record<string, any>>>;
+}) {
+  return (
+    <div>
+      <label style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text2)", textTransform: "uppercase", letterSpacing: ".06em", display: "block", marginBottom: 4 }}>
+        {label}
+      </label>
+      <input
+        type={type}
+        value={draft[field] ?? ""}
+        onChange={e => setDraft(p => ({ ...p, [field]: e.target.value }))}
+        placeholder={placeholder}
+        step={step}
+        style={{
+          background: "var(--bg0)", border: "1px solid var(--border2)", borderRadius: 4,
+          padding: "8px 12px", fontFamily: "var(--mono)", fontSize: 12, color: "var(--text0)",
+          outline: "none", width: "100%"
+        }}
+      />
     </div>
   );
 }

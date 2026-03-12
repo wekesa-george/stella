@@ -42,6 +42,7 @@ export interface Bot {
   uptime: string;
   initStep: string | null;
   marketType: string;
+  config: Record<string, any>;
 }
 
 export interface BeamMetrics {

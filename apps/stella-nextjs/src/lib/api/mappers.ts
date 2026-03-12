@@ -60,6 +60,7 @@ export function mapApiBotToUiBot(api: Record<string, any>): Bot {
     uptime: `${hours}h ${minutes}m`,
     initStep: api.init_step ?? api.initStep ?? null,
     marketType: api.market_type ?? api.marketType ?? 'spot',
+    config: api.config ?? {},
   };
 }
 
@@ -110,6 +111,7 @@ export function mapWsBotSnapshotToUiBot(snap: BotSnapshot): Bot {
     uptime: `${hours}h ${minutes}m`,
     initStep: snap.init_step ?? null,
     marketType: snap.market_type ?? 'spot',
+    config: snap.config ?? {},
   };
 }
 
