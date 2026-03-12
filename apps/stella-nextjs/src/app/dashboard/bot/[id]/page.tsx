@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, ReferenceLine
 } from "recharts";
 import {
-  getBot, getBotPositions, getBotOrders, getBotEquityCurve, getBotBars,
+  getBot, getBotConfig, getBotPositions, getBotOrders, getBotEquityCurve, getBotBars,
   startBot, pauseBot, stopBot, deleteBot, placeManualOrder, updateBot
 } from "@/lib/tradingEngineApi";
 import { useBotChannel, usePositionChannel, useOrderChannel } from "@/hooks/usePhoenixChannel";
@@ -1371,9 +1371,20 @@ export default function BotDetailPage() {
   useEffect(() => {
     (async () => {
       try {
-        const botResult = await getBot(botId);
+        const [botResult, configResult] = await Promise.all([
+          getBot(botId),
+          getBotConfig(botId).catch(() => ({ data: null })),
+        ]);
         if (botResult.data) {
           const mappedBot = mapApiBotToUiBot(botResult.data);
+          // Merge config from dedicated endpoint if the main response lacks it
+          if (configResult.data) {
+            const raw = configResult.data as any;
+            const cfg = raw.config ?? raw;
+            if (cfg && typeof cfg === "object" && Object.keys(cfg).length > 0) {
+              mappedBot.config = { ...mappedBot.config, ...cfg };
+            }
+          }
           setBot(mappedBot);
         } else {
           setBotError(true);

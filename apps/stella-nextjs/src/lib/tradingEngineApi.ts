@@ -127,6 +127,10 @@ export async function getBot(botId: string) {
   return request(`/api/bots/${botId}`);
 }
 
+export async function getBotConfig(botId: string) {
+  return request(`/api/bots/${botId}/config`);
+}
+
 export async function updateBot(
   botId: string,
   config: Record<string, any>,
