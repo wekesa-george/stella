@@ -97,7 +97,10 @@ defmodule TradeEngine.API.Enrichment do
       error_count: runtime_bot[:error_count] || 0,
       allocated_capital: runtime_bot.allocated_capital,
       active_capital: runtime_bot.active_capital,
-      created_at: runtime_bot[:created_at]
+      created_at: runtime_bot[:created_at],
+      config: runtime_bot[:config] || %{},
+      market_type: runtime_bot[:market_type] || "spot",
+      init_step: runtime_bot[:init_step]
     }
   end
 
