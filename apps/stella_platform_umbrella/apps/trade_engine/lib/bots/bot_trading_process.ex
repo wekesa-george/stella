@@ -999,17 +999,23 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   # Price precision matching Binance tick sizes (PRICE_FILTER)
-  defp exchange_price_precision(symbol, _market_type) do
+  # Futures tick sizes: BTC=0.1 (1dp), ETH=0.01 (2dp), BNB=0.01 (2dp), SOL=0.01 (2dp)
+  # Spot tick sizes are generally finer but these work for both
+  defp exchange_price_precision(symbol, market_type) do
+    is_futures = market_type in ["usds_futures", "coinm_futures"]
+    base = symbol |> String.split("/") |> List.first() |> String.split(":") |> List.first()
+
     cond do
-      String.starts_with?(symbol, "BTC") -> 2
-      String.starts_with?(symbol, "ETH") -> 2
-      String.starts_with?(symbol, "BNB") -> 2
-      String.starts_with?(symbol, "SOL") -> 2
-      String.starts_with?(symbol, "XRP") -> 4
-      String.starts_with?(symbol, "DOGE") -> 5
-      String.starts_with?(symbol, "ADA") -> 4
-      String.starts_with?(symbol, "DOT") -> 3
-      String.starts_with?(symbol, "LINK") -> 3
+      String.starts_with?(base, "BTC") and is_futures -> 1
+      String.starts_with?(base, "BTC") -> 2
+      String.starts_with?(base, "ETH") -> 2
+      String.starts_with?(base, "BNB") -> 2
+      String.starts_with?(base, "SOL") -> 2
+      String.starts_with?(base, "XRP") -> 4
+      String.starts_with?(base, "DOGE") -> 5
+      String.starts_with?(base, "ADA") -> 4
+      String.starts_with?(base, "DOT") -> 3
+      String.starts_with?(base, "LINK") -> 3
       String.starts_with?(symbol, "AVAX") -> 2
       true -> 2
     end
