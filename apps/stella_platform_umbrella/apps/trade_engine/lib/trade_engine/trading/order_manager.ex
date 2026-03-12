@@ -182,55 +182,75 @@ defmodule TradeEngine.Trading.OrderManager do
 
   defp finalize_order(order, {:ok, result}) do
     executed_price = result[:executed_price]
-    executed_qty = result[:executed_qty] || Decimal.to_float(order.quantity)
+    executed_qty = result[:executed_qty]
     exchange_order_id = result[:order_id]
+    exchange_status = result[:status]
     now = DateTime.utc_now()
 
-    # Calculate slippage in basis points
-    expected_price = deep_get(order.metadata || %{}, ["expected_price"])
-    slippage_bps = compute_slippage_bps(expected_price, executed_price)
+    # Determine order status from exchange response:
+    # - NEW/PARTIALLY_FILLED on exchange → limit order sitting on book → "open"
+    # - FILLED → fully executed → "filled"
+    # - executed_qty == 0 or nil → not filled yet → "open"
+    order_qty = safe_decimal_to_float(order.quantity)
+    exec_qty = executed_qty || 0
+    exec_price = executed_price || 0
 
-    # Merge slippage data into metadata
-    slippage_meta = if slippage_bps do
-      %{"slippage_bps" => slippage_bps, "expected_price" => expected_price}
+    status = cond do
+      exchange_status in ["NEW", "new"] -> "open"
+      exec_qty <= 0 or exec_price <= 0 -> "open"
+      exec_qty > 0 and exec_qty < order_qty * 0.99 -> "partially_filled"
+      true -> "filled"
+    end
+
+    is_filled = status == "filled"
+    is_partial = status == "partially_filled"
+
+    # Calculate slippage only for actual fills
+    slippage_meta = if is_filled or is_partial do
+      expected_price = deep_get(order.metadata || %{}, ["expected_price"])
+      slippage_bps = compute_slippage_bps(expected_price, executed_price)
+      if slippage_bps, do: %{"slippage_bps" => slippage_bps, "expected_price" => expected_price}, else: %{}
     else
       %{}
     end
 
-    # Detect partial fills: if executed_qty < order.quantity, mark as partially_filled
-    order_qty = safe_decimal_to_float(order.quantity)
-    status = if executed_qty > 0 and executed_qty < order_qty * 0.99 do
-      "partially_filled"
-    else
-      "filled"
+    remaining = cond do
+      is_filled -> Decimal.new(0)
+      is_partial -> to_decimal(order_qty - exec_qty)
+      true -> order.quantity
     end
-
-    remaining = if status == "partially_filled", do: to_decimal(order_qty - executed_qty), else: Decimal.new(0)
 
     update_attrs = %{
       status: status,
-      execution_price: to_decimal(executed_price),
-      filled_quantity: to_decimal(executed_qty),
+      execution_price: if(exec_price > 0, do: to_decimal(exec_price), else: nil),
+      filled_quantity: to_decimal(exec_qty),
       remaining_quantity: remaining,
-      execution_time: now,
-      first_fill_at: now,
       exchange_order_id: to_string(exchange_order_id || ""),
       exchange_response: sanitize_exchange_response(result),
       metadata: Map.merge(order.metadata || %{}, slippage_meta)
     }
 
-    case Repo.update(Order.changeset(order, update_attrs)) do
-      {:ok, filled_order} ->
-        # Record fill in trading.fills table
-        record_fill(filled_order, executed_price, executed_qty, exchange_order_id, result)
+    # Only set execution_time/first_fill_at when actually filled
+    update_attrs = if is_filled or is_partial do
+      Map.merge(update_attrs, %{execution_time: now, first_fill_at: now})
+    else
+      update_attrs
+    end
 
-        broadcast({:order_filled, filled_order})
-        broadcast_bot(filled_order.bot_id, {:order_filled, filled_order})
+    case Repo.update(Order.changeset(order, update_attrs)) do
+      {:ok, updated_order} ->
+        if is_filled or is_partial do
+          record_fill(updated_order, executed_price, exec_qty, exchange_order_id, result)
+          broadcast({:order_filled, updated_order})
+          broadcast_bot(updated_order.bot_id, {:order_filled, updated_order})
+        else
+          broadcast({:order_created, updated_order})
+          broadcast_bot(updated_order.bot_id, {:order_created, updated_order})
+        end
         {:ok, result}
 
       {:error, _} ->
-        # DB update failed but exchange succeeded — log and return success
-        Logger.warning("OrderManager: order #{order.id} filled on exchange but DB update failed")
+        Logger.warning("OrderManager: order #{order.id} exchange ok but DB update failed (status: #{status})")
         {:ok, result}
     end
   end

@@ -1333,6 +1333,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     grid_levels = TradeEngine.Strategies.GridBot.compute_grid_levels(config)
     sorted_levels = Enum.sort(grid_levels)
 
+    # Update the DB order to "filled" now that we confirmed it via exchange polling
+    update_grid_order_filled(filled_entry, filled_price)
+
     # Find the next level for a counter-order
     counter_side = if filled_entry.side == "BUY", do: "SELL", else: "BUY"
 
@@ -1373,9 +1376,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     BotLogger.info(state.bot_id, :grid, "Grid fill processed", %{
       filled_side: filled_entry.side,
       filled_price: filled_price,
+      filled_qty: filled_entry.quantity,
       counter_side: counter_side,
       counter_price: counter_price,
-      estimated_pnl: Float.round(pnl, 4)
+      estimated_pnl: Float.round(pnl, 4),
+      exchange_order_id: filled_entry.order_id
     })
 
     # Place counter-order if we have a valid price level
@@ -1388,6 +1393,37 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       })
       state
     end
+  end
+
+  # Update DB order from "open" to "filled" when grid_check_fills detects fill
+  defp update_grid_order_filled(filled_entry, filled_price) do
+    Task.start(fn ->
+      try do
+        import Ecto.Query
+        exchange_oid = to_string(filled_entry.order_id)
+        now = DateTime.utc_now()
+
+        query = from(o in TradeEngine.Trading.Order,
+          where: o.exchange_order_id == ^exchange_oid and o.status == "open"
+        )
+
+        case TradeEngine.Repo.update_all(query, set: [
+          status: "filled",
+          execution_price: Decimal.from_float(filled_price / 1.0),
+          filled_quantity: Decimal.from_float(filled_entry.quantity / 1.0),
+          remaining_quantity: Decimal.new(0),
+          execution_time: now,
+          first_fill_at: now
+        ]) do
+          {n, _} when n > 0 ->
+            Logger.debug("Grid order #{exchange_oid} updated to filled @ #{filled_price}")
+          _ ->
+            Logger.debug("Grid order #{exchange_oid} not found as open (may already be filled)")
+        end
+      rescue
+        e -> Logger.warning("Failed to update grid order to filled: #{Exception.message(e)}")
+      end
+    end)
   end
 
   # ════════════════════════════════════════════════════════════════════════════
