@@ -1047,61 +1047,93 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       state
     else
       symbol = signal.symbol
-      qty = signal.quantity_per_grid
+      raw_qty = signal.quantity_per_grid
       is_spot = state.market_type in [nil, "spot"]
 
-      # Cap buy orders by available capital: each buy locks up qty * price in USDT.
-      # Only place as many buy orders as the total_investment can cover.
+      # Round quantity to exchange precision upfront (floor to avoid overspend)
+      qty_precision = exchange_qty_precision(symbol, state.market_type)
+      qty = Float.floor(raw_qty * :math.pow(10, qty_precision)) / :math.pow(10, qty_precision)
+
+      # Cap buy orders by available capital
       total_investment = get_strategy_param(state.config, "total_investment", state.allocated_capital)
-      # Capital already locked in existing grid buy orders
       locked_capital = state.grid_orders
         |> Enum.filter(fn {_level, entry} -> entry.side == "BUY" end)
         |> Enum.reduce(0.0, fn {_level, entry}, acc -> acc + entry.quantity * entry.price end)
       remaining_capital = max(0.0, total_investment - locked_capital)
 
-      # On spot: only place BUY orders initially. Sell orders are placed
-      # as counter-orders when buys fill (you can't sell what you don't own).
-      # On futures: place both sides since you can short.
-      buy_levels = Enum.take(signal.buy_levels, available_slots)
+      BotLogger.info(state.bot_id, :grid, "Grid order execution starting", %{
+        symbol: symbol,
+        current_price: signal.current_price,
+        raw_qty_per_grid: Float.round(raw_qty, 8),
+        rounded_qty: qty,
+        qty_precision: qty_precision,
+        total_investment: total_investment,
+        locked_capital: Float.round(locked_capital, 2),
+        remaining_capital: Float.round(remaining_capital, 2),
+        buy_levels: length(signal.buy_levels),
+        sell_levels: length(signal.sell_levels),
+        existing_orders: current_order_count,
+        available_slots: available_slots,
+        market_type: state.market_type
+      })
 
-      {state, _capital_left} = Enum.reduce(buy_levels, {state, remaining_capital}, fn price_level, {acc, capital} ->
-        order_cost = qty * price_level
-        if map_size(acc.grid_orders) < max_orders and capital >= order_cost do
-          new_state = place_grid_limit_order(acc, symbol, "BUY", qty, price_level)
-          # Only deduct capital if order actually placed (grid_orders grew)
-          if map_size(new_state.grid_orders) > map_size(acc.grid_orders) do
-            {new_state, capital - order_cost}
-          else
-            {new_state, capital}
-          end
-        else
-          {acc, capital}
-        end
-      end)
-
-      placed_count = map_size(state.grid_orders) - current_order_count
-
-      if is_spot do
-        BotLogger.info(state.bot_id, :grid, "Spot mode: placed buy orders only", %{
-          buy_orders_placed: placed_count,
-          buy_levels_available: length(buy_levels),
-          sell_levels_skipped: length(signal.sell_levels),
-          capital_allocated: Float.round(total_investment - remaining_capital + (placed_count * qty * signal.current_price), 2),
-          capital_remaining: Float.round(remaining_capital - (placed_count * qty * signal.current_price), 2)
+      if qty <= 0 do
+        BotLogger.error(state.bot_id, :grid, "Grid qty rounds to zero — increase total_investment or reduce grid_levels", %{
+          raw_qty: Float.round(raw_qty, 8),
+          qty_precision: qty_precision,
+          total_investment: total_investment,
+          grid_levels: get_strategy_param(state.config, "grid_levels", 10),
+          current_price: signal.current_price
         })
         state
       else
-        # Futures: can place sells (shorts) upfront
-        remaining_slots = max(0, max_orders - map_size(state.grid_orders))
-        sell_levels = Enum.take(signal.sell_levels, remaining_slots)
+        buy_levels = Enum.take(signal.buy_levels, available_slots)
 
-        Enum.reduce(sell_levels, state, fn price_level, acc ->
-          if map_size(acc.grid_orders) < max_orders do
-            place_grid_limit_order(acc, symbol, "SELL", qty, price_level)
+        {state, _capital_left} = Enum.reduce(buy_levels, {state, remaining_capital}, fn price_level, {acc, capital} ->
+          order_cost = qty * price_level
+          if map_size(acc.grid_orders) < max_orders and capital >= order_cost do
+            new_state = place_grid_limit_order(acc, symbol, "BUY", qty, price_level)
+            if map_size(new_state.grid_orders) > map_size(acc.grid_orders) do
+              {new_state, capital - order_cost}
+            else
+              {new_state, capital}
+            end
           else
-            acc
+            {acc, capital}
           end
         end)
+
+        placed_buy_count = map_size(state.grid_orders) - current_order_count
+
+        if is_spot do
+          BotLogger.info(state.bot_id, :grid, "Spot grid orders placed", %{
+            buy_orders_placed: placed_buy_count,
+            buy_levels_available: length(buy_levels),
+            sell_levels_skipped: length(signal.sell_levels)
+          })
+          state
+        else
+          # Futures: can place sells (shorts) upfront
+          remaining_slots = max(0, max_orders - map_size(state.grid_orders))
+          sell_levels = Enum.take(signal.sell_levels, remaining_slots)
+
+          state = Enum.reduce(sell_levels, state, fn price_level, acc ->
+            if map_size(acc.grid_orders) < max_orders do
+              place_grid_limit_order(acc, symbol, "SELL", qty, price_level)
+            else
+              acc
+            end
+          end)
+
+          placed_sell_count = map_size(state.grid_orders) - current_order_count - placed_buy_count
+
+          BotLogger.info(state.bot_id, :grid, "Futures grid orders placed", %{
+            buy_orders_placed: placed_buy_count,
+            sell_orders_placed: placed_sell_count,
+            total_grid_orders: map_size(state.grid_orders)
+          })
+          state
+        end
       end
     end
   end
@@ -1111,52 +1143,84 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     price_precision = exchange_price_precision(symbol, state.market_type)
     qty_precision = exchange_qty_precision(symbol, state.market_type)
     rounded_price = Float.round(price_level / 1, price_precision)
-    rounded_qty = Float.round(quantity / 1, qty_precision)
+    # Use floor for quantity — never round up beyond what capital allows
+    rounded_qty = Float.floor(quantity * :math.pow(10, qty_precision)) / :math.pow(10, qty_precision)
 
-    bot_context = [
-      user_id: state.user_id,
-      bot_id: state.bot_id,
-      credential_id: state.credential_id,
-      strategy_id: state.strategy_id,
-      market_type: state.market_type,
-      grid_level: price_level
-    ]
+    # Validate: quantity must be > 0 and notional must meet exchange minimum ($5 futures, $10 spot)
+    is_futures = state.market_type in ["usds_futures", "coinm_futures"]
+    min_notional = if is_futures, do: 5.0, else: 10.0
+    notional = rounded_qty * rounded_price
 
-    case OrderManager.place_limit_order(
-      state.credential_id, symbol, side, rounded_qty, rounded_price, bot_context
-    ) do
-      {:ok, result} ->
-        order_id = result[:order_id]
-
-        BotLogger.info(state.bot_id, :grid, "Grid order placed", %{
+    cond do
+      rounded_qty <= 0 ->
+        BotLogger.warning(state.bot_id, :grid, "Grid order skipped: quantity rounds to zero", %{
           side: side,
-          price: price_level,
-          quantity: quantity,
-          order_id: order_id
-        })
-
-        grid_entry = %{
-          order_id: order_id,
-          side: side,
-          quantity: quantity,
-          price: price_level,
-          symbol: symbol,
-          status: "NEW",
-          placed_at: DateTime.utc_now()
-        }
-
-        %{state |
-          grid_orders: Map.put(state.grid_orders, price_level, grid_entry),
-          total_trades: state.total_trades + 1
-        }
-
-      {:error, reason} ->
-        BotLogger.warning(state.bot_id, :grid, "Grid order failed", %{
-          side: side,
-          price: price_level,
-          reason: inspect(reason)
+          raw_qty: Float.round(quantity, 8),
+          rounded_qty: rounded_qty,
+          price: rounded_price,
+          qty_precision: qty_precision
         })
         state
+
+      notional < min_notional ->
+        BotLogger.warning(state.bot_id, :grid, "Grid order skipped: below min notional", %{
+          side: side,
+          notional: Float.round(notional, 2),
+          min_notional: min_notional,
+          qty: rounded_qty,
+          price: rounded_price
+        })
+        state
+
+      true ->
+        bot_context = [
+          user_id: state.user_id,
+          bot_id: state.bot_id,
+          credential_id: state.credential_id,
+          strategy_id: state.strategy_id,
+          market_type: state.market_type,
+          grid_level: price_level
+        ]
+
+        case OrderManager.place_limit_order(
+          state.credential_id, symbol, side, rounded_qty, rounded_price, bot_context
+        ) do
+          {:ok, result} ->
+            order_id = result[:order_id]
+
+            BotLogger.info(state.bot_id, :grid, "Grid order placed", %{
+              side: side,
+              price: rounded_price,
+              quantity: rounded_qty,
+              notional: Float.round(notional, 2),
+              order_id: order_id
+            })
+
+            grid_entry = %{
+              order_id: order_id,
+              side: side,
+              quantity: rounded_qty,
+              price: rounded_price,
+              symbol: symbol,
+              status: "NEW",
+              placed_at: DateTime.utc_now()
+            }
+
+            %{state |
+              grid_orders: Map.put(state.grid_orders, rounded_price, grid_entry),
+              total_trades: state.total_trades + 1
+            }
+
+          {:error, reason} ->
+            BotLogger.warning(state.bot_id, :grid, "Grid order failed", %{
+              side: side,
+              price: rounded_price,
+              quantity: rounded_qty,
+              notional: Float.round(notional, 2),
+              reason: inspect(reason)
+            })
+            state
+        end
     end
   end
 
