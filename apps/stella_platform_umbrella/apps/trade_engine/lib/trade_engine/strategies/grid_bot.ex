@@ -58,13 +58,15 @@ defmodule TradeEngine.Strategies.GridBot do
 
   @impl true
   def generate_signal(candles, _order_flow, context) do
-    config = Map.merge(@defaults, Map.get(context, :config, %{}))
+    raw_config = Map.get(context, :config, %{})
+    config = Map.merge(@defaults, raw_config)
 
     upper = config["upper_price"]
     lower = config["lower_price"]
 
     if upper <= 0 or lower <= 0 or upper <= lower do
-      {:error, :invalid_grid_range}
+      Logger.error("GridBot: invalid_grid_range — upper=#{inspect(upper)} lower=#{inspect(lower)} | raw_config_keys=#{inspect(Map.keys(raw_config))} | merged_upper=#{inspect(config["upper_price"])} merged_lower=#{inspect(config["lower_price"])} | raw_upper=#{inspect(raw_config["upper_price"])} raw_lower=#{inspect(raw_config["lower_price"])}")
+      {:error, {:invalid_grid_range, %{upper: upper, lower: lower, raw_keys: Map.keys(raw_config)}}}
     else
       # Get current price from latest candle
       latest = List.last(candles)

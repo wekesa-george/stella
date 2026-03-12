@@ -440,9 +440,12 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           end
 
         {:error, reason} ->
-          BotLogger.debug(state.bot_id, :signal, "Signal rejected", %{
+          BotLogger.warning(state.bot_id, :signal, "Signal rejected", %{
             symbol: symbol,
-            reason: inspect(reason)
+            reason: inspect(reason),
+            config_upper: state.config["upper_price"],
+            config_lower: state.config["lower_price"],
+            config_keys: inspect(Map.keys(state.config))
           })
           state
       end
