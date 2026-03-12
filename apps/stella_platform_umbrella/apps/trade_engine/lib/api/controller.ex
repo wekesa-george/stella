@@ -238,6 +238,10 @@ defmodule TradeEngine.API.Controller do
     json_response(conn, API.delete_bot(bot_id))
   end
 
+  get "/api/bots/:bot_id/config" do
+    json_response(conn, API.get_bot_config(bot_id))
+  end
+
   get "/api/bots/:bot_id" do
     json_response(conn, API.get_bot(bot_id))
   end
