@@ -1,5 +1,6 @@
 defmodule AdminGatewayWeb.CredentialController do
   use AdminGatewayWeb, :controller
+  require Logger
 
   alias TradeEngine.Exchanges.Executor
 
@@ -129,6 +130,7 @@ defmodule AdminGatewayWeb.CredentialController do
               %{symbol: symbol, status: "skipped", reason: "zero quantity"}
 
             side == "SHORT" ->
+              cancel_open_orders(credential_id, symbol)
               case Executor.close_short(credential_id, symbol, amount, entry, market_type: "usds_futures") do
                 {:ok, result} -> Map.merge(%{symbol: symbol, side: "SHORT", status: "closed"}, result)
                 {:error, reason} -> %{symbol: symbol, side: "SHORT", status: "failed", error: inspect(reason)}
@@ -136,6 +138,7 @@ defmodule AdminGatewayWeb.CredentialController do
 
             true ->
               # LONG or BOTH — close as long
+              cancel_open_orders(credential_id, symbol)
               case Executor.close_long(credential_id, symbol, amount, entry, market_type: "usds_futures") do
                 {:ok, result} -> Map.merge(%{symbol: symbol, side: "LONG", status: "closed"}, result)
                 {:error, reason} -> %{symbol: symbol, side: "LONG", status: "failed", error: inspect(reason)}
@@ -204,6 +207,9 @@ defmodule AdminGatewayWeb.CredentialController do
       if quantity == 0.0 do
         conn |> put_status(400) |> json(%{error: "No open position found for #{symbol}"})
       else
+        # Cancel all open orders for this symbol first to avoid -2025 max open order limit
+        cancel_open_orders(credential_id, symbol)
+
         result = if side == "SHORT" do
           Executor.close_short(credential_id, symbol, quantity, entry, market_type: "usds_futures")
         else
@@ -223,6 +229,21 @@ defmodule AdminGatewayWeb.CredentialController do
             conn |> put_status(502) |> json(%{error: "Failed to close position: #{inspect(reason)}"})
         end
       end
+    end
+  end
+
+  defp cancel_open_orders(credential_id, symbol) do
+    case Executor.get_open_orders(credential_id, symbol, market_type: "usds_futures") do
+      {:ok, orders} when is_list(orders) and orders != [] ->
+        Enum.each(orders, fn order ->
+          order_id = order[:order_id] || order["order_id"] || order["orderId"]
+          if order_id do
+            Executor.cancel_order(credential_id, symbol, order_id, market_type: "usds_futures")
+          end
+        end)
+        Logger.info("[CredentialController] Cancelled #{length(orders)} open orders for #{symbol} before closing position")
+      _ ->
+        :ok
     end
   end
 
