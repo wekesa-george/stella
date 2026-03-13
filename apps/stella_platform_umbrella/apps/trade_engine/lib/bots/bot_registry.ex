@@ -138,6 +138,11 @@ defmodule TradeEngine.Bots.BotRegistry do
     GenServer.cast(__MODULE__, {:update_positions, bot_id, count})
   end
 
+  @doc "Update active (locked) capital for a bot"
+  def update_active_capital(bot_id, amount) when is_number(amount) do
+    GenServer.cast(__MODULE__, {:update_active_capital, bot_id, amount})
+  end
+
   @doc "Report an initialization sub-step for a bot"
   def report_init_step(bot_id, step) do
     GenServer.cast(__MODULE__, {:init_step, bot_id, step})
@@ -591,6 +596,17 @@ defmodule TradeEngine.Bots.BotRegistry do
         :ets.insert(@ets_table, {bot_id, updated})
         broadcast_bot_event(:bot_updated, updated)
         record_equity_snapshot(updated, "trade")
+      _ -> :ok
+    end
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:update_active_capital, bot_id, amount}, state) do
+    case :ets.lookup(@ets_table, bot_id) do
+      [{^bot_id, runtime}] ->
+        updated = %{runtime | active_capital: amount + 0.0}
+        :ets.insert(@ets_table, {bot_id, updated})
       _ -> :ok
     end
     {:noreply, state}

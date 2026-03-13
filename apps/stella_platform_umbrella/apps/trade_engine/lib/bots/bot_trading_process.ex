@@ -115,7 +115,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           is_grid: is_grid,
           grid_orders: %{},          # %{price_level => %{order_id, side, status}}
           grid_initialized: false,
-          grid_restart_pending: false  # Set true after stop-loss to trigger grid redeployment
+          grid_restart_pending: false, # Set true after stop-loss to trigger grid redeployment
+          grid_placement_cooldown_until: nil,  # DateTime — backoff after exchange rejects
+          grid_consecutive_failures: 0         # Track consecutive placement failures for backoff
         }
 
         # Step 5: Ready
@@ -1062,20 +1064,47 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     current_order_count = map_size(state.grid_orders)
     available_slots = max(0, max_orders - current_order_count)
 
-    if available_slots == 0 do
-      BotLogger.debug(state.bot_id, :grid, "Grid full, no slots available", %{
-        max_orders: max_orders,
-        current: current_order_count
-      })
-      state
-    else
+    # Cooldown check: if we recently hit exchange order limits, back off
+    now = DateTime.utc_now()
+    in_cooldown = state.grid_placement_cooldown_until &&
+      DateTime.compare(now, state.grid_placement_cooldown_until) == :lt
+
+    cond do
+      in_cooldown ->
+        BotLogger.debug(state.bot_id, :grid, "Grid placement in cooldown", %{
+          until: DateTime.to_iso8601(state.grid_placement_cooldown_until),
+          consecutive_failures: state.grid_consecutive_failures
+        })
+        state
+
+      available_slots == 0 ->
+        BotLogger.debug(state.bot_id, :grid, "Grid full, no slots available", %{
+          max_orders: max_orders,
+          current: current_order_count
+        })
+        state
+
+      # No new levels to place — all grid levels already have orders
+      length(signal.buy_levels) == 0 and length(signal.sell_levels) == 0 ->
+        BotLogger.debug(state.bot_id, :grid, "All grid levels covered, nothing to place", %{
+          existing_orders: current_order_count
+        })
+        state
+
+      true ->
       symbol = signal.symbol
       raw_qty = signal.quantity_per_grid
       is_spot = state.market_type in [nil, "spot"]
 
-      # Round quantity to exchange precision upfront (floor to avoid overspend)
+      # Round quantity to exchange precision upfront
+      # Use round (not floor) — floor causes 0.000985 → 0.000 at precision 3
+      # which makes the bot unable to place any orders on small accounts
       qty_precision = exchange_qty_precision(symbol, state.market_type)
-      qty = Float.floor(raw_qty * :math.pow(10, qty_precision)) / :math.pow(10, qty_precision)
+      qty = Float.round(raw_qty, qty_precision)
+
+      # Ensure qty meets exchange minimum step (e.g., 0.001 for BTC futures)
+      min_qty = 1.0 / :math.pow(10, qty_precision)
+      qty = if qty < min_qty and raw_qty > 0, do: min_qty, else: qty
 
       # Cap buy orders by available capital
       total_investment = get_strategy_param(state.config, "total_investment", state.allocated_capital)
@@ -1128,7 +1157,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
         placed_buy_count = map_size(state.grid_orders) - current_order_count
 
-        if is_spot do
+        state = if is_spot do
           BotLogger.info(state.bot_id, :grid, "Spot grid orders placed", %{
             buy_orders_placed: placed_buy_count,
             buy_levels_available: length(buy_levels),
@@ -1157,6 +1186,13 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           })
           state
         end
+
+        # Update active capital in registry based on locked capital in open grid orders
+        locked = state.grid_orders
+          |> Enum.reduce(0.0, fn {_level, entry}, acc -> acc + entry.quantity * entry.price end)
+        BotRegistry.update_active_capital(state.bot_id, locked)
+
+        state
       end
     end
   end
@@ -1166,8 +1202,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     price_precision = exchange_price_precision(symbol, state.market_type)
     qty_precision = exchange_qty_precision(symbol, state.market_type)
     rounded_price = Float.round(price_level / 1, price_precision)
-    # Use floor for quantity — never round up beyond what capital allows
-    rounded_qty = Float.floor(quantity * :math.pow(10, qty_precision)) / :math.pow(10, qty_precision)
+    # Round quantity to nearest step (not floor — floor kills small accounts)
+    rounded_qty = Float.round(quantity, qty_precision)
+    min_qty = 1.0 / :math.pow(10, qty_precision)
+    rounded_qty = if rounded_qty < min_qty and quantity > 0, do: min_qty, else: rounded_qty
 
     # Validate: quantity must be > 0 and notional must meet exchange minimum ($5 futures, $10 spot)
     is_futures = state.market_type in ["usds_futures", "coinm_futures"]
@@ -1231,18 +1269,46 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
             %{state |
               grid_orders: Map.put(state.grid_orders, rounded_price, grid_entry),
-              total_trades: state.total_trades + 1
+              total_trades: state.total_trades + 1,
+              grid_consecutive_failures: 0,
+              grid_placement_cooldown_until: nil
             }
 
           {:error, reason} ->
-            BotLogger.warning(state.bot_id, :grid, "Grid order failed", %{
-              side: side,
-              price: rounded_price,
-              quantity: rounded_qty,
-              notional: Float.round(notional, 2),
-              reason: inspect(reason)
-            })
-            state
+            reason_str = inspect(reason)
+            is_max_order_error = String.contains?(reason_str, "max open order") or
+                                 String.contains?(reason_str, "-2025") or
+                                 String.contains?(reason_str, "MAX_NUM_ORDERS")
+
+            new_failures = state.grid_consecutive_failures + 1
+
+            # Exponential backoff: 2min, 4min, 8min, max 15min
+            cooldown_state = if is_max_order_error do
+              backoff_seconds = min(15 * 60, 120 * :math.pow(2, min(new_failures - 1, 3)) |> trunc())
+              cooldown_until = DateTime.add(DateTime.utc_now(), backoff_seconds, :second)
+
+              BotLogger.warning(state.bot_id, :grid, "Exchange order limit hit — backing off", %{
+                consecutive_failures: new_failures,
+                cooldown_seconds: backoff_seconds,
+                cooldown_until: DateTime.to_iso8601(cooldown_until)
+              })
+
+              %{state |
+                grid_consecutive_failures: new_failures,
+                grid_placement_cooldown_until: cooldown_until
+              }
+            else
+              BotLogger.warning(state.bot_id, :grid, "Grid order failed", %{
+                side: side,
+                price: rounded_price,
+                quantity: rounded_qty,
+                notional: Float.round(notional, 2),
+                reason: reason_str
+              })
+              %{state | grid_consecutive_failures: new_failures}
+            end
+
+            cooldown_state
         end
     end
   end
@@ -1312,6 +1378,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       {:ok, open_orders} ->
         open_ids = MapSet.new(open_orders, fn o -> o.order_id end)
 
+        # Reconcile DB: cancel orphaned "open" orders not on exchange
+        reconcile_stale_db_orders(state.bot_id, open_ids)
+
         # Find grid orders that are no longer open on exchange → they were filled
         {filled, still_open} = state.grid_orders
           |> Enum.split_with(fn {_level, entry} ->
@@ -1347,8 +1416,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     grid_levels = TradeEngine.Strategies.GridBot.compute_grid_levels(config)
     sorted_levels = Enum.sort(grid_levels)
 
-    # Update the DB order to "filled" now that we confirmed it via exchange polling
-    update_grid_order_filled(filled_entry, filled_price)
+    # Update the DB order to "filled" and record the fill transaction
+    update_grid_order_filled(filled_entry, filled_price, state)
+
+    # Update aggregate grid position in DB (async)
+    update_grid_position(state, symbol, filled_entry, filled_price)
 
     # Find the next level for a counter-order
     counter_side = if filled_entry.side == "BUY", do: "SELL", else: "BUY"
@@ -1409,13 +1481,115 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     end
   end
 
-  # Update DB order from "open" to "filled" when grid_check_fills detects fill
-  defp update_grid_order_filled(filled_entry, filled_price) do
+  # Maintain one aggregate position per grid bot.
+  # BUY fills increase position size (or create it), SELL fills reduce it.
+  # Also accumulates fees from exchange fill details.
+  defp update_grid_position(state, symbol, filled_entry, filled_price) do
+    Task.start(fn ->
+      try do
+        import Ecto.Query
+        alias TradeEngine.Trading.Position
+
+        # Find existing open position for this bot
+        existing = TradeEngine.Repo.one(
+          from(p in Position,
+            where: p.bot_id == ^state.bot_id and p.status == "open",
+            limit: 1
+          )
+        )
+
+        qty = filled_entry.quantity / 1.0
+        price = filled_price / 1.0
+
+        case {filled_entry.side, existing} do
+          {"BUY", nil} ->
+            # First buy — create new position
+            attrs = %{
+              symbol: symbol,
+              position_type: "long",
+              quantity: Decimal.from_float(qty),
+              remaining_quantity: Decimal.from_float(qty),
+              entry_price: Decimal.from_float(price),
+              current_price: Decimal.from_float(price),
+              status: "open",
+              entry_time: DateTime.utc_now(),
+              user_id: state.user_id,
+              strategy_id: state.strategy_id,
+              credential_id: state.credential_id,
+              bot_id: state.bot_id,
+              metadata: %{"type" => "grid_aggregate"}
+            }
+            case TradeEngine.Repo.insert(Position.changeset(%Position{}, attrs)) do
+              {:ok, pos} -> Logger.debug("Grid position created: #{pos.id}")
+              {:error, err} -> Logger.warning("Failed to create grid position: #{inspect(err)}")
+            end
+
+          {"BUY", pos} ->
+            # Add to existing position — weighted average entry price
+            old_qty = Decimal.to_float(pos.quantity)
+            new_qty = old_qty + qty
+            avg_entry = (Decimal.to_float(pos.entry_price) * old_qty + price * qty) / new_qty
+
+            TradeEngine.Repo.update(Position.changeset(pos, %{
+              quantity: Decimal.from_float(new_qty),
+              remaining_quantity: Decimal.from_float(new_qty),
+              entry_price: Decimal.from_float(avg_entry),
+              current_price: Decimal.from_float(price)
+            }))
+
+          {"SELL", nil} ->
+            # Sell without position — shouldn't happen, but log it
+            Logger.warning("Grid SELL fill with no open position for bot #{state.bot_id}")
+
+          {"SELL", pos} ->
+            # Reduce position
+            old_qty = Decimal.to_float(pos.quantity)
+            new_qty = max(0.0, old_qty - qty)
+            entry_price_f = Decimal.to_float(pos.entry_price)
+            pnl_increment = (price - entry_price_f) * qty
+            old_pnl = Decimal.to_float(pos.profit_loss || Decimal.new(0))
+
+            if new_qty < 0.0000001 do
+              # Position fully closed
+              TradeEngine.Repo.update(Position.changeset(pos, %{
+                quantity: Decimal.new(0),
+                remaining_quantity: Decimal.new(0),
+                exit_price: Decimal.from_float(price),
+                current_price: Decimal.from_float(price),
+                profit_loss: Decimal.from_float(old_pnl + pnl_increment),
+                status: "closed",
+                exit_time: DateTime.utc_now()
+              }))
+            else
+              TradeEngine.Repo.update(Position.changeset(pos, %{
+                quantity: Decimal.from_float(new_qty),
+                remaining_quantity: Decimal.from_float(new_qty),
+                current_price: Decimal.from_float(price),
+                profit_loss: Decimal.from_float(old_pnl + pnl_increment)
+              }))
+            end
+        end
+      rescue
+        e -> Logger.warning("Grid position update failed: #{Exception.message(e)}")
+      end
+    end)
+  end
+
+  # Update DB order from "open" to "filled" when grid_check_fills detects fill.
+  # Also queries exchange for actual trade details and records a fill/transaction.
+  defp update_grid_order_filled(filled_entry, filled_price, state) do
     Task.start(fn ->
       try do
         import Ecto.Query
         exchange_oid = to_string(filled_entry.order_id)
         now = DateTime.utc_now()
+
+        # Try to get actual fill details from exchange
+        fill_details = fetch_fill_for_order(state, filled_entry)
+        actual_price = (fill_details[:price] || filled_price) / 1.0
+        actual_qty = (fill_details[:quantity] || filled_entry.quantity) / 1.0
+        commission = fill_details[:commission] || 0.0
+        commission_asset = fill_details[:commission_asset]
 
         query = from(o in TradeEngine.Trading.Order,
           where: o.exchange_order_id == ^exchange_oid and o.status == "open"
@@ -1423,19 +1597,118 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
         case TradeEngine.Repo.update_all(query, set: [
           status: "filled",
-          execution_price: Decimal.from_float(filled_price / 1.0),
-          filled_quantity: Decimal.from_float(filled_entry.quantity / 1.0),
+          execution_price: Decimal.from_float(actual_price),
+          filled_quantity: Decimal.from_float(actual_qty),
           remaining_quantity: Decimal.new(0),
           execution_time: now,
           first_fill_at: now
         ]) do
           {n, _} when n > 0 ->
-            Logger.debug("Grid order #{exchange_oid} updated to filled @ #{filled_price}")
+            Logger.debug("Grid order #{exchange_oid} updated to filled @ #{actual_price}")
+
+            # Record the fill as a Transaction
+            record_grid_fill(state, filled_entry, actual_price, actual_qty, commission, commission_asset)
+
           _ ->
             Logger.debug("Grid order #{exchange_oid} not found as open (may already be filled)")
         end
       rescue
         e -> Logger.warning("Failed to update grid order to filled: #{Exception.message(e)}")
+      end
+    end)
+  end
+
+  # Query exchange for actual fill details of a specific order
+  defp fetch_fill_for_order(state, filled_entry) do
+    symbol = filled_entry.symbol
+    order_id = filled_entry.order_id
+
+    case Executor.get_user_trades(
+      state.credential_id, symbol,
+      market_type: state.market_type, limit: 20
+    ) do
+      {:ok, trades} when is_list(trades) ->
+        # Find the trade matching our order_id
+        oid = to_string(order_id)
+        case Enum.find(trades, fn t -> to_string(t[:order_id]) == oid end) do
+          nil -> %{}
+          trade -> trade
+        end
+      _ -> %{}
+    end
+  rescue
+    _ -> %{}
+  end
+
+  # Insert a Transaction record for a grid fill
+  defp record_grid_fill(state, filled_entry, price, quantity, commission, commission_asset) do
+    alias TradeEngine.Trading.Transaction
+
+    fill_attrs = %{
+      transaction_type: "trade",
+      symbol: filled_entry.symbol,
+      direction: String.downcase(filled_entry.side),
+      action: "grid_#{String.downcase(filled_entry.side)}",
+      quantity: Decimal.from_float(quantity / 1.0),
+      price: Decimal.from_float(price / 1.0),
+      amount: Decimal.from_float(quantity * price / 1.0),
+      order_id: to_string(filled_entry.order_id),
+      status: "completed",
+      executed_at: DateTime.utc_now(),
+      exchange: "binance",
+      user_id: state.user_id,
+      fee_amount: Decimal.from_float((commission || 0) / 1.0),
+      fee_asset: commission_asset,
+      description: "Grid #{filled_entry.side} #{filled_entry.symbol} qty=#{quantity} @ #{price}"
+    }
+
+    case TradeEngine.Repo.insert(Transaction.changeset(%Transaction{}, fill_attrs)) do
+      {:ok, fill} ->
+        Phoenix.PubSub.broadcast(TradeEngine.PubSub, "fills:updates", {:fill_recorded, fill})
+        Logger.debug("Grid fill recorded: #{filled_entry.side} #{quantity} @ #{price}")
+      {:error, err} ->
+        Logger.warning("Failed to record grid fill: #{inspect(err)}")
+    end
+  rescue
+    e -> Logger.warning("Grid fill record error: #{Exception.message(e)}")
+  end
+
+  # Reconcile DB: mark "open" orders as "cancelled" if they're not on the exchange
+  # and not tracked in our grid_orders state. Runs async to not block the fill check.
+  defp reconcile_stale_db_orders(bot_id, exchange_open_ids) do
+    Task.start(fn ->
+      try do
+        import Ecto.Query
+
+        # Get all DB orders marked "open" for this bot
+        db_open_orders = TradeEngine.Repo.all(
+          from(o in TradeEngine.Trading.Order,
+            where: o.bot_id == ^bot_id and o.status == "open",
+            select: {o.id, o.exchange_order_id}
+          )
+        )
+
+        # Find orders in DB that are NOT on the exchange
+        stale_orders = Enum.filter(db_open_orders, fn {_id, exchange_oid} ->
+          exchange_oid && not MapSet.member?(exchange_open_ids, exchange_oid)
+        end)
+
+        if length(stale_orders) > 0 do
+          stale_ids = Enum.map(stale_orders, fn {id, _} -> id end)
+
+          {updated, _} = TradeEngine.Repo.update_all(
+            from(o in TradeEngine.Trading.Order,
+              where: o.id in ^stale_ids and o.status == "open"
+            ),
+            set: [status: "cancelled", metadata: %{"reconciled" => true, "reconciled_at" => DateTime.to_iso8601(DateTime.utc_now())}]
+          )
+
+          if updated > 0 do
+            Logger.info("Grid reconciliation: marked #{updated} stale DB orders as cancelled for bot #{bot_id}")
+          end
+        end
+      rescue
+        e -> Logger.warning("Grid reconciliation failed: #{Exception.message(e)}")
       end
     end)
   end
