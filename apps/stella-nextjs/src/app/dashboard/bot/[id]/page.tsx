@@ -1702,6 +1702,7 @@ export default function BotDetailPage() {
       fee_rate: bot.config.fee_rate ?? 0.0004,
       quantity_per_grid: bot.config.quantity_per_grid ?? 0,
       restart_on_stop_loss: bot.config.restart_on_stop_loss ?? true,
+      leverage: bot.config.leverage ?? 1,
     });
     setGridConfigModal(true);
   };
@@ -1900,6 +1901,7 @@ export default function BotDetailPage() {
                   ["Take Profit", bot.config.take_profit_price ? `$${Number(bot.config.take_profit_price).toLocaleString()}` : "--"],
                   ["Fee", bot.config.fee_rate ? `${(bot.config.fee_rate * 100).toFixed(2)}%` : "--"],
                   ["Restart on SL", bot.config.restart_on_stop_loss ? "Yes" : "No"],
+                  ...(bot.config.leverage && bot.config.leverage > 1 ? [["Leverage", `${bot.config.leverage}x`]] : []),
                 ] as [string, any][]).map(([k, v]) => (
                   <span key={k} style={{ display:"inline-flex", gap:4, alignItems:"center", letterSpacing:".06em", textTransform:"uppercase" }}>
                     {k}: <span style={{ color:"var(--text1)", fontWeight:500 }}>{v}</span>
@@ -2265,6 +2267,45 @@ export default function BotDetailPage() {
                 <GridConfigField label="Fee Rate" field="fee_rate" type="number" step={0.0001} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
                 <GridConfigField label="Qty Per Grid (0=auto)" field="quantity_per_grid" type="number" step={0.001} draft={gridConfigDraft} setDraft={setGridConfigDraft} />
               </div>
+              {/* Leverage (futures bots) */}
+              {bot && (bot.marketType === "usds_futures" || bot.marketType === "coinm_futures" || bot.config?.market_type === "usds_futures" || bot.config?.market_type === "coinm_futures") && (
+                <div>
+                  <label style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text2)", textTransform: "uppercase", letterSpacing: ".06em", display: "block", marginBottom: 4 }}>
+                    Leverage
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="range"
+                      value={gridConfigDraft.leverage ?? 1}
+                      onChange={e => setGridConfigDraft(p => ({ ...p, leverage: parseInt(e.target.value) || 1 }))}
+                      min={1} max={125} step={1}
+                      style={{ flex: 1, accentColor: "var(--blue)" }}
+                    />
+                    <input
+                      type="number"
+                      value={gridConfigDraft.leverage ?? 1}
+                      onChange={e => setGridConfigDraft(p => ({ ...p, leverage: Math.max(1, Math.min(125, parseInt(e.target.value) || 1)) }))}
+                      min={1} max={125}
+                      style={{
+                        background: "var(--bg0)", border: "1px solid var(--border2)", borderRadius: 4,
+                        padding: "8px 12px", fontFamily: "var(--mono)", fontSize: 12, color: "var(--text0)",
+                        outline: "none", width: 60, textAlign: "center"
+                      }}
+                    />
+                    <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text1)" }}>x</span>
+                  </div>
+                  {(gridConfigDraft.leverage ?? 1) > 10 && (
+                    <p style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--yellow, #eab308)", marginTop: 4 }}>
+                      High leverage increases liquidation risk.
+                    </p>
+                  )}
+                  {(gridConfigDraft.leverage ?? 1) > 1 && gridConfigDraft.total_investment && (
+                    <p style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text2)", marginTop: 2 }}>
+                      Effective capital: ${(parseFloat(gridConfigDraft.total_investment) * (gridConfigDraft.leverage ?? 1)).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              )}
               {/* Toggle */}
               <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                 <input

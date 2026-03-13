@@ -29,6 +29,7 @@ export const BOT_FLEET: Record<string, BotConfig> = {
       take_profit_price: null,
       max_open_orders: 20,
       fee_rate: 0.001,
+      leverage: 1,
     },
 
     apiConfig: {
@@ -68,6 +69,7 @@ export const BOT_FLEET: Record<string, BotConfig> = {
       take_profit_price: null,
       max_open_orders: 40,
       fee_rate: 0.001,
+      leverage: 1,
     },
 
     apiConfig: {

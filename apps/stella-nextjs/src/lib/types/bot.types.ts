@@ -64,6 +64,9 @@ export interface GridBotConfig {
   max_open_orders: number;      // exchange order limit (default 20)
   fee_rate: number;             // per-side fee rate (default 0.001 = 0.1%)
 
+  // Leverage (futures only)
+  leverage: number;             // 1 = no leverage, 2-125 = leveraged (default 1)
+
   // Computed (read-only, shown in UI)
   grid_spacing_pct?: number;    // % between levels
   profit_per_grid_pct?: number; // spacing - 2*fee = net profit per round trip

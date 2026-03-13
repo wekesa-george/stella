@@ -14,6 +14,7 @@ export interface GridConfigValues {
   take_profit_price: number | null;
   max_open_orders: number;
   fee_rate: number;
+  leverage: number;
 }
 
 interface GridBotConfigFormProps {
@@ -23,6 +24,8 @@ interface GridBotConfigFormProps {
   currentPrice?: number;
   /** Whether the form is in a disabled/read-only state */
   disabled?: boolean;
+  /** Market type — leverage only shown for futures */
+  marketType?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -63,10 +66,11 @@ const DEFAULT_VALUES: GridConfigValues = {
   take_profit_price: null,
   max_open_orders: 20,
   fee_rate: 0.001,
+  leverage: 1,
 };
 
 // ── Component ────────────────────────────────────────────────────
-export function GridBotConfigForm({ values, onChange, currentPrice, disabled }: GridBotConfigFormProps) {
+export function GridBotConfigForm({ values, onChange, currentPrice, disabled, marketType }: GridBotConfigFormProps) {
   const v = { ...DEFAULT_VALUES, ...values };
 
   const update = (patch: Partial<GridConfigValues>) => {
@@ -325,6 +329,51 @@ export function GridBotConfigForm({ values, onChange, currentPrice, disabled }: 
           </p>
         </div>
       </div>
+
+      {/* ── Section: Leverage (futures only) ── */}
+      {(marketType === "usds_futures" || marketType === "coinm_futures") && (
+        <>
+          <div className={sectionTitle}>Leverage</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={label}>Leverage Multiplier</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  value={v.leverage}
+                  onChange={(e) => update({ leverage: Math.max(1, Math.min(125, parseInt(e.target.value) || 1)) })}
+                  min="1"
+                  max="125"
+                  step="1"
+                  className="flex-1 accent-[#3d9df3]"
+                  disabled={disabled}
+                />
+                <input
+                  type="number"
+                  value={v.leverage}
+                  onChange={(e) => update({ leverage: Math.max(1, Math.min(125, parseInt(e.target.value) || 1)) })}
+                  min="1"
+                  max="125"
+                  className={`${input} !w-16 text-center`}
+                  disabled={disabled}
+                />
+                <span className="text-xs text-foreground font-mono">x</span>
+              </div>
+              {v.leverage > 10 && (
+                <p className="text-[9px] text-[#ffaa00] mt-1">
+                  High leverage increases liquidation risk. Platform max is enforced server-side.
+                </p>
+              )}
+              {v.leverage > 1 && v.total_investment > 0 && (
+                <p className="text-[9px] text-[#5a7090] mt-0.5">
+                  Effective capital: <span className="text-foreground font-mono">${(v.total_investment * v.leverage).toLocaleString()}</span>
+                  {" "}({v.leverage}x of ${v.total_investment.toLocaleString()})
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
