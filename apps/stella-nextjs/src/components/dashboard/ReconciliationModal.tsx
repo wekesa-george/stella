@@ -10,11 +10,24 @@ import {
 
 type Tab = 'positions' | 'orders' | 'balances';
 
-interface ReconciliationModalProps {
-  onClose: () => void;
+interface CredentialInfo {
+  name: string;
+  sandbox: boolean;
 }
 
-export default function ReconciliationModal({ onClose }: ReconciliationModalProps) {
+interface ReconciliationModalProps {
+  onClose: () => void;
+  /** If provided, filter to only this credential */
+  credentialId?: string;
+  /** Display name for the filtered credential (e.g. "Binance") */
+  credentialName?: string;
+  /** Whether the credential is a sandbox */
+  credentialSandbox?: boolean;
+  /** Map of credential ID → display info for all known credentials */
+  credentialMap?: Record<string, CredentialInfo>;
+}
+
+export default function ReconciliationModal({ onClose, credentialId, credentialName, credentialSandbox, credentialMap }: ReconciliationModalProps) {
   const [tab, setTab] = useState<Tab>('positions');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +37,45 @@ export default function ReconciliationModal({ onClose }: ReconciliationModalProp
   const [summary, setSummary] = useState<any>(null);
   const summaryRef = useRef<any>(null);
   const mountedRef = useRef(false);
+
+  // Helper to filter reconciliation data by credential_id when filtering to a single credential
+  const filterByCredential = useCallback((data: any) => {
+    if (!credentialId || !data) return data;
+    const filtered = { ...data };
+    // Filter array fields that contain credential-specific items
+    for (const key of ['orphaned_exchange', 'orphaned_db', 'drifted', 'matched', 'missing_db', 'stale_exchange', 'status_mismatch']) {
+      if (Array.isArray(filtered[key])) {
+        filtered[key] = filtered[key].filter((item: any) => item.credential_id === credentialId);
+      }
+    }
+    // Filter balances array and inject display name
+    if (Array.isArray(filtered.balances)) {
+      filtered.balances = filtered.balances
+        .filter((b: any) => b.credential_id === credentialId)
+        .map((b: any) => ({
+          ...b,
+          exchange_name: b.exchange_name || credentialName || b.adapter_name,
+          is_sandbox: b.is_sandbox ?? credentialSandbox ?? false,
+        }));
+    }
+    // Filter errors
+    if (Array.isArray(filtered.errors)) {
+      filtered.errors = filtered.errors.filter((e: any) => e.credential_id === credentialId);
+    }
+    // Recount totals if present
+    if (filtered.totals) {
+      filtered.totals = {
+        matched: filtered.matched?.length ?? filtered.totals.matched,
+        orphaned_exchange: filtered.orphaned_exchange?.length ?? filtered.totals.orphaned_exchange,
+        orphaned_db: filtered.orphaned_db?.length ?? filtered.totals.orphaned_db,
+        drifted: filtered.drifted?.length ?? filtered.totals.drifted,
+        missing_db: filtered.missing_db?.length ?? filtered.totals.missing_db,
+        stale_exchange: filtered.stale_exchange?.length ?? filtered.totals.stale_exchange,
+        status_mismatch: filtered.status_mismatch?.length ?? filtered.totals.status_mismatch,
+      };
+    }
+    return filtered;
+  }, [credentialId]);
 
   const fetchTab = useCallback(async (t: Tab) => {
     setLoading(true);
@@ -39,22 +91,22 @@ export default function ReconciliationModal({ onClose }: ReconciliationModalProp
       if (t === 'positions') {
         const r = await getReconciliationPositions();
         if (r?.error) throw new Error(r.error);
-        setPosData(r?.data);
+        setPosData(filterByCredential(r?.data));
       } else if (t === 'orders') {
         const r = await getReconciliationOrders();
         if (r?.error) throw new Error(r.error);
-        setOrdData(r?.data);
+        setOrdData(filterByCredential(r?.data));
       } else if (t === 'balances') {
         const r = await getReconciliationBalances();
         if (r?.error) throw new Error(r.error);
-        setBalData(r?.data);
+        setBalData(filterByCredential(r?.data));
       }
     } catch (e: any) {
       setError(e?.message || 'Failed to fetch');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterByCredential]);
 
   const handleTabSwitch = useCallback((t: Tab) => {
     setTab(t);
@@ -106,8 +158,8 @@ export default function ReconciliationModal({ onClose }: ReconciliationModalProp
               Platform Reconciliation
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--t2)', marginTop: 2 }}>
-              Exchange vs Local DB — All Futures Credentials
-              {summary && ` — ${summary.credentials || 0} credential(s)`}
+              Exchange vs Local DB — {credentialId ? `${credentialName || 'Selected Credential'}${credentialSandbox ? ' (Sandbox)' : ''}` : 'All Futures Credentials'}
+              {summary && ` — ${credentialId ? '1' : summary.credentials || 0} credential(s)`}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -196,11 +248,11 @@ export default function ReconciliationModal({ onClose }: ReconciliationModalProp
               {error}
             </div>
           ) : tab === 'positions' && posData ? (
-            <PositionsTab data={posData} />
+            <PositionsTab data={posData} credentialMap={credentialMap} />
           ) : tab === 'orders' && ordData ? (
-            <OrdersTab data={ordData} />
+            <OrdersTab data={ordData} credentialMap={credentialMap} />
           ) : tab === 'balances' && balData ? (
-            <BalancesTab data={balData} />
+            <BalancesTab data={balData} credentialMap={credentialMap} />
           ) : (
             <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', textAlign: 'center', padding: 32 }}>
               Click REFRESH to load data
@@ -226,7 +278,7 @@ export default function ReconciliationModal({ onClose }: ReconciliationModalProp
 }
 
 /* ── POSITIONS TAB ── */
-function PositionsTab({ data }: { data: any }) {
+function PositionsTab({ data, credentialMap }: { data: any; credentialMap?: Record<string, CredentialInfo> }) {
   const totals = data.totals || {};
   const sections: { key: string; label: string; color: string; items: any[] }[] = [
     { key: 'orphaned_exchange', label: 'Orphaned on Exchange (no DB / no bot)', color: 'var(--r)', items: data.orphaned_exchange || [] },
@@ -307,7 +359,7 @@ function PositionsTab({ data }: { data: any }) {
       {data.errors?.length > 0 && (
         <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--r)', marginTop: 8 }}>
           Errors: {data.errors.map((e: any, i: number) => (
-            <div key={i}>{e.credential_id?.slice(0, 8)}: {e.error}</div>
+            <div key={i}>{e.exchange_name || e.adapter_name || e.label || credentialMap?.[e.credential_id]?.name || e.credential_id?.slice(0, 8)}: {e.error}</div>
           ))}
         </div>
       )}
@@ -316,7 +368,7 @@ function PositionsTab({ data }: { data: any }) {
 }
 
 /* ── ORDERS TAB ── */
-function OrdersTab({ data }: { data: any }) {
+function OrdersTab({ data, credentialMap }: { data: any; credentialMap?: Record<string, CredentialInfo> }) {
   const totals = data.totals || {};
 
   const sections = [
@@ -392,7 +444,7 @@ function OrdersTab({ data }: { data: any }) {
       {data.errors?.length > 0 && (
         <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--r)', marginTop: 8 }}>
           Errors: {data.errors.map((e: any, i: number) => (
-            <div key={i}>{e.credential_id?.slice(0, 8)}: {e.error}</div>
+            <div key={i}>{e.exchange_name || e.adapter_name || e.label || credentialMap?.[e.credential_id]?.name || e.credential_id?.slice(0, 8)}: {e.error}</div>
           ))}
         </div>
       )}
@@ -401,8 +453,16 @@ function OrdersTab({ data }: { data: any }) {
 }
 
 /* ── BALANCES TAB ── */
-function BalancesTab({ data }: { data: any }) {
+function BalancesTab({ data, credentialMap }: { data: any; credentialMap?: Record<string, CredentialInfo> }) {
   const balances = data.balances || [];
+
+  const resolveCredential = (b: any, i: number) => {
+    // Try the map first, then fallback to API fields, then numbered fallback
+    const mapped = credentialMap?.[b.credential_id];
+    const name = b.exchange_name || b.adapter_name || b.label || mapped?.name || `Credential ${i + 1}`;
+    const isSandbox = b.is_sandbox ?? mapped?.sandbox ?? false;
+    return { name, isSandbox };
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -410,14 +470,25 @@ function BalancesTab({ data }: { data: any }) {
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', textAlign: 'center', padding: 24 }}>
           No futures credentials found
         </div>
-      ) : balances.map((b: any, i: number) => (
+      ) : balances.map((b: any, i: number) => {
+        const { name, isSandbox } = resolveCredential(b, i);
+        return (
         <div key={i} style={{
           padding: 12, background: 'var(--bg2)', border: '1px solid var(--b2)', borderRadius: 4,
           fontFamily: 'var(--mono)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t0)' }}>
-              Credential: {String(b.credential_id).slice(0, 12)}...
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t0)' }}>
+                {name}
+              </div>
+              {isSandbox && (
+                <span style={{
+                  fontSize: 7, padding: '1px 4px', borderRadius: 2, fontWeight: 600,
+                  background: 'rgba(0,150,255,0.1)', color: 'rgba(100,180,255,1)',
+                  border: '1px solid rgba(0,150,255,0.2)',
+                }}>SANDBOX</span>
+              )}
             </div>
             <div style={{
               fontSize: 9, padding: '2px 6px', borderRadius: 3,
@@ -455,12 +526,13 @@ function BalancesTab({ data }: { data: any }) {
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
 
       {data.errors?.length > 0 && (
         <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--r)', marginTop: 8 }}>
           Errors: {data.errors.map((e: any, i: number) => (
-            <div key={i}>{e.credential_id?.slice(0, 8)}: {e.error}</div>
+            <div key={i}>{e.exchange_name || e.adapter_name || e.label || credentialMap?.[e.credential_id]?.name || e.credential_id?.slice(0, 8)}: {e.error}</div>
           ))}
         </div>
       )}

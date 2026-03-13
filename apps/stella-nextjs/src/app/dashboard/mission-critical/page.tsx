@@ -1520,7 +1520,7 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   const [refreshingBalances, setRefreshingBalances] = useState(false);
   // Position modal state
   const [posModal, setPosModal] = useState<{ credId: string; name: string } | null>(null);
-  const [showReconciliation, setShowReconciliation] = useState(false);
+  const [showReconciliation, setShowReconciliation] = useState<{ credId: string; name: string; sandbox: boolean } | null>(null);
   const [posModalData, setPosModalData] = useState<any[]>([]);
   const [posModalLoading, setPosModalLoading] = useState(false);
   const [posModalClosing, setPosModalClosing] = useState(false);
@@ -1714,6 +1714,15 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     };
   });
 
+  // Build credential ID → display info map for the reconciliation modal
+  const credentialMap = useMemo(() => {
+    const map: Record<string, { name: string; sandbox: boolean }> = {};
+    for (const t of tiles) {
+      map[t.id] = { name: t.name, sandbox: t.sandbox };
+    }
+    return map;
+  }, [tiles]);
+
   const statusColor = (s: string) => s === "healthy" ? "var(--g)" : s === "degraded" ? "var(--a)" : s === "unknown" ? "var(--t2)" : "var(--r)";
   const latColor = (ms: number) => ms < 50 ? "var(--g)" : ms < 150 ? "var(--a)" : "var(--r)";
 
@@ -1863,7 +1872,7 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                       POSITIONS
                     </button>
                     <button
-                      onClick={() => setShowReconciliation(true)}
+                      onClick={() => setShowReconciliation({ credId: ex.id, name: ex.name, sandbox: ex.sandbox })}
                       style={{
                         flex:1, background:"rgba(255,180,0,0.08)", border:"1px solid rgba(255,180,0,0.3)", borderRadius:2,
                         color:"var(--y, #ffb400)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:8,
@@ -1882,7 +1891,13 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
 
       {/* ── Reconciliation Modal ── */}
       {showReconciliation && (
-        <ReconciliationModal onClose={() => setShowReconciliation(false)} />
+        <ReconciliationModal
+          onClose={() => setShowReconciliation(null)}
+          credentialId={showReconciliation.credId}
+          credentialName={showReconciliation.name}
+          credentialSandbox={showReconciliation.sandbox}
+          credentialMap={credentialMap}
+        />
       )}
 
       {/* ── Positions Modal ── */}

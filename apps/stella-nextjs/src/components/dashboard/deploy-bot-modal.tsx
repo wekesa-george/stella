@@ -118,9 +118,12 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
   // Step 5 — Review / Deploy
   const [botName, setBotName] = useState("");
   const [allocatedCapital, setAllocatedCapital] = useState("");
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchBots, setBatchBots] = useState<{ name: string; capital: string; pairs: string[] }[]>([]);
 
   // Shared state
   const [submitting, setSubmitting] = useState(false);
+  const [deployProgress, setDeployProgress] = useState<{ total: number; done: number; errors: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // ── Data loading ─────────────────────────────────────────────
@@ -239,7 +242,9 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
       case 4:
         return !!selectedStrategyId;
       case 5:
-        return !!botName.trim();
+        return batchMode
+          ? batchBots.length > 0 && batchBots.every((b) => b.name.trim())
+          : !!botName.trim();
       default:
         return false;
     }
@@ -267,6 +272,9 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
     setSelectedStrategyId("");
     setBotName("");
     setAllocatedCapital("");
+    setBatchMode(false);
+    setBatchBots([]);
+    setDeployProgress(null);
     setError(null);
   };
 
@@ -277,43 +285,65 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
 
   // ── Submit ───────────────────────────────────────────────────
 
+  const deployOne = async (name: string, capital: string, pairs: string[]) => {
+    const payload: Record<string, any> = {
+      name: name.trim(),
+      exchange: selectedExchange?.exchange_key || "binance",
+      trading_pairs: pairs,
+      strategy_id: selectedStrategyId || undefined,
+      credential_id: selectedCredentialId || undefined,
+      allocated_capital: capital ? Number(capital) : undefined,
+    };
+
+    if (ownerType === "system") {
+      return createSystemBot({ service_account_id: selectedSaId, ...payload });
+    } else {
+      return createBot({ user_id: selectedUserId, ...payload });
+    }
+  };
+
   const handleDeploy = async () => {
     setError(null);
-    if (!botName.trim()) {
-      setError("Bot name is required");
+
+    const items = batchMode
+      ? batchBots.filter((b) => b.name.trim())
+      : [{ name: botName, capital: allocatedCapital, pairs: selectedPairs }];
+
+    if (items.length === 0) {
+      setError("Add at least one bot to deploy");
       return;
     }
+
     setSubmitting(true);
-    try {
-      const payload: Record<string, any> = {
-        name: botName.trim(),
-        exchange: selectedExchange?.exchange_key || "binance",
-        trading_pairs: selectedPairs,
-        strategy_id: selectedStrategyId || undefined,
-        credential_id: selectedCredentialId || undefined,
-        allocated_capital: allocatedCapital ? Number(allocatedCapital) : undefined,
-      };
+    setDeployProgress({ total: items.length, done: 0, errors: [] });
 
-      let result;
-      if (ownerType === "system") {
-        result = await createSystemBot({ service_account_id: selectedSaId, ...payload });
-      } else {
-        result = await createBot({ user_id: selectedUserId, ...payload });
-      }
+    const errors: string[] = [];
+    let lastBot: Bot | null = null;
 
-      if (result.error) {
-        setError(result.error);
-        return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      try {
+        const result = await deployOne(item.name, item.capital, item.pairs);
+        if (result.error) {
+          errors.push(`${item.name}: ${result.error}`);
+        } else if (result.data) {
+          lastBot = mapApiBotToUiBot(result.data);
+          onDeployed(lastBot);
+        }
+      } catch {
+        errors.push(`${item.name}: Failed to deploy`);
       }
-      if (result.data) {
-        const bot = mapApiBotToUiBot(result.data);
-        onDeployed(bot);
-        handleClose();
-      }
-    } catch {
-      setError("Failed to deploy bot");
-    } finally {
-      setSubmitting(false);
+      setDeployProgress({ total: items.length, done: i + 1, errors: [...errors] });
+    }
+
+    setSubmitting(false);
+
+    if (errors.length === 0) {
+      handleClose();
+    } else if (errors.length < items.length) {
+      setError(`${items.length - errors.length} deployed, ${errors.length} failed:\n${errors.join("\n")}`);
+    } else {
+      setError(`All deploys failed:\n${errors.join("\n")}`);
     }
   };
 
@@ -428,6 +458,10 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
               setBotName={setBotName}
               allocatedCapital={allocatedCapital}
               setAllocatedCapital={setAllocatedCapital}
+              batchMode={batchMode}
+              setBatchMode={setBatchMode}
+              batchBots={batchBots}
+              setBatchBots={setBatchBots}
             />
           )}
 
@@ -463,7 +497,11 @@ export function DeployBotModal({ open, onClose, onDeployed }: DeployBotModalProp
                 disabled={submitting || !canNext()}
                 className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50"
               >
-                {submitting ? "Deploying..." : "Deploy Bot"}
+                {submitting && deployProgress
+                  ? `Deploying ${deployProgress.done}/${deployProgress.total}...`
+                  : batchMode
+                  ? `Deploy ${batchBots.length} Bot${batchBots.length !== 1 ? "s" : ""}`
+                  : "Deploy Bot"}
               </button>
             )}
           </div>
@@ -827,6 +865,10 @@ function StepReview({
   setBotName,
   allocatedCapital,
   setAllocatedCapital,
+  batchMode,
+  setBatchMode,
+  batchBots,
+  setBatchBots,
 }: {
   ownerType: "user" | "system";
   user?: UserRow;
@@ -839,37 +881,185 @@ function StepReview({
   setBotName: (n: string) => void;
   allocatedCapital: string;
   setAllocatedCapital: (v: string) => void;
+  batchMode: boolean;
+  setBatchMode: (v: boolean) => void;
+  batchBots: { name: string; capital: string; pairs: string[] }[];
+  setBatchBots: (v: { name: string; capital: string; pairs: string[] }[]) => void;
 }) {
+  const addBatchBot = () => {
+    const idx = batchBots.length + 1;
+    const stratLabel = strategy?.name?.split(" ")[0] || "Bot";
+    const pairLabel = selectedPairs[0]?.replace(/[/:]/g, "") || "";
+    setBatchBots([
+      ...batchBots,
+      { name: `${stratLabel} ${pairLabel} #${idx}`, capital: allocatedCapital || "", pairs: [...selectedPairs] },
+    ]);
+  };
+
+  const removeBatchBot = (i: number) => {
+    setBatchBots(batchBots.filter((_, j) => j !== i));
+  };
+
+  const updateBatchBot = (i: number, field: string, value: string | string[]) => {
+    setBatchBots(batchBots.map((b, j) => (j === i ? { ...b, [field]: value } : b)));
+  };
+
+  const duplicateBatchBot = (i: number) => {
+    const src = batchBots[i];
+    setBatchBots([
+      ...batchBots,
+      { ...src, name: `${src.name} (copy)` },
+    ]);
+  };
+
+  const quickBatchFromPairs = () => {
+    const stratLabel = strategy?.name?.split(" ")[0] || "Bot";
+    const bots = selectedPairs.map((pair, i) => ({
+      name: `${stratLabel} ${pair.replace(/[/:]/g, "")} #${i + 1}`,
+      capital: allocatedCapital || "",
+      pairs: [pair],
+    }));
+    setBatchBots(bots);
+  };
+
   return (
     <div className="space-y-4">
-      {/* Bot Name */}
-      <div>
-        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
-          Bot Name
-        </label>
-        <input
-          value={botName}
-          onChange={(e) => setBotName(e.target.value)}
-          placeholder="e.g. BTC Scalper Alpha"
-          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
-          autoFocus
-        />
+      {/* Mode Toggle */}
+      <div className="flex items-center justify-between">
+        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest">Deploy Mode</label>
+        <div className="flex gap-1 bg-[#0d1520] rounded-sm p-0.5 border border-dark">
+          <button
+            onClick={() => setBatchMode(false)}
+            className={`px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all ${
+              !batchMode ? "bg-[#FFD700] text-black" : "text-[#5a7090] hover:text-foreground"
+            }`}
+          >
+            Single
+          </button>
+          <button
+            onClick={() => {
+              setBatchMode(true);
+              if (batchBots.length === 0) addBatchBot();
+            }}
+            className={`px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all ${
+              batchMode ? "bg-[#FFD700] text-black" : "text-[#5a7090] hover:text-foreground"
+            }`}
+          >
+            Batch
+          </button>
+        </div>
       </div>
 
-      {/* Allocated Capital */}
-      <div>
-        <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
-          Allocated Capital (USD)
-        </label>
-        <input
-          value={allocatedCapital}
-          onChange={(e) => setAllocatedCapital(e.target.value)}
-          placeholder="10000"
-          type="number"
-          min="0"
-          className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
-        />
-      </div>
+      {!batchMode ? (
+        <>
+          {/* Single bot — Bot Name */}
+          <div>
+            <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
+              Bot Name
+            </label>
+            <input
+              value={botName}
+              onChange={(e) => setBotName(e.target.value)}
+              placeholder="e.g. BTC Scalper Alpha"
+              className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
+              Allocated Capital (USD)
+            </label>
+            <input
+              value={allocatedCapital}
+              onChange={(e) => setAllocatedCapital(e.target.value)}
+              placeholder="10000"
+              type="number"
+              min="0"
+              className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Batch mode */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={addBatchBot}
+              className="px-3 py-1.5 rounded-sm text-[10px] font-bold uppercase border border-dark hover:border-[#FFD700] text-[#8fa3b8] hover:text-[#FFD700] transition-all"
+            >
+              + Add Bot
+            </button>
+            {selectedPairs.length > 1 && (
+              <button
+                onClick={quickBatchFromPairs}
+                className="px-3 py-1.5 rounded-sm text-[10px] font-bold uppercase border border-dark hover:border-[#3d9df3] text-[#8fa3b8] hover:text-[#3d9df3] transition-all"
+                title="Create one bot per selected trading pair"
+              >
+                1 Bot per Pair ({selectedPairs.length})
+              </button>
+            )}
+            <span className="text-[10px] text-[#5a7090] ml-auto">{batchBots.length} bot{batchBots.length !== 1 ? "s" : ""}</span>
+          </div>
+
+          <div className="space-y-2 max-h-[280px] overflow-y-auto">
+            {batchBots.map((bot, i) => (
+              <div key={i} className="border border-dark rounded-md p-3 space-y-2 bg-[rgba(255,255,255,0.01)]">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-[#5a7090] font-bold w-4 shrink-0">#{i + 1}</span>
+                  <input
+                    value={bot.name}
+                    onChange={(e) => updateBatchBot(i, "name", e.target.value)}
+                    placeholder="Bot name"
+                    className="flex-1 bg-dark-elevated border border-dark rounded-sm px-2 py-1.5 text-[11px] text-foreground placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                  />
+                  <input
+                    value={bot.capital}
+                    onChange={(e) => updateBatchBot(i, "capital", e.target.value)}
+                    placeholder="Capital"
+                    type="number"
+                    min="0"
+                    className="w-24 bg-dark-elevated border border-dark rounded-sm px-2 py-1.5 text-[11px] text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                  />
+                  <button
+                    onClick={() => duplicateBatchBot(i)}
+                    title="Duplicate"
+                    className="text-[#5a7090] hover:text-[#3d9df3] text-sm transition-colors"
+                  >
+                    &#x2398;
+                  </button>
+                  <button
+                    onClick={() => removeBatchBot(i)}
+                    title="Remove"
+                    className="text-[#5a7090] hover:text-[#ff4757] text-sm transition-colors"
+                  >
+                    &times;
+                  </button>
+                </div>
+                {/* Per-bot pair override */}
+                <div className="flex flex-wrap gap-1">
+                  {selectedPairs.map((pair) => (
+                    <button
+                      key={pair}
+                      onClick={() => {
+                        const has = bot.pairs.includes(pair);
+                        const next = has ? bot.pairs.filter((p) => p !== pair) : [...bot.pairs, pair];
+                        if (next.length > 0) updateBatchBot(i, "pairs", next);
+                      }}
+                      className={`px-1.5 py-0.5 rounded-sm text-[9px] font-mono border transition-all ${
+                        bot.pairs.includes(pair)
+                          ? "border-[#FFD700]/40 text-[#FFD700] bg-[rgba(255,215,0,0.06)]"
+                          : "border-dark text-[#5a7090] hover:border-dark-2"
+                      }`}
+                    >
+                      {pair.replace(/[/:]/g, "")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Summary */}
       <div className="border border-dark rounded-md overflow-hidden">
@@ -900,6 +1090,12 @@ function StepReview({
             <SummaryRow
               label="Credential"
               value={credential.label || credential.id.slice(0, 8)}
+            />
+          )}
+          {batchMode && (
+            <SummaryRow
+              label="Bots to Deploy"
+              value={`${batchBots.length} bot${batchBots.length !== 1 ? "s" : ""} — Total capital: $${batchBots.reduce((s, b) => s + (Number(b.capital) || 0), 0).toLocaleString()}`}
             />
           )}
         </div>
