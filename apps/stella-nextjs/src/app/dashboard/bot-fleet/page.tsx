@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve } from "@/lib/tradingEngineApi";
+import { stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve, deployBot, deploySystemBot } from "@/lib/tradingEngineApi";
 import type { BotListFilters } from "@/lib/tradingEngineApi";
 import { acknowledgeAlert as ackAlertApi } from "@/lib/stellaAdminApi";
 import { useBotChannel, useAlertChannel } from "@/hooks/usePhoenixChannel";
 import { mapWsAlertToUiAlert } from "@/lib/api/mappers";
 import type { Bot, Alert } from "@/lib/types/dashboard";
-import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye, Play, Pause, Square, Trash2, LayoutGrid, TableProperties } from "lucide-react";
+import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye, Play, Pause, Square, Trash2, LayoutGrid, TableProperties, Copy, Loader2, AlertCircle, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BotGridSkeleton } from "@/components/ui/skeleton";
@@ -72,6 +72,11 @@ export default function BotFleetPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [botEquityCurves, setBotEquityCurves] = useState<Record<string, { t: number; value: number }[]>>({});
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  const [cloneBot, setCloneBot] = useState<Bot | null>(null);
+  const [cloneCount, setCloneCount] = useState(1);
+  const [cloneSubmitting, setCloneSubmitting] = useState(false);
+  const [cloneProgress, setCloneProgress] = useState<{ total: number; done: number; errors: string[] } | null>(null);
+  const [cloneError, setCloneError] = useState<string | null>(null);
   const router = useRouter();
 
   const { bots: wsBots } = useBotChannel();
@@ -185,6 +190,62 @@ export default function BotFleetPage() {
         alert(`Failed to delete bot: ${result.error}`);
       }
       setDeleteModal(null);
+    }
+  };
+
+  const handleClone = (bot: Bot) => {
+    setCloneBot(bot);
+    setCloneCount(1);
+    setCloneError(null);
+    setCloneProgress(null);
+  };
+
+  const confirmClone = async () => {
+    if (!cloneBot) return;
+    const total = Math.max(1, Math.min(20, cloneCount));
+    setCloneSubmitting(true);
+    setCloneProgress({ total, done: 0, errors: [] });
+    setCloneError(null);
+
+    const errors: string[] = [];
+    const suffix = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+
+    for (let i = 0; i < total; i++) {
+      const name = `${cloneBot.name} clone-${suffix()}`;
+
+      const payload: Record<string, any> = {
+        name,
+        trading_pairs: cloneBot.tradingPairs?.length ? cloneBot.tradingPairs : [cloneBot.pair],
+        strategy_id: cloneBot.strategyId || undefined,
+        credential_id: cloneBot.credentialId || undefined,
+        allocated_capital: cloneBot.allocatedCapital || undefined,
+        market_type: cloneBot.marketType || "spot",
+        ...(cloneBot.config && Object.keys(cloneBot.config).length > 0 ? { config: cloneBot.config } : {}),
+      };
+
+      try {
+        const result = cloneBot.serviceAccountId
+          ? await deploySystemBot({ service_account_id: cloneBot.serviceAccountId, ...payload })
+          : await deployBot({ user_id: cloneBot.user, ...payload });
+
+        if (result.error) {
+          errors.push(`${name}: ${result.error}`);
+        }
+      } catch {
+        errors.push(`${name}: Failed to deploy`);
+      }
+
+      setCloneProgress({ total, done: i + 1, errors: [...errors] });
+    }
+
+    setCloneSubmitting(false);
+
+    if (errors.length === 0) {
+      setCloneBot(null);
+    } else if (errors.length < total) {
+      setCloneError(`${total - errors.length} cloned, ${errors.length} failed:\n${errors.join("\n")}`);
+    } else {
+      setCloneError(`All clones failed:\n${errors.join("\n")}`);
     }
   };
 
@@ -733,6 +794,13 @@ export default function BotFleetPage() {
                             <Trash2 className="h-3 w-3" />
                           </button>
                         )}
+                        <button
+                          onClick={() => handleClone(bot)}
+                          title="Clone"
+                          className="p-1 rounded text-[#5a7090] hover:text-[#3d9df3] hover:bg-[rgba(61,157,243,0.08)] transition-colors"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -920,6 +988,15 @@ export default function BotFleetPage() {
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             )}
+
+                            {/* Clone */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleClone(bot); }}
+                              title="Clone"
+                              className="p-1 rounded text-[#8fa3b8] hover:text-[#3d9df3] hover:bg-[rgba(61,157,243,0.08)] transition-colors"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1103,6 +1180,115 @@ export default function BotFleetPage() {
                 className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-[#ff4757] text-white hover:bg-[#ff2233] transition-all"
               >
                 Delete Forever
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clone Modal */}
+      {cloneBot && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-card border border-dark rounded-lg p-6 w-[420px] space-y-4">
+            <h3 className="text-sm font-bold text-foreground">Clone Bot</h3>
+            <p className="text-xs text-[#8fa3b8] leading-relaxed">
+              Deploy copies of <span className="font-mono text-foreground">{cloneBot.name}</span> with the same parameters. Each clone gets a randomized name suffix.
+            </p>
+
+            {/* Source bot summary */}
+            <div className="border border-dark rounded-md divide-y divide-[#1e2d40] text-[10px]">
+              <div className="px-3 py-1.5 flex justify-between">
+                <span className="text-[#5a7090]">Strategy</span>
+                <span className="text-foreground font-mono">{cloneBot.strategy || "—"}</span>
+              </div>
+              <div className="px-3 py-1.5 flex justify-between">
+                <span className="text-[#5a7090]">Pair</span>
+                <span className="text-foreground font-mono">{cloneBot.pair || "—"}</span>
+              </div>
+              <div className="px-3 py-1.5 flex justify-between">
+                <span className="text-[#5a7090]">Exchange</span>
+                <span className="text-foreground font-mono">{cloneBot.exchange || "—"}</span>
+              </div>
+              <div className="px-3 py-1.5 flex justify-between">
+                <span className="text-[#5a7090]">Capital</span>
+                <span className="text-foreground font-mono">{cloneBot.allocatedCapital ? `$${cloneBot.allocatedCapital.toLocaleString()}` : "—"}</span>
+              </div>
+            </div>
+
+            {/* Clone count */}
+            <div>
+              <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
+                Number of Clones
+              </label>
+              <input
+                value={cloneCount}
+                onChange={(e) => setCloneCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                type="number"
+                min={1}
+                max={20}
+                disabled={cloneSubmitting}
+                className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2 disabled:opacity-50"
+              />
+              {cloneBot.allocatedCapital > 0 && cloneCount > 1 && (
+                <p className="text-[9px] text-[#5a7090] mt-1">
+                  Total capital: <span className="text-foreground font-mono">${(cloneBot.allocatedCapital * cloneCount).toLocaleString()}</span> ({cloneCount} x ${cloneBot.allocatedCapital.toLocaleString()})
+                </p>
+              )}
+            </div>
+
+            {/* Progress */}
+            {cloneSubmitting && cloneProgress && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-[#8fa3b8]">Deploying clones...</span>
+                  <span className="text-foreground font-mono">{cloneProgress.done}/{cloneProgress.total}</span>
+                </div>
+                <div className="w-full h-1.5 bg-[#1e2d40] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#3d9df3] rounded-full transition-all duration-300"
+                    style={{ width: `${(cloneProgress.done / cloneProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Results */}
+            {!cloneSubmitting && cloneProgress && cloneProgress.done === cloneProgress.total && cloneProgress.errors.length > 0 && cloneProgress.errors.length < cloneProgress.total && (
+              <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                <p className="text-[10px] text-[#8fa3b8]">{cloneProgress.total - cloneProgress.errors.length} succeeded, {cloneProgress.errors.length} failed:</p>
+                {cloneProgress.errors.map((err, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-[10px]">
+                    <AlertCircle className="h-3 w-3 text-[#ff4757] shrink-0 mt-0.5" />
+                    <span className="text-[#ff4757]">{err}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Error */}
+            {cloneError && (
+              <div className="text-[10px] text-[#ff4757] bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded-sm px-3 py-2 whitespace-pre-line">
+                {cloneError}
+              </div>
+            )}
+
+            <div className="flex gap-2.5 justify-end">
+              <button
+                onClick={() => setCloneBot(null)}
+                disabled={cloneSubmitting}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-dark hover:border-dark-2 hover:text-foreground transition-all disabled:opacity-50"
+              >
+                {cloneProgress && cloneProgress.done === cloneProgress.total && cloneProgress.errors.length === 0 ? "Done" : "Cancel"}
+              </button>
+              <button
+                onClick={confirmClone}
+                disabled={cloneSubmitting || cloneCount < 1 || cloneCount > 20}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-[#3d9df3] text-white hover:bg-[#2b8ae0] transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                {cloneSubmitting && <Loader2 className="h-3 w-3 animate-spin" />}
+                {cloneSubmitting
+                  ? `Cloning ${cloneProgress?.done ?? 0}/${cloneProgress?.total ?? cloneCount}...`
+                  : `Clone ${cloneCount} Bot${cloneCount !== 1 ? "s" : ""}`}
               </button>
             </div>
           </div>
