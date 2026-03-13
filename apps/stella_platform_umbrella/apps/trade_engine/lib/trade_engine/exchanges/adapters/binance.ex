@@ -837,6 +837,69 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
     end
   end
 
+  @doc """
+  Set leverage for a futures symbol.
+  Calls POST /fapi/v1/leverage.
+  """
+  def set_leverage(symbol, leverage, credentials) do
+    futures_url = resolve_futures_base_url(credentials)
+    if futures_url == "" do
+      {:error, :no_futures_url_configured}
+    else
+      trading_symbol = normalize_symbol(symbol, :trading)
+      params = %{"symbol" => trading_symbol, "leverage" => leverage}
+
+      case signed_request(:post, futures_url <> "/v1/leverage", params, credentials) do
+        {:ok, data} when is_map(data) ->
+          {:ok, %{
+            symbol: data["symbol"],
+            leverage: data["leverage"],
+            max_notional_value: data["maxNotionalValue"]
+          }}
+        {:ok, %{"code" => code, "msg" => msg}} ->
+          {:error, %{code: code, message: msg}}
+        error -> error
+      end
+    end
+  end
+
+  @doc """
+  Get income history (funding fees, realized PnL, commissions, etc.).
+  Calls GET /fapi/v1/income.
+  """
+  def get_income_history(credentials, opts \\ []) do
+    futures_url = resolve_futures_base_url(credentials)
+    if futures_url == "" do
+      {:error, :no_futures_url_configured}
+    else
+      params = %{"limit" => Keyword.get(opts, :limit, 100)}
+      params = if sym = Keyword.get(opts, :symbol), do: Map.put(params, "symbol", normalize_symbol(sym, :trading)), else: params
+      params = if type = Keyword.get(opts, :income_type), do: Map.put(params, "incomeType", type), else: params
+      params = if st = Keyword.get(opts, :start_time), do: Map.put(params, "startTime", st), else: params
+      params = if et = Keyword.get(opts, :end_time), do: Map.put(params, "endTime", et), else: params
+
+      case signed_request(:get, futures_url <> "/v1/income", params, credentials) do
+        {:ok, records} when is_list(records) ->
+          parsed = Enum.map(records, fn r ->
+            %{
+              symbol: r["symbol"],
+              income_type: r["incomeType"],
+              income: parse_float_safe(r["income"]),
+              asset: r["asset"],
+              info: r["info"],
+              time: r["time"],
+              tran_id: r["tranId"],
+              trade_id: r["tradeId"]
+            }
+          end)
+          {:ok, parsed}
+        {:ok, %{"code" => code, "msg" => msg}} ->
+          {:error, %{code: code, message: msg}}
+        error -> error
+      end
+    end
+  end
+
   # ========================================================================
   # PRIVATE — HMAC-signed requests
   # ========================================================================

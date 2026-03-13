@@ -27,6 +27,13 @@ defmodule AdminGatewayWeb.Router do
     get "/credentials/:id/positions", CredentialController, :positions
     post "/credentials/:id/positions/close", CredentialController, :close_position
     post "/credentials/:id/positions/close-all", CredentialController, :close_all_positions
+
+    # Reconciliation endpoints (admin dashboard)
+    get "/reconciliation/summary", ReconciliationController, :summary
+    get "/reconciliation/positions", ReconciliationController, :positions
+    get "/reconciliation/orders", ReconciliationController, :orders
+    get "/reconciliation/balances", ReconciliationController, :balances
+    get "/reconciliation/trades/:credential_id", ReconciliationController, :trades
   end
 
   # Authenticated admin routes

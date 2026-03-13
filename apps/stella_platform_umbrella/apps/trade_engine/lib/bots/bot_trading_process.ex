@@ -141,6 +141,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           Process.send_after(self(), :adopt_exchange_positions, 3_000)
         end
 
+        # Futures: sync leverage on exchange to match bot config
+        if Map.get(bot, :market_type, "spot") != "spot" do
+          Process.send_after(self(), :sync_leverage, 2_000)
+        end
+
         Logger.info("BotTradingProcess started for #{bot.name} (#{bot_id}) — strategy: #{inspect(strategy_module)} — pairs: #{inspect(bot.trading_pairs)}")
         {:ok, state}
 
@@ -278,6 +283,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     else
       {:noreply, state}
     end
+  end
+
+  @impl true
+  def handle_info(:sync_leverage, state) do
+    {:noreply, sync_leverage_on_exchange(state)}
   end
 
   @impl true
@@ -1832,6 +1842,50 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   rescue
     e ->
       BotLogger.warn(state.bot_id, :grid, "Exchange position adoption failed", %{error: Exception.message(e)})
+      state
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # LEVERAGE SYNC (on bot startup)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  defp sync_leverage_on_exchange(state) do
+    credential_id = state.credential_id
+    bot_id = state.bot_id
+    config = state.config || %{}
+    trading_pairs = state.trading_pairs || []
+
+    # Get leverage from bot config — default to nil (don't change if not set)
+    target_leverage = config["leverage"] || config[:leverage]
+
+    if target_leverage && target_leverage > 0 do
+      Enum.each(trading_pairs, fn pair ->
+        case Executor.set_leverage(credential_id, pair, target_leverage) do
+          {:ok, result} ->
+            BotLogger.info(bot_id, :lifecycle, "Leverage set to #{target_leverage}x for #{pair}", %{
+              symbol: result[:symbol],
+              leverage: result[:leverage]
+            })
+
+          {:error, %{code: -4028}} ->
+            # Already at target leverage
+            BotLogger.debug(bot_id, :lifecycle, "Leverage already #{target_leverage}x for #{pair}")
+
+          {:error, reason} ->
+            BotLogger.warn(bot_id, :lifecycle, "Failed to set leverage for #{pair}", %{
+              target: target_leverage,
+              error: inspect(reason)
+            })
+        end
+      end)
+    else
+      BotLogger.debug(bot_id, :lifecycle, "No leverage configured — exchange default applies")
+    end
+
+    state
+  rescue
+    e ->
+      BotLogger.warn(state.bot_id, :lifecycle, "Leverage sync failed", %{error: Exception.message(e)})
       state
   end
 

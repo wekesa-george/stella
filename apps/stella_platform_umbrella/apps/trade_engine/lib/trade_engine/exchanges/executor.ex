@@ -264,6 +264,28 @@ defmodule TradeEngine.Exchanges.Executor do
     end
   end
 
+  @doc "Set leverage for a futures symbol on the exchange"
+  def set_leverage(credential_id, symbol, leverage) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :set_leverage, 3) do
+        adapter.set_leverage(symbol, leverage, creds)
+      else
+        {:error, :set_leverage_not_supported}
+      end
+    end
+  end
+
+  @doc "Get income history (funding fees, realized PnL, commissions)"
+  def get_income_history(credential_id, opts \\ []) do
+    with {:ok, adapter, creds} <- resolve(credential_id) do
+      if function_exported?(adapter, :get_income_history, 2) do
+        adapter.get_income_history(creds, opts)
+      else
+        {:error, :income_history_not_supported}
+      end
+    end
+  end
+
   @doc "Normalize a symbol for a specific purpose"
   def normalize_symbol(credential_id, symbol, purpose) do
     with {:ok, adapter, _creds} <- resolve(credential_id) do

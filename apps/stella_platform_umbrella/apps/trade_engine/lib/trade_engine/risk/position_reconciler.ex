@@ -21,7 +21,7 @@ defmodule TradeEngine.Risk.PositionReconciler do
   alias TradeEngine.Repo
   alias TradeEngine.Trading.Position
   alias TradeEngine.Bots.BotRegistry
-  alias TradeEngine.Exchanges.Executor
+  alias TradeEngine.Exchanges.{Executor, CredentialDiscovery}
 
   @pubsub TradeEngine.PubSub
   @ets_table :position_reconciler_cache
@@ -429,32 +429,8 @@ defmodule TradeEngine.Risk.PositionReconciler do
   end
 
   defp detect_ghost_positions do
-    # Get ALL enabled futures credentials (not just running bot credentials)
-    all_credentials = try do
-      {:ok, %{rows: rows}} = Repo.query(
-        "SELECT id, config_overrides FROM exchange.user_credentials WHERE is_enabled = true",
-        [],
-        timeout: 10_000
-      )
-
-      rows
-      |> Enum.filter(fn [_id, config] ->
-        market = (config || %{})["market_type"] || ""
-        String.contains?(market, "futures")
-      end)
-      |> Enum.map(fn [id, _config] -> id end)
-    rescue
-      _ ->
-        # Fallback: use credentials from all bots (running or not)
-        try do
-          BotRegistry.list_bots()
-          |> Enum.map(fn bot -> Map.get(bot, :credential_id) end)
-          |> Enum.uniq()
-          |> Enum.reject(&is_nil/1)
-        rescue
-          _ -> []
-        end
-    end
+    # Get ALL active futures credentials (joins adapter to check supports_futures)
+    all_credentials = CredentialDiscovery.get_futures_credentials()
 
     if all_credentials == [] do
       []

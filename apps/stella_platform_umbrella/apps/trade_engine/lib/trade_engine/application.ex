@@ -89,6 +89,8 @@ defmodule TradeEngine.Application do
       {TradeEngine.Risk.PlatformCircuitBreaker, []},
       {TradeEngine.Risk.PositionReconciler, []},
       {TradeEngine.Risk.SlippageMonitor, []},
+      {TradeEngine.Risk.BalanceVerifier, []},
+      {TradeEngine.Risk.FundingTracker, []},
 
       # Phase: Alert persistence, notification, and incident auto-creation
       {TradeEngine.Alerts.AlertPersister, []},
