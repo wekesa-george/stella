@@ -136,9 +136,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         Process.send_after(self(), :poll_candles, @candle_poll_interval_ms)
 
         # Grid bot: check for filled orders every 10s + adopt exchange positions
+        # Also cancel stale exchange orders from previous runs on startup
         if is_grid do
           Process.send_after(self(), :grid_check_fills, 10_000)
           Process.send_after(self(), :adopt_exchange_positions, 3_000)
+          Process.send_after(self(), :clear_stale_exchange_orders, 5_000)
         end
 
         # Futures: sync leverage on exchange to match bot config
@@ -295,6 +297,20 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     if state.is_grid do
       Process.send_after(self(), :grid_check_fills, 10_000)
       {:noreply, grid_check_fills(state)}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:clear_stale_exchange_orders, state) do
+    if state.is_grid do
+      symbol = List.first(state.trading_pairs)
+      if symbol do
+        BotLogger.info(state.bot_id, :grid, "Startup: clearing stale exchange orders", %{symbol: symbol})
+        {:noreply, cancel_all_exchange_orders_for_symbol(state, symbol)}
+      else
+        {:noreply, state}
+      end
     else
       {:noreply, state}
     end
@@ -1302,9 +1318,19 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
             new_failures = state.grid_consecutive_failures + 1
 
-            # Exponential backoff: 2min, 4min, 8min, max 15min
+            # On first hit or every 5 failures: cancel all open exchange orders to clear the limit
             cooldown_state = if is_max_order_error do
-              backoff_seconds = min(15 * 60, 120 * :math.pow(2, min(new_failures - 1, 3)) |> trunc())
+              state = if new_failures == 1 or rem(new_failures, 5) == 0 do
+                BotLogger.info(state.bot_id, :grid, "Cancelling all open exchange orders to clear -2025 limit", %{
+                  consecutive_failures: new_failures, symbol: symbol
+                })
+                cancel_all_exchange_orders_for_symbol(state, symbol)
+              else
+                state
+              end
+
+              # Short cooldown after cancel (30s), longer if still failing
+              backoff_seconds = if new_failures <= 2, do: 30, else: min(5 * 60, 60 * min(new_failures, 5))
               cooldown_until = DateTime.add(DateTime.utc_now(), backoff_seconds, :second)
 
               BotLogger.warning(state.bot_id, :grid, "Exchange order limit hit — backing off", %{
@@ -1331,6 +1357,42 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             cooldown_state
         end
     end
+  end
+
+  # Cancel ALL open orders on exchange for a symbol (not just ones we track locally)
+  # This clears stale orders from previous bot runs that cause -2025
+  defp cancel_all_exchange_orders_for_symbol(state, symbol) do
+    case Executor.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
+      {:ok, open_orders} when is_list(open_orders) ->
+        cancelled = Enum.reduce(open_orders, 0, fn order, count ->
+          oid = order[:order_id] || order["orderId"]
+          if oid do
+            case OrderManager.cancel_order(state.credential_id, symbol, oid) do
+              {:ok, _} -> count + 1
+              {:error, _} -> count
+            end
+          else
+            count
+          end
+        end)
+
+        BotLogger.info(state.bot_id, :grid, "Cancelled stale exchange orders", %{
+          found: length(open_orders), cancelled: cancelled, symbol: symbol
+        })
+
+        # Clear local grid orders since we just cancelled everything
+        %{state | grid_orders: %{}, grid_consecutive_failures: 0}
+
+      _ ->
+        BotLogger.warning(state.bot_id, :grid, "Could not fetch open orders for cancel", %{symbol: symbol})
+        state
+    end
+  rescue
+    e ->
+      BotLogger.warning(state.bot_id, :grid, "cancel_all_exchange_orders_for_symbol failed", %{
+        error: Exception.message(e)
+      })
+      state
   end
 
   # Cancel all pending grid limit orders on the exchange and clear local state
