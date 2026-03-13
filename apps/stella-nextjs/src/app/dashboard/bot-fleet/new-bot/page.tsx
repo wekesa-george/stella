@@ -140,6 +140,8 @@ export default function NewBotPage() {
   // Step 6 — Review / Deploy
   const [botName, setBotName] = useState("");
   const [allocatedCapital, setAllocatedCapital] = useState("");
+  const [botCount, setBotCount] = useState(1);
+  const [deployProgress, setDeployProgress] = useState<{ total: number; done: number; errors: string[] } | null>(null);
 
   // Grid bot config (only used when strategy is core_grid)
   const [gridUpperPrice, setGridUpperPrice] = useState("");
@@ -328,6 +330,7 @@ export default function NewBotPage() {
         return !!selectedStrategyId;
       case 6: {
         if (!botName.trim()) return false;
+        if (botCount < 1 || botCount > 20) return false;
         if (isGridStrategy) {
           const upper = Number(gridUpperPrice);
           const lower = Number(gridLowerPrice);
@@ -358,10 +361,23 @@ export default function NewBotPage() {
       setError("Bot name is required");
       return;
     }
+
+    if (isGridStrategy && gridMetrics && !gridMetrics.isProfitable) {
+      setError(`Grid spacing (${gridMetrics.spacingPct.toFixed(3)}%) is too tight to cover fees. Reduce grid levels or widen the price range.`);
+      return;
+    }
+
+    const total = Math.max(1, Math.min(20, botCount));
     setSubmitting(true);
-    try {
+    setDeployProgress({ total, done: 0, errors: [] });
+
+    const errors: string[] = [];
+
+    for (let i = 1; i <= total; i++) {
+      const name = total === 1 ? botName.trim() : `${botName.trim()} #${i}`;
+
       const payload: Record<string, any> = {
-        name: botName.trim(),
+        name,
         trading_pairs: [selectedPair],
         strategy_id: selectedStrategyId || undefined,
         credential_id: selectedCredentialId || undefined,
@@ -370,12 +386,6 @@ export default function NewBotPage() {
       };
 
       if (isGridStrategy) {
-        // Fee-aware validation
-        if (gridMetrics && !gridMetrics.isProfitable) {
-          setError(`Grid spacing (${gridMetrics.spacingPct.toFixed(3)}%) is too tight to cover fees. Reduce grid levels or widen the price range.`);
-          setSubmitting(false);
-          return;
-        }
         payload.config = {
           upper_price: Number(gridUpperPrice),
           lower_price: Number(gridLowerPrice),
@@ -392,24 +402,29 @@ export default function NewBotPage() {
         };
       }
 
-      let result;
-      if (ownerType === "system") {
-        result = await deploySystemBot({ service_account_id: selectedSaId, ...payload });
-      } else {
-        result = await deployBot({ user_id: selectedUserId, ...payload });
+      try {
+        const result = ownerType === "system"
+          ? await deploySystemBot({ service_account_id: selectedSaId, ...payload })
+          : await deployBot({ user_id: selectedUserId, ...payload });
+
+        if (result.error) {
+          errors.push(`${name}: ${result.error}`);
+        }
+      } catch {
+        errors.push(`${name}: Failed to deploy`);
       }
 
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      if (result.data) {
-        router.push("/dashboard/bot-fleet");
-      }
-    } catch {
-      setError("Failed to deploy bot");
-    } finally {
-      setSubmitting(false);
+      setDeployProgress({ total, done: i, errors: [...errors] });
+    }
+
+    setSubmitting(false);
+
+    if (errors.length === 0) {
+      router.push("/dashboard/bot-fleet");
+    } else if (errors.length < total) {
+      setError(`${total - errors.length} deployed, ${errors.length} failed:\n${errors.join("\n")}`);
+    } else {
+      setError(`All deploys failed:\n${errors.join("\n")}`);
     }
   };
 
@@ -935,6 +950,35 @@ export default function NewBotPage() {
                 />
               </div>
 
+              {/* Number of Bots */}
+              <div>
+                <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
+                  Number of Bots
+                </label>
+                <input
+                  value={botCount}
+                  onChange={(e) => setBotCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                  type="number"
+                  min={1}
+                  max={20}
+                  className="w-full bg-dark-elevated border border-dark rounded-sm px-3 py-2 text-xs text-foreground font-mono placeholder:text-[#5a7090] focus:outline-none focus:border-dark-2"
+                />
+                <p className="text-[9px] text-[#5a7090] mt-1">
+                  {botCount > 1
+                    ? `Names will be suffixed #1, #2, ... #${botCount}`
+                    : "Deploy a single bot with this configuration"}
+                </p>
+                {botCount > 1 && (
+                  <div className="mt-2 bg-dark-elevated border border-dark rounded-sm px-3 py-2 space-y-0.5 max-h-[120px] overflow-y-auto">
+                    {Array.from({ length: botCount }, (_, i) => (
+                      <div key={i} className="text-[10px] text-[#8fa3b8] font-mono">
+                        {botName.trim() || "Bot"} #{i + 1}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Allocated Capital */}
               <div>
                 <label className="text-[9px] text-[#5a7090] uppercase tracking-widest block mb-1.5">
@@ -1244,10 +1288,19 @@ export default function NewBotPage() {
                         : "—"
                     }
                   />
+                  {botCount > 1 && (
+                    <SummaryRow label="Number of Bots" value={String(botCount)} />
+                  )}
                   {allocatedCapital && (
                     <SummaryRow
-                      label="Capital"
+                      label={botCount > 1 ? "Capital (per bot)" : "Capital"}
                       value={`$${Number(allocatedCapital).toLocaleString()}`}
+                    />
+                  )}
+                  {allocatedCapital && botCount > 1 && (
+                    <SummaryRow
+                      label="Total Capital"
+                      value={`$${(Number(allocatedCapital) * botCount).toLocaleString()}`}
                     />
                   )}
                   {isGridStrategy && gridUpperPrice && gridLowerPrice && (
@@ -1282,10 +1335,47 @@ export default function NewBotPage() {
             </div>
           )}
 
+          {/* Deploy Progress */}
+          {submitting && deployProgress && deployProgress.total > 1 && (
+            <div className="mt-4 space-y-2">
+              <div className="flex justify-between text-[10px]">
+                <span className="text-[#8fa3b8]">Deploying bots...</span>
+                <span className="text-foreground font-mono">{deployProgress.done}/{deployProgress.total}</span>
+              </div>
+              <div className="w-full h-1.5 bg-[#1e2d40] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#FFD700] rounded-full transition-all duration-300"
+                  style={{ width: `${(deployProgress.done / deployProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Deploy Results (partial failure) */}
+          {!submitting && deployProgress && deployProgress.total > 1 && deployProgress.errors.length > 0 && deployProgress.errors.length < deployProgress.total && (
+            <div className="mt-4 space-y-1.5">
+              {Array.from({ length: deployProgress.total }, (_, i) => {
+                const name = `${botName.trim()} #${i + 1}`;
+                const failed = deployProgress.errors.find((e) => e.startsWith(name));
+                return (
+                  <div key={i} className="flex items-center gap-2 text-[10px]">
+                    {failed ? (
+                      <AlertCircle className="h-3 w-3 text-[#ff4757] shrink-0" />
+                    ) : (
+                      <Check className="h-3 w-3 text-[#00d4aa] shrink-0" />
+                    )}
+                    <span className={failed ? "text-[#ff4757]" : "text-[#00d4aa]"}>{name}</span>
+                    {failed && <span className="text-[#5a7090]">— {failed.split(": ").slice(1).join(": ")}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Error */}
           {error && (
-            <div className="mt-4 text-xs text-[#ff4757] bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded-sm px-3 py-2 flex items-center gap-2">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <div className="mt-4 text-xs text-[#ff4757] bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded-sm px-3 py-2 flex items-start gap-2 whitespace-pre-line">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               {error}
             </div>
           )}
@@ -1316,7 +1406,13 @@ export default function NewBotPage() {
                 className="px-5 py-2 rounded-sm text-xs font-bold uppercase tracking-wider bg-[#FFD700] text-black hover:bg-[#FFE44D] transition-all disabled:opacity-50 flex items-center gap-2"
               >
                 {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
-                {submitting ? "Deploying..." : "Deploy Bot"}
+                {submitting
+                  ? deployProgress && deployProgress.total > 1
+                    ? `Deploying ${deployProgress.done}/${deployProgress.total}...`
+                    : "Deploying..."
+                  : botCount > 1
+                  ? `Deploy ${botCount} Bots`
+                  : "Deploy Bot"}
               </button>
             )}
           </div>
