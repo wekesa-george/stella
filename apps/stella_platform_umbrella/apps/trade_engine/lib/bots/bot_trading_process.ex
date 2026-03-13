@@ -1138,18 +1138,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
       true ->
       symbol = signal.symbol
-      raw_qty = signal.quantity_per_grid
+      qty = signal.quantity_per_grid
       is_spot = state.market_type in [nil, "spot"]
-
-      # Round quantity to exchange precision upfront
-      # Use round (not floor) — floor causes 0.000985 → 0.000 at precision 3
-      # which makes the bot unable to place any orders on small accounts
-      qty_precision = exchange_qty_precision(symbol, state.market_type)
-      qty = Float.round(raw_qty, qty_precision)
-
-      # Ensure qty meets exchange minimum step (e.g., 0.001 for BTC futures)
-      min_qty = 1.0 / :math.pow(10, qty_precision)
-      qty = if qty < min_qty and raw_qty > 0, do: min_qty, else: qty
 
       # Cap buy orders by available capital
       total_investment = get_strategy_param(state.config, "total_investment", state.allocated_capital)
@@ -1161,9 +1151,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       BotLogger.info(state.bot_id, :grid, "Grid order execution starting", %{
         symbol: symbol,
         current_price: signal.current_price,
-        raw_qty_per_grid: Float.round(raw_qty, 8),
-        rounded_qty: qty,
-        qty_precision: qty_precision,
+        qty_per_grid: Float.round(qty * 1.0, 8),
         total_investment: total_investment,
         locked_capital: Float.round(locked_capital, 2),
         remaining_capital: Float.round(remaining_capital, 2),
@@ -1175,9 +1163,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       })
 
       if qty <= 0 do
-        BotLogger.error(state.bot_id, :grid, "Grid qty rounds to zero — increase total_investment or reduce grid_levels", %{
-          raw_qty: Float.round(raw_qty, 8),
-          qty_precision: qty_precision,
+        BotLogger.error(state.bot_id, :grid, "Grid qty is zero — increase total_investment or reduce grid_levels", %{
+          qty: qty,
           total_investment: total_investment,
           grid_levels: get_strategy_param(state.config, "grid_levels", 10),
           current_price: signal.current_price
@@ -1243,42 +1230,43 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   defp place_grid_limit_order(state, symbol, side, quantity, price_level) do
-    # Round price and quantity to exchange precision to avoid PRICE_FILTER errors
+    alias TradeEngine.Trading.BinanceFilterValidator
+
+    # Round price to exchange precision
     price_precision = exchange_price_precision(symbol, state.market_type)
-    qty_precision = exchange_qty_precision(symbol, state.market_type)
     rounded_price = Float.round(price_level / 1, price_precision)
-    # Round quantity to nearest step (not floor — floor kills small accounts)
-    rounded_qty = Float.round(quantity, qty_precision)
-    min_qty = 1.0 / :math.pow(10, qty_precision)
-    rounded_qty = if rounded_qty < min_qty and quantity > 0, do: min_qty, else: rounded_qty
 
-    # Validate: quantity must be > 0 and notional must meet exchange minimum ($5 futures, $10 spot)
-    is_futures = state.market_type in ["usds_futures", "coinm_futures"]
-    min_notional = if is_futures, do: 5.0, else: 10.0
-    notional = rounded_qty * rounded_price
-
-    cond do
-      rounded_qty <= 0 ->
-        BotLogger.warning(state.bot_id, :grid, "Grid order skipped: quantity rounds to zero", %{
+    # Validate quantity against Binance LOT_SIZE filter (live step size from exchange)
+    validated_qty = case BinanceFilterValidator.validate_quantity(symbol, quantity, market_type: state.market_type) do
+      {:ok, adj_qty} -> adj_qty
+      {:error, reason} ->
+        BotLogger.warning(state.bot_id, :grid, "Grid order skipped: LOT_SIZE validation failed", %{
           side: side,
           raw_qty: Float.round(quantity, 8),
-          rounded_qty: rounded_qty,
           price: rounded_price,
-          qty_precision: qty_precision
+          reason: reason
         })
-        state
+        nil
+    end
 
-      notional < min_notional ->
+    if is_nil(validated_qty) or validated_qty <= 0 do
+      state
+    else
+      # Validate notional meets exchange minimum ($5 futures, $10 spot)
+      is_futures = state.market_type in ["usds_futures", "coinm_futures"]
+      min_notional = if is_futures, do: 5.0, else: 10.0
+      notional = validated_qty * rounded_price
+
+      if notional < min_notional do
         BotLogger.warning(state.bot_id, :grid, "Grid order skipped: below min notional", %{
           side: side,
           notional: Float.round(notional, 2),
           min_notional: min_notional,
-          qty: rounded_qty,
+          qty: validated_qty,
           price: rounded_price
         })
         state
-
-      true ->
+      else
         bot_context = [
           user_id: state.user_id,
           bot_id: state.bot_id,
@@ -1289,7 +1277,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         ]
 
         case OrderManager.place_limit_order(
-          state.credential_id, symbol, side, rounded_qty, rounded_price, bot_context
+          state.credential_id, symbol, side, validated_qty, rounded_price, bot_context
         ) do
           {:ok, result} ->
             order_id = result[:order_id]
@@ -1297,7 +1285,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             BotLogger.info(state.bot_id, :grid, "Grid order placed", %{
               side: side,
               price: rounded_price,
-              quantity: rounded_qty,
+              quantity: validated_qty,
               notional: Float.round(notional, 2),
               order_id: order_id
             })
@@ -1305,7 +1293,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             grid_entry = %{
               order_id: order_id,
               side: side,
-              quantity: rounded_qty,
+              quantity: validated_qty,
               price: rounded_price,
               symbol: symbol,
               status: "NEW",
@@ -1356,8 +1344,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
               BotLogger.warning(state.bot_id, :grid, "Grid order failed", %{
                 side: side,
                 price: rounded_price,
-                quantity: rounded_qty,
-                notional: Float.round(notional, 2),
+                quantity: validated_qty,
                 reason: reason_str
               })
               %{state | grid_consecutive_failures: new_failures}
@@ -1365,6 +1352,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
             cooldown_state
         end
+      end
     end
   end
 
