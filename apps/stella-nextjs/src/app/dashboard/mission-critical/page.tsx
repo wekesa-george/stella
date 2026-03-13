@@ -5,7 +5,7 @@ import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
-import { listBots, getInfraMetrics, getServiceHealth, getExchangeHealth, listServiceAccounts, listServiceAccountCredentials, listAdapters, getCredentialBalance, getRecentOrders, getPlatformEquityCurve, getAllCapitalAllocations, getSystemAlerts, getOpenIncidents, acknowledgeSystemAlert, pauseBot, startBot, stopBot, stopTrading, resolveIncident } from "@/lib/tradingEngineApi";
+import { listBots, getInfraMetrics, getServiceHealth, getExchangeHealth, listServiceAccounts, listServiceAccountCredentials, listAdapters, getCredentialBalance, getCredentialPositions, closeAllCredentialPositions, getRecentOrders, getPlatformEquityCurve, getAllCapitalAllocations, getSystemAlerts, getOpenIncidents, acknowledgeSystemAlert, pauseBot, startBot, stopBot, stopTrading, resolveIncident } from "@/lib/tradingEngineApi";
 import { useRouter } from "next/navigation";
 import { TrainingProvider, useTraining } from "@/lib/training/TrainingContext";
 import { getInfrastructureStatus } from "@/lib/stellaAdminApi";
@@ -1494,6 +1494,12 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   const [loadingSA, setLoadingSA] = useState(true);
   const [loadingCreds, setLoadingCreds] = useState(false);
   const [refreshingBalances, setRefreshingBalances] = useState(false);
+  // Position modal state
+  const [posModal, setPosModal] = useState<{ credId: string; name: string } | null>(null);
+  const [posModalData, setPosModalData] = useState<any[]>([]);
+  const [posModalLoading, setPosModalLoading] = useState(false);
+  const [posModalClosing, setPosModalClosing] = useState(false);
+  const [posModalResult, setPosModalResult] = useState<any>(null);
 
   // Load service accounts + adapters on mount
   useEffect(() => {
@@ -1562,6 +1568,45 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
 
   // Auto-fetch on credentials/adapters load
   useEffect(() => { fetchBalances(); }, [fetchBalances]);
+
+  // Open positions modal for a credential
+  const openPosModal = useCallback(async (credId: string, name: string) => {
+    setPosModal({ credId, name });
+    setPosModalLoading(true);
+    setPosModalData([]);
+    setPosModalResult(null);
+    try {
+      const res = await getCredentialPositions(credId);
+      const body = (res.data as any)?.data ?? res.data;
+      setPosModalData(body?.positions ?? []);
+    } catch {
+      setPosModalData([]);
+    } finally {
+      setPosModalLoading(false);
+    }
+  }, []);
+
+  // Close all positions from modal
+  const handleCloseAll = useCallback(async () => {
+    if (!posModal) return;
+    if (!confirm('Close ALL open positions on this exchange? This will place market orders to flatten every position.')) return;
+    setPosModalClosing(true);
+    setPosModalResult(null);
+    try {
+      const res = await closeAllCredentialPositions(posModal.credId);
+      const body = (res.data as any)?.data ?? res.data;
+      setPosModalResult(body);
+      // Refresh positions
+      const res2 = await getCredentialPositions(posModal.credId);
+      const body2 = (res2.data as any)?.data ?? res2.data;
+      setPosModalData(body2?.positions ?? []);
+      fetchBalances();
+    } catch (err: any) {
+      setPosModalResult({ error: err?.message || 'Failed to close positions' });
+    } finally {
+      setPosModalClosing(false);
+    }
+  }, [posModal, fetchBalances]);
 
   // Resolve adapter name from adapter_id
   const adapterMap = useMemo(() => {
@@ -1751,11 +1796,210 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                     </div>
                   )}
                 </div>
+
+                {/* Positions button (futures only) */}
+                {ex.isFutures && (
+                  <div style={{ marginTop:6, borderTop:"1px solid var(--b2)", paddingTop:5 }}>
+                    <button
+                      onClick={() => openPosModal(ex.id, ex.name)}
+                      style={{
+                        width:"100%", background:"none", border:"1px solid var(--b2)", borderRadius:2,
+                        color:"var(--t1)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:8,
+                        padding:"3px 0", fontWeight:600,
+                      }}
+                    >
+                      VIEW POSITIONS
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* ── Positions Modal ── */}
+      {posModal && (
+        <div
+          onClick={() => setPosModal(null)}
+          style={{
+            position:"fixed", inset:0, zIndex:9999,
+            background:"rgba(0,0,0,0.7)", backdropFilter:"blur(4px)",
+            display:"flex", alignItems:"center", justifyContent:"center",
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background:"var(--bg1)", border:"1px solid var(--b2)", borderRadius:6,
+              width:"min(560px, 90vw)", maxHeight:"80vh", display:"flex", flexDirection:"column",
+              boxShadow:"0 20px 60px rgba(0,0,0,0.5)",
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              display:"flex", alignItems:"center", justifyContent:"space-between",
+              padding:"12px 16px", borderBottom:"1px solid var(--b2)",
+            }}>
+              <div>
+                <div style={{ fontFamily:"var(--mono)", fontSize:13, fontWeight:700, color:"var(--t0)" }}>
+                  Exchange Positions
+                </div>
+                <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--t2)", marginTop:2 }}>
+                  {posModal.name} — Live from exchange
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                {posModalData.length > 0 && (
+                  <button
+                    onClick={handleCloseAll}
+                    disabled={posModalClosing}
+                    style={{
+                      background: posModalClosing ? "var(--bg3)" : "rgba(255,71,87,0.15)",
+                      border:"1px solid rgba(255,71,87,0.4)", borderRadius:3,
+                      color: posModalClosing ? "var(--t3)" : "var(--r)",
+                      cursor: posModalClosing ? "default" : "pointer",
+                      fontFamily:"var(--mono)", fontSize:10, fontWeight:700,
+                      padding:"4px 10px",
+                    }}
+                  >
+                    {posModalClosing ? 'CLOSING...' : 'CLOSE ALL POSITIONS'}
+                  </button>
+                )}
+                <button
+                  onClick={() => openPosModal(posModal.credId, posModal.name)}
+                  style={{
+                    background:"none", border:"1px solid var(--b2)", borderRadius:3,
+                    color:"var(--t1)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:9,
+                    padding:"4px 8px",
+                  }}
+                >
+                  REFRESH
+                </button>
+                <button
+                  onClick={() => setPosModal(null)}
+                  style={{
+                    background:"none", border:"none", color:"var(--t2)", cursor:"pointer",
+                    fontSize:18, lineHeight:1, padding:"0 4px",
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            </div>
+
+            {/* Close result banner */}
+            {posModalResult && (
+              <div style={{
+                margin:"8px 16px 0", padding:"6px 10px", borderRadius:3, fontFamily:"var(--mono)", fontSize:10,
+                background: posModalResult.error ? "rgba(255,71,87,0.1)" : "rgba(0,212,170,0.1)",
+                border: `1px solid ${posModalResult.error ? "rgba(255,71,87,0.3)" : "rgba(0,212,170,0.3)"}`,
+                color: posModalResult.error ? "var(--r)" : "var(--g)",
+              }}>
+                {posModalResult.error
+                  ? `Error: ${posModalResult.error}`
+                  : `Closed: ${posModalResult.closed ?? 0} | Failed: ${posModalResult.failed ?? 0}`}
+                {posModalResult.results && posModalResult.results.length > 0 && (
+                  <div style={{ marginTop:4, fontSize:9 }}>
+                    {posModalResult.results.map((r: any, i: number) => (
+                      <div key={i} style={{ color: r.status === 'closed' ? "var(--g)" : r.status === 'failed' ? "var(--r)" : "var(--t2)" }}>
+                        {r.symbol} {r.side} — {r.status}{r.error ? `: ${r.error}` : ''}{r.pnl != null ? ` (PnL: $${parseFloat(r.pnl).toFixed(2)})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Body */}
+            <div style={{ flex:1, overflow:"auto", padding:16 }}>
+              {posModalLoading ? (
+                <div style={{ fontFamily:"var(--mono)", fontSize:11, color:"var(--t2)", textAlign:"center", padding:24 }}>
+                  Fetching positions from exchange...
+                </div>
+              ) : posModalData.length === 0 ? (
+                <div style={{ fontFamily:"var(--mono)", fontSize:11, color:"var(--t2)", textAlign:"center", padding:24 }}>
+                  No open positions on exchange
+                </div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {/* Summary row */}
+                  <div style={{
+                    display:"flex", gap:16, padding:"8px 12px", background:"var(--bg2)",
+                    border:"1px solid var(--b2)", borderRadius:4, fontFamily:"var(--mono)",
+                  }}>
+                    <div>
+                      <div style={{ fontSize:8, color:"var(--t2)", marginBottom:2 }}>POSITIONS</div>
+                      <div style={{ fontSize:14, fontWeight:700, color:"var(--t0)" }}>{posModalData.length}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:8, color:"var(--t2)", marginBottom:2 }}>TOTAL UNREALIZED</div>
+                      <div style={{
+                        fontSize:14, fontWeight:700,
+                        color: posModalData.reduce((s: number, p: any) => s + parseFloat(p.unrealized_pnl || '0'), 0) >= 0 ? "var(--g)" : "var(--r)"
+                      }}>
+                        {(() => {
+                          const total = posModalData.reduce((s: number, p: any) => s + parseFloat(p.unrealized_pnl || '0'), 0);
+                          return `${total >= 0 ? '+' : ''}$${total.toFixed(2)}`;
+                        })()}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:8, color:"var(--t2)", marginBottom:2 }}>TOTAL NOTIONAL</div>
+                      <div style={{ fontSize:14, fontWeight:700, color:"var(--t0)" }}>
+                        ${posModalData.reduce((s: number, p: any) => s + Math.abs(parseFloat(p.notional || '0')), 0).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Position table */}
+                  <table style={{ width:"100%", fontFamily:"var(--mono)", fontSize:10, borderCollapse:"collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom:"1px solid var(--b2)" }}>
+                        {['Symbol', 'Side', 'Qty', 'Entry', 'Mark', 'Liq', 'Lev', 'Margin', 'PnL'].map(h => (
+                          <th key={h} style={{ padding:"4px 6px", textAlign:"left", fontSize:8, color:"var(--t2)", fontWeight:600 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {posModalData.map((pos: any, i: number) => {
+                        const amt = parseFloat(pos.position_amount || '0');
+                        const entry = parseFloat(pos.entry_price || '0');
+                        const mark = parseFloat(pos.mark_price || '0');
+                        const pnl = parseFloat(pos.unrealized_pnl || '0');
+                        const liq = parseFloat(pos.liquidation_price || '0');
+                        const notional = Math.abs(parseFloat(pos.notional || '0'));
+                        const side = (pos.position_side || (amt >= 0 ? 'LONG' : 'SHORT')).toUpperCase();
+                        return (
+                          <tr key={i} style={{ borderBottom:"1px solid var(--b2)" }}>
+                            <td style={{ padding:"6px", fontWeight:700, color:"var(--t0)" }}>{pos.symbol}</td>
+                            <td style={{ padding:"6px" }}>
+                              <span style={{
+                                padding:"1px 4px", borderRadius:2, fontSize:9, fontWeight:700,
+                                background: side === 'LONG' ? "rgba(0,212,170,0.15)" : "rgba(255,71,87,0.15)",
+                                color: side === 'LONG' ? "var(--g)" : "var(--r)",
+                              }}>{side}</span>
+                            </td>
+                            <td style={{ padding:"6px", color:"var(--t0)" }}>{Math.abs(amt)}</td>
+                            <td style={{ padding:"6px", color:"var(--t0)" }}>${entry.toFixed(2)}</td>
+                            <td style={{ padding:"6px", color:"var(--t0)" }}>${mark.toFixed(2)}</td>
+                            <td style={{ padding:"6px", color: liq > 0 ? "var(--a)" : "var(--t3)" }}>{liq > 0 ? `$${liq.toFixed(2)}` : '--'}</td>
+                            <td style={{ padding:"6px", color:"var(--t0)" }}>{pos.leverage}x</td>
+                            <td style={{ padding:"6px", color:"var(--t1)", fontSize:9 }}>{pos.margin_type}</td>
+                            <td style={{ padding:"6px", fontWeight:700, color: pnl >= 0 ? "var(--g)" : "var(--r)" }}>
+                              {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

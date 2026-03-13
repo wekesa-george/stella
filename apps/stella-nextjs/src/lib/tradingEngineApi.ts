@@ -427,6 +427,14 @@ export async function getCredentialBalance(id: string, marketType: string = 'spo
   return request(`/api/credentials/${id}/balance?market_type=${marketType}`, {}, 'gateway');
 }
 
+export async function getCredentialPositions(id: string) {
+  return request(`/api/credentials/${id}/positions`, {}, 'gateway');
+}
+
+export async function closeAllCredentialPositions(id: string) {
+  return request(`/api/credentials/${id}/positions/close-all`, { method: 'POST' }, 'gateway');
+}
+
 export async function createCredential(data: {
   service_account_id?: string;
   user_id?: string;
