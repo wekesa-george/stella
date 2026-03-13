@@ -443,6 +443,23 @@ export async function closeCredentialPosition(id: string, symbol: string, side: 
   }, 'gateway');
 }
 
+// ── Reconciliation ──
+export async function getReconciliationSummary() {
+  return request('/api/reconciliation/summary', {}, 'gateway');
+}
+export async function getReconciliationPositions() {
+  return request('/api/reconciliation/positions', {}, 'gateway');
+}
+export async function getReconciliationOrders() {
+  return request('/api/reconciliation/orders', {}, 'gateway');
+}
+export async function getReconciliationBalances() {
+  return request('/api/reconciliation/balances', {}, 'gateway');
+}
+export async function getReconciliationTrades(credentialId: string, symbol: string, limit = 50) {
+  return request(`/api/reconciliation/trades/${credentialId}?symbol=${encodeURIComponent(symbol)}&limit=${limit}`, {}, 'gateway');
+}
+
 export async function createCredential(data: {
   service_account_id?: string;
   user_id?: string;

@@ -12,6 +12,7 @@ import { getInfrastructureStatus } from "@/lib/stellaAdminApi";
 import { useBotChannel, useInfraChannel, useAlertChannel, usePlatformChannel, useOrderChannel } from "@/hooks/usePhoenixChannel";
 import { mapApiBotToUiBot, mapWsAlertToUiAlert, mapWsInfraToTradeEngineMetrics } from "@/lib/api/mappers";
 import type { Bot, TradeEngineMetrics, Alert } from "@/lib/types/dashboard";
+import ReconciliationModal from "@/components/dashboard/ReconciliationModal";
 
 /* ─────────────────────────── FONTS & BASE ────────────────────────────────── */
 const FONT = `@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');`;
@@ -19,10 +20,13 @@ const FONT = `@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mon
 /* ─────────────────────────── HELPERS ────────────────────────────────────── */
 const fmtK = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + "k" : n.toFixed(0);
 
-function sparkline(n = 24, base = 100, vol = 0.04) {
+function sparkline(n = 24, base = 100, vol = 0.04, seed = 42) {
+  // Deterministic pseudo-random to avoid hydration mismatch (no Math.random)
+  let s = seed;
+  const nextRand = () => { s = (s * 16807 + 0) % 2147483647; return s / 2147483647; };
   let v = base;
   return Array.from({ length: n }, (_, i) => {
-    v += (Math.random() - 0.47) * vol * v;
+    v += (nextRand() - 0.47) * vol * v;
     return { i, v: +v.toFixed(2) };
   });
 }
@@ -344,6 +348,11 @@ ${FONT}
 .mc-grid-left .mc-capital-card    { grid-column: 10 / 17; grid-row: 12 / 16; }
 .mc-grid-left .mc-services-card   { grid-column: 1 / 10;  grid-row: 16 / 20; }
 .mc-grid-left .mc-uptime-card     { grid-column: 10 / 17; grid-row: 16 / 20; }
+.mc-grid-left .mc-recon-card      { grid-column: 1 / 4;   grid-row: 20 / 22; }
+.mc-grid-left .mc-corr-card       { grid-column: 4 / 7;   grid-row: 20 / 22; }
+.mc-grid-left .mc-cred-card       { grid-column: 7 / 10;  grid-row: 20 / 22; }
+.mc-grid-left .mc-exhealth-card   { grid-column: 10 / 13; grid-row: 20 / 22; }
+.mc-grid-left .mc-fills-card      { grid-column: 13 / 17; grid-row: 20 / 22; }
 
 /* ── TOPBAR RESPONSIVE HELPERS ── */
 .mc-tb-stats { font-family: var(--mono); font-size: 8px; color: var(--t2); display: flex; gap: 12px; }
@@ -384,6 +393,11 @@ ${FONT}
   .mc-grid-left .mc-capital-card    { grid-column: 5 / 9;  grid-row: span 4; }
   .mc-grid-left .mc-services-card   { grid-column: 1 / 5;  grid-row: span 4; }
   .mc-grid-left .mc-uptime-card     { grid-column: 5 / 9;  grid-row: span 4; }
+  .mc-grid-left .mc-recon-card      { grid-column: span 2; grid-row: span 2; }
+  .mc-grid-left .mc-corr-card       { grid-column: span 2; grid-row: span 2; }
+  .mc-grid-left .mc-cred-card       { grid-column: span 2; grid-row: span 2; }
+  .mc-grid-left .mc-exhealth-card   { grid-column: span 2; grid-row: span 2; }
+  .mc-grid-left .mc-fills-card      { grid-column: span 2; grid-row: span 2; }
 
   /* Topbar: hide less important items */
   .mc-tb-version { display: none; }
@@ -432,6 +446,11 @@ ${FONT}
   .mc-grid-left .mc-capital-card    { grid-column: 1 / 5;  grid-row: span 3; }
   .mc-grid-left .mc-services-card   { grid-column: 1 / 5;  grid-row: span 4; }
   .mc-grid-left .mc-uptime-card     { grid-column: 1 / 5;  grid-row: span 2; }
+  .mc-grid-left .mc-recon-card      { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-corr-card       { grid-column: 3 / 5;  grid-row: span 2; }
+  .mc-grid-left .mc-cred-card       { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-exhealth-card   { grid-column: 3 / 5;  grid-row: span 2; }
+  .mc-grid-left .mc-fills-card      { grid-column: 1 / 5;  grid-row: span 2; }
 
   /* Scale down typography */
   .mc-bv-xl { font-size: 28px; }
@@ -468,6 +487,11 @@ ${FONT}
   .mc-grid-left .mc-capital-card    { grid-column: 1 / 3;  grid-row: span 3; }
   .mc-grid-left .mc-services-card   { grid-column: 1 / 3;  grid-row: span 5; }
   .mc-grid-left .mc-uptime-card     { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-recon-card      { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-corr-card       { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-cred-card       { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-exhealth-card   { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-fills-card      { grid-column: 1 / 3;  grid-row: span 2; }
 
   .mc-right > .mc-card:first-child { min-height: 160px; }
   .mc-right > .mc-card:last-child { min-height: 200px; }
@@ -1496,6 +1520,7 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   const [refreshingBalances, setRefreshingBalances] = useState(false);
   // Position modal state
   const [posModal, setPosModal] = useState<{ credId: string; name: string } | null>(null);
+  const [showReconciliation, setShowReconciliation] = useState(false);
   const [posModalData, setPosModalData] = useState<any[]>([]);
   const [posModalLoading, setPosModalLoading] = useState(false);
   const [posModalClosing, setPosModalClosing] = useState(false);
@@ -1824,18 +1849,28 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                   )}
                 </div>
 
-                {/* Positions button (futures only) */}
+                {/* Positions + Reconcile buttons (futures only) */}
                 {ex.isFutures && (
-                  <div style={{ marginTop:6, borderTop:"1px solid var(--b2)", paddingTop:5 }}>
+                  <div style={{ marginTop:6, borderTop:"1px solid var(--b2)", paddingTop:5, display:"flex", gap:4 }}>
                     <button
                       onClick={() => openPosModal(ex.id, ex.name)}
                       style={{
-                        width:"100%", background:"none", border:"1px solid var(--b2)", borderRadius:2,
+                        flex:1, background:"none", border:"1px solid var(--b2)", borderRadius:2,
                         color:"var(--t1)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:8,
                         padding:"3px 0", fontWeight:600,
                       }}
                     >
-                      VIEW POSITIONS
+                      POSITIONS
+                    </button>
+                    <button
+                      onClick={() => setShowReconciliation(true)}
+                      style={{
+                        flex:1, background:"rgba(255,180,0,0.08)", border:"1px solid rgba(255,180,0,0.3)", borderRadius:2,
+                        color:"var(--y, #ffb400)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:8,
+                        padding:"3px 0", fontWeight:700,
+                      }}
+                    >
+                      RECONCILE
                     </button>
                   </div>
                 )}
@@ -1844,6 +1879,11 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
           </div>
         )}
       </div>
+
+      {/* ── Reconciliation Modal ── */}
+      {showReconciliation && (
+        <ReconciliationModal onClose={() => setShowReconciliation(false)} />
+      )}
 
       {/* ── Positions Modal ── */}
       {posModal && (
@@ -2443,14 +2483,15 @@ function FillActivityCard({ platformStats }: { platformStats?: any }) {
 
 /* ─── HEARTBEAT HEALTH ─── */
 function HeartbeatCard({ bots: botList, wsBots }: { bots: Bot[]; wsBots: any[] }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   const running = botList.filter(b => b.status === "running").length;
-  // Detect stale heartbeats: >60s since last heartbeat
-  const now = Date.now();
-  const stale = botList.filter(b => {
+  // Detect stale heartbeats: >60s since last heartbeat — only on client to avoid hydration mismatch
+  const stale = mounted ? botList.filter(b => {
     if (b.status !== 'running') return false;
     if (!b.lastHeartbeat) return true;
-    return (now - b.lastHeartbeat) > 60_000;
-  }).length;
+    return (Date.now() - b.lastHeartbeat) > 60_000;
+  }).length : 0;
   const fresh = running - stale;
   return (
     <div className="mc-card mc-profitfactor-card">
@@ -2845,7 +2886,7 @@ function MissionCriticalDashboard() {
         pct: b.pnlPct,
         trades: b.trades,
         equity: b.equity,
-        spark: sparkline(20, b.equity || 1000, 0.02),
+        spark: sparkline(20, b.equity || 1000, 0.02, b.id.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0)),
       }))
     : [];
 
@@ -3027,7 +3068,7 @@ function MissionCriticalDashboard() {
 
   return (
     <>
-      <style>{CSS}</style>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <div className="mc">
         <div className="mc-shell">
 
