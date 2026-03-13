@@ -1493,6 +1493,7 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   const [balances, setBalances] = useState<Record<string, any>>({});
   const [loadingSA, setLoadingSA] = useState(true);
   const [loadingCreds, setLoadingCreds] = useState(false);
+  const [refreshingBalances, setRefreshingBalances] = useState(false);
 
   // Load service accounts + adapters on mount
   useEffect(() => {
@@ -1530,11 +1531,15 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     })();
   }, [selectedSA]);
 
-  // Fetch balances per credential (after credentials load)
-  useEffect(() => {
+  // Fetch balances per credential
+  const fetchBalances = useCallback(() => {
     if (credentials.length === 0) return;
     const enabled = credentials.filter((c: any) => c.is_enabled !== false);
     if (enabled.length === 0) return;
+
+    setRefreshingBalances(true);
+    let pending = enabled.length;
+    const done = () => { pending--; if (pending <= 0) setRefreshingBalances(false); };
 
     for (const cred of enabled) {
       const adapter = adapters.find((a: any) => a.id === cred.adapter_id);
@@ -1550,9 +1555,13 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
         })
         .catch(() => {
           setBalances(prev => ({ ...prev, [cred.id]: { error: true } }));
-        });
+        })
+        .finally(done);
     }
   }, [credentials, adapters]);
+
+  // Auto-fetch on credentials/adapters load
+  useEffect(() => { fetchBalances(); }, [fetchBalances]);
 
   // Resolve adapter name from adapter_id
   const adapterMap = useMemo(() => {
@@ -1560,6 +1569,13 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     for (const a of adapters) m.set(a.id, a);
     return m;
   }, [adapters]);
+
+  // Format balance value
+  const fmtBal = (v: number | null | undefined) => {
+    if (v == null) return '--';
+    if (Math.abs(v) >= 1000) return `$${(v / 1000).toFixed(1)}k`;
+    return `$${v.toFixed(2)}`;
+  };
 
   // Merge credential data with adapter info + exchange health
   const tiles = credentials.map((cred: any) => {
@@ -1571,6 +1587,14 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
       return eName.includes(adapterName.toLowerCase()) || eName.includes(adapterCode.toLowerCase());
     });
     const bal = balances[cred.id];
+    const hasBal = bal && !bal.error;
+    const isFutures = (cred.config_overrides?.market_type || '').includes('futures') ||
+                      adapter?.supports_futures || adapter?.supportsFutures;
+
+    // Extract per-asset breakdown
+    const assets: { asset: string; wallet_balance: number; available_balance: number; unrealized_pnl: number }[] =
+      hasBal && Array.isArray(bal.assets) ? bal.assets : [];
+
     return {
       id: cred.id,
       name: adapterName,
@@ -1581,10 +1605,15 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
       lat: health?.latency_ms ?? health?.response_time_ms ?? 0,
       sandbox: cred.is_sandbox ?? false,
       enabled: cred.is_enabled ?? true,
-      market: cred.config_overrides?.market_type || (adapter?.supports_futures || adapter?.supportsFutures ? 'futures' : 'spot'),
-      balance: bal && !bal.error ? bal.total_balance : null,
+      market: cred.config_overrides?.market_type || (isFutures ? 'futures' : 'spot'),
+      isFutures,
+      // Balance fields
+      walletBalance: hasBal ? bal.total_balance : null,
+      availableBalance: hasBal ? bal.available_balance : null,
+      unrealizedPnl: hasBal ? assets.reduce((s: number, a: any) => s + (a.unrealized_pnl || 0), 0) : null,
       balanceCurrency: bal?.currency || 'USDT',
       balanceError: bal?.error ?? false,
+      assets,
     };
   });
 
@@ -1596,24 +1625,40 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
       <div className="mc-card-accent" style={{ background: tiles.some(t => t.status !== 'healthy') ? "var(--a)" : "var(--g)" }}/>
       <div className="mc-ch">
         <div className="mc-ct">Exchange Adapters</div>
-        {/* SA selector */}
-        {serviceAccounts.length > 1 ? (
-          <select
-            value={selectedSA || ''}
-            onChange={e => setSelectedSA(e.target.value)}
+        <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+          {/* Refresh button */}
+          <button
+            onClick={fetchBalances}
+            disabled={refreshingBalances || loadingSA || loadingCreds}
+            title="Refresh balances"
             style={{
-              background: "var(--bg3)", border: "1px solid var(--b2)", borderRadius: 2,
-              color: "var(--t0)", fontFamily: "var(--mono)", fontSize: 8, padding: "2px 4px",
-              outline: "none", cursor: "pointer",
+              background: "none", border: "1px solid var(--b2)", borderRadius: 2,
+              color: refreshingBalances ? "var(--t3)" : "var(--t1)", cursor: refreshingBalances ? "default" : "pointer",
+              fontFamily: "var(--mono)", fontSize: 8, padding: "1px 5px",
+              opacity: refreshingBalances ? 0.5 : 1, transition: "opacity .2s",
             }}
           >
-            {serviceAccounts.map((sa: any) => (
-              <option key={sa.id} value={sa.id}>{sa.name || sa.id.slice(0, 8)}</option>
-            ))}
-          </select>
-        ) : serviceAccounts.length === 1 ? (
-          <span className="mc-tag mc-td">{serviceAccounts[0].name || 'SA'}</span>
-        ) : null}
+            {refreshingBalances ? '...' : 'REFRESH'}
+          </button>
+          {/* SA selector */}
+          {serviceAccounts.length > 1 ? (
+            <select
+              value={selectedSA || ''}
+              onChange={e => setSelectedSA(e.target.value)}
+              style={{
+                background: "var(--bg3)", border: "1px solid var(--b2)", borderRadius: 2,
+                color: "var(--t0)", fontFamily: "var(--mono)", fontSize: 8, padding: "2px 4px",
+                outline: "none", cursor: "pointer",
+              }}
+            >
+              {serviceAccounts.map((sa: any) => (
+                <option key={sa.id} value={sa.id}>{sa.name || sa.id.slice(0, 8)}</option>
+              ))}
+            </select>
+          ) : serviceAccounts.length === 1 ? (
+            <span className="mc-tag mc-td">{serviceAccounts[0].name || 'SA'}</span>
+          ) : null}
+        </div>
       </div>
       <div className="mc-cb" style={{ flex:1, padding:0 }}>
         {loadingSA || loadingCreds ? (
@@ -1647,15 +1692,64 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                     <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:"var(--t1)", textTransform:"uppercase" }}>{ex.market}</div>
                   </div>
                   <div>
-                    <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Balance</div>
-                    <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color: ex.balanceError ? "var(--r)" : ex.balance != null ? "var(--g)" : "var(--t3)" }}>
-                      {ex.balanceError ? 'Error' : ex.balance != null ? `$${ex.balance >= 1000 ? (ex.balance/1000).toFixed(1) + 'k' : ex.balance.toFixed(2)}` : '--'}
-                    </div>
-                  </div>
-                  <div>
                     <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Status</div>
                     <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:statusColor(ex.status), textTransform:"uppercase" }}>{ex.status}</div>
                   </div>
+                  <div>
+                    <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Currency</div>
+                    <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:"var(--t1)" }}>{ex.balanceCurrency}</div>
+                  </div>
+                </div>
+
+                {/* Balance breakdown */}
+                <div style={{ marginTop:6, borderTop:"1px solid var(--b2)", paddingTop:5 }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"3px 8px" }}>
+                    <div>
+                      <div className="mc-sub" style={{ fontSize:6, marginBottom:1 }}>Wallet</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700, color: ex.balanceError ? "var(--r)" : ex.walletBalance != null ? "var(--g)" : "var(--t3)" }}>
+                        {ex.balanceError ? 'ERR' : fmtBal(ex.walletBalance)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mc-sub" style={{ fontSize:6, marginBottom:1 }}>Available</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700, color: ex.availableBalance != null ? "var(--b)" : "var(--t3)" }}>
+                        {fmtBal(ex.availableBalance)}
+                      </div>
+                    </div>
+                    {ex.isFutures && (
+                      <div style={{ gridColumn:"span 2" }}>
+                        <div className="mc-sub" style={{ fontSize:6, marginBottom:1 }}>Unrealized PnL</div>
+                        <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color: ex.unrealizedPnl != null ? (ex.unrealizedPnl >= 0 ? "var(--g)" : "var(--r)") : "var(--t3)" }}>
+                          {ex.unrealizedPnl != null ? `${ex.unrealizedPnl >= 0 ? '+' : ''}${fmtBal(ex.unrealizedPnl)}` : '--'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Per-asset breakdown (show non-zero assets) */}
+                  {ex.assets.length > 0 && ex.assets.length <= 5 && (
+                    <div style={{ marginTop:4, display:"flex", flexWrap:"wrap", gap:3 }}>
+                      {ex.assets.map((a: any, i: number) => (
+                        <div key={i} style={{
+                          background:"var(--bg2)", border:"1px solid var(--b2)", borderRadius:2,
+                          padding:"2px 4px", fontFamily:"var(--mono)", fontSize:7, color:"var(--t1)",
+                        }}>
+                          <span style={{ color:"var(--t2)" }}>{a.asset}</span>{' '}
+                          {a.wallet_balance >= 1000 ? `${(a.wallet_balance/1000).toFixed(1)}k` : a.wallet_balance.toFixed(2)}
+                          {ex.isFutures && a.unrealized_pnl !== 0 && (
+                            <span style={{ color: a.unrealized_pnl >= 0 ? "var(--g)" : "var(--r)", marginLeft:2 }}>
+                              {a.unrealized_pnl >= 0 ? '+' : ''}{a.unrealized_pnl.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {ex.assets.length > 5 && (
+                    <div style={{ marginTop:3, fontFamily:"var(--mono)", fontSize:7, color:"var(--t2)" }}>
+                      {ex.assets.length} assets
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -1717,7 +1811,7 @@ function UptimeCard({ services: svcs, infraMetrics }: { services: { name: string
 
 /* ─── FAILED ORDERS ─── */
 function FailedOrdersCard({ orders: orderList }: { orders: any[] }) {
-  const cnt = orderList.filter((o: any) => o.status === 'failed').length;
+  const cnt = orderList.filter((o: any) => (o.order_status || o.status) === 'failed').length;
   const total = orderList.length;
   return (
     <div className="mc-card mc-failed-card" style={{ borderColor: cnt > 5 ? "rgba(255,71,87,.4)" : undefined }}>
@@ -1748,9 +1842,11 @@ function TradesCard({ platformStats }: { platformStats: any }) {
 
 /* ─── FILL RATE ─── */
 function FillRateCard({ orders: orderList }: { orders: any[] }) {
-  // Derive fill rate from WS order stream
-  const filled = orderList.filter((o: any) => o.status === 'filled').length;
-  const total = orderList.filter((o: any) => ['filled', 'cancelled', 'failed', 'rejected'].includes(o.status)).length;
+  // Derive fill rate from order stream
+  // Phoenix enrichment returns `order_status`; WS may use `status` — check both
+  const getStatus = (o: any) => o.order_status || o.status;
+  const filled = orderList.filter((o: any) => getStatus(o) === 'filled').length;
+  const total = orderList.filter((o: any) => ['filled', 'cancelled', 'failed', 'rejected'].includes(getStatus(o))).length;
   const rate = total > 0 ? (filled / total) * 100 : 0;
   return (
     <div className="mc-card mc-fillrate-card">
@@ -1818,15 +1914,40 @@ function DrawdownCard({ platformStats }: { platformStats: any }) {
 }
 
 /* ─── AVG EXECUTION ─── */
-function AvgExecCard() {
-  // Tier 4: requires submitted_at/first_fill_at to be populated in Executor
+function AvgExecCard({ orders }: { orders: any[] }) {
+  // Compute avg execution time: submitted_at → first_fill_at
+  const filledWithTimes = orders.filter((o: any) => {
+    const status = o.order_status || o.status;
+    if (status !== 'filled') return false;
+    const submitted = o.submitted_at;
+    const filled = o.first_fill_at || o.completed_at;
+    return submitted && filled;
+  });
+
+  let avgMs = 0;
+  if (filledWithTimes.length > 0) {
+    const totalMs = filledWithTimes.reduce((sum: number, o: any) => {
+      const submitted = new Date(o.submitted_at).getTime();
+      const filled = new Date(o.first_fill_at || o.completed_at).getTime();
+      return sum + Math.max(0, filled - submitted);
+    }, 0);
+    avgMs = totalMs / filledWithTimes.length;
+  }
+
+  const hasData = filledWithTimes.length > 0 && avgMs > 0;
+  const formatted = hasData
+    ? avgMs < 1000 ? `${Math.round(avgMs)}ms`
+    : avgMs < 60000 ? `${(avgMs / 1000).toFixed(1)}s`
+    : `${(avgMs / 60000).toFixed(1)}m`
+    : '--';
+
   return (
     <div className="mc-card mc-avgexec-card">
-      <div className="mc-card-accent" style={{ background:"var(--t3)" }}/>
+      <div className="mc-card-accent" style={{ background: hasData ? "var(--b)" : "var(--t3)" }}/>
       <div className="mc-ch"><div className="mc-ct">Avg Exec</div></div>
       <div className="mc-cb" style={{ justifyContent:"center", alignItems:"center" }}>
-        <div className="mc-bigval mc-bv-sm" style={{ color:"var(--t2)", textAlign:"center" }}>--</div>
-        <div className="mc-sub" style={{ fontSize:7 }}>requires execution tracking</div>
+        <div className="mc-bigval mc-bv-sm" style={{ color: hasData ? "var(--b)" : "var(--t2)", textAlign:"center" }}>{formatted}</div>
+        <div className="mc-sub" style={{ fontSize:7 }}>{hasData ? `from ${filledWithTimes.length} filled orders` : 'no filled orders with timestamps'}</div>
       </div>
     </div>
   );
@@ -2732,7 +2853,9 @@ function MissionCriticalDashboard() {
 
                   <SlippageCard platformStats={platformStats} />
                   <DrawdownCard platformStats={platformStats} />
-                  <AvgExecCard />
+                  {ordersError ? <CardError label="Avg Exec" /> :
+                   !ordersReady ? <CardSkeleton label="Avg Exec" /> :
+                   <AvgExecCard orders={allRawOrders} />}
                   <ReconciliationCard platformStats={platformStats} />
                   <CorrelationCard platformStats={platformStats} />
                   <CredentialHealthCard platformStats={platformStats} />
