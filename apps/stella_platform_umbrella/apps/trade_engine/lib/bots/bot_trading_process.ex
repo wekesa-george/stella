@@ -65,13 +65,22 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
         # Step 2: Loading strategy
         BotRegistry.report_init_step(bot_id, "loading_strategy")
-        config = Map.get(bot, :config, %{})
+        raw_config = Map.get(bot, :config, %{})
+        config = stringify_keys(raw_config)
 
         # Resolve strategy module from class_module or strategy type
         strategy_module = resolve_strategy_module(bot)
         strategy_defaults = strategy_module.default_config()
         merged_config = Map.merge(strategy_defaults, config)
-        BotLogger.info(bot_id, :lifecycle, "Loading strategy", %{strategy: inspect(strategy_module)})
+        BotLogger.info(bot_id, :lifecycle, "Loading strategy", %{
+          strategy: inspect(strategy_module),
+          raw_config_keys: inspect(Map.keys(raw_config)),
+          stringified_keys: inspect(Map.keys(config)),
+          upper_price: config["upper_price"],
+          lower_price: config["lower_price"],
+          merged_upper: merged_config["upper_price"],
+          merged_lower: merged_config["lower_price"]
+        })
 
         # Step 3: Subscribing to market data (polling mode)
         BotRegistry.report_init_step(bot_id, "subscribing_market_data")
@@ -2008,4 +2017,14 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   rescue
     e -> Logger.warning("[BotTrading] Position close persist exception: #{inspect(e)}")
   end
+
+  # Normalize config map keys to strings so strategies always see "upper_price" not :upper_price.
+  # Atom keys can sneak in from the API controller's atomize_keys() or ETS caching.
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), stringify_keys(v)}
+      {k, v} -> {k, stringify_keys(v)}
+    end)
+  end
+  defp stringify_keys(other), do: other
 end

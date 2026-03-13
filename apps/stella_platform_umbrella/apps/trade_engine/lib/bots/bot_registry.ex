@@ -726,7 +726,7 @@ defmodule TradeEngine.Bots.BotRegistry do
       strategy_type: strategy_type,
       credential_id: bot.credential_id,
       market_type: bot.market_type || "spot",
-      config: bot.config || %{},
+      config: stringify_keys(bot.config || %{}),
       risk_overrides: bot.risk_overrides || %{},
       status: bot.status,
       trading_pairs: bot.trading_pairs || [],
@@ -1095,4 +1095,13 @@ defmodule TradeEngine.Bots.BotRegistry do
     end
   end
   defp format_duration(_), do: "0m"
+
+  # Normalize map keys to strings — prevents atom/string key mismatch in configs
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), stringify_keys(v)}
+      {k, v} -> {k, stringify_keys(v)}
+    end)
+  end
+  defp stringify_keys(other), do: other
 end

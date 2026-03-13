@@ -59,13 +59,15 @@ defmodule TradeEngine.Strategies.GridBot do
   @impl true
   def generate_signal(candles, _order_flow, context) do
     raw_config = Map.get(context, :config, %{})
-    config = Map.merge(@defaults, raw_config)
+    # Normalize: ensure all keys are strings and numeric values are floats
+    normalized = normalize_config(raw_config)
+    config = Map.merge(@defaults, normalized)
 
     upper = config["upper_price"]
     lower = config["lower_price"]
 
     if upper <= 0 or lower <= 0 or upper <= lower do
-      Logger.error("GridBot: invalid_grid_range — upper=#{inspect(upper)} lower=#{inspect(lower)} | raw_config_keys=#{inspect(Map.keys(raw_config))} | merged_upper=#{inspect(config["upper_price"])} merged_lower=#{inspect(config["lower_price"])} | raw_upper=#{inspect(raw_config["upper_price"])} raw_lower=#{inspect(raw_config["lower_price"])}")
+      Logger.error("GridBot: invalid_grid_range — upper=#{inspect(upper)} lower=#{inspect(lower)} | raw_keys=#{inspect(Map.keys(raw_config))} | normalized_keys=#{inspect(Map.keys(normalized))}")
       {:error, {:invalid_grid_range, %{upper: upper, lower: lower, raw_keys: Map.keys(raw_config)}}}
     else
       # Get current price from latest candle
@@ -111,7 +113,7 @@ defmodule TradeEngine.Strategies.GridBot do
 
   @impl true
   def should_exit?(position, context) do
-    config = Map.merge(@defaults, Map.get(context, :config, %{}))
+    config = Map.merge(@defaults, normalize_config(Map.get(context, :config, %{})))
     price_cache = Map.get(context, :price_cache, %{})
     current_price = Map.get(price_cache, position.symbol, position.current_price)
 
@@ -135,7 +137,7 @@ defmodule TradeEngine.Strategies.GridBot do
 
   @impl true
   def calculate_position_size(_signal, context) do
-    config = Map.merge(@defaults, Map.get(context, :config, %{}))
+    config = Map.merge(@defaults, normalize_config(Map.get(context, :config, %{})))
     total = config["total_investment"]
     grid_count = config["grid_levels"] || 10
     per_grid = total / max(grid_count, 1)
@@ -144,7 +146,7 @@ defmodule TradeEngine.Strategies.GridBot do
 
   @impl true
   def calculate_stop_loss(_signal, _entry_price, context) do
-    config = Map.merge(@defaults, Map.get(context, :config, %{}))
+    config = Map.merge(@defaults, normalize_config(Map.get(context, :config, %{})))
     config["stop_loss_price"] || config["lower_price"] || 0.0
   end
 
@@ -266,4 +268,25 @@ defmodule TradeEngine.Strategies.GridBot do
       if current_price > 0, do: usd_per_grid / current_price, else: 0.0
     end
   end
+
+  # Normalize config map: convert all atom keys to strings and Decimals to floats.
+  # Handles mixed atom/string key maps by splitting into two maps and merging
+  # with atom-key values taking priority (they come from the actual DB config,
+  # while string-key duplicates may be stale defaults from a prior merge).
+  defp normalize_config(map) when is_map(map) do
+    {atom_entries, string_entries} =
+      Enum.reduce(map, {%{}, %{}}, fn
+        {k, v}, {atoms, strings} when is_atom(k) ->
+          {Map.put(atoms, Atom.to_string(k), normalize_value(v)), strings}
+        {k, v}, {atoms, strings} ->
+          {atoms, Map.put(strings, k, normalize_value(v))}
+      end)
+
+    # Atom-key values override string-key values (atom keys are from the real config)
+    Map.merge(string_entries, atom_entries)
+  end
+  defp normalize_config(other), do: other
+
+  defp normalize_value(%Decimal{} = d), do: Decimal.to_float(d)
+  defp normalize_value(v), do: v
 end
