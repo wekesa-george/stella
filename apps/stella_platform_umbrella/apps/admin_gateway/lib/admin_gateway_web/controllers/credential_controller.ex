@@ -167,6 +167,65 @@ defmodule AdminGatewayWeb.CredentialController do
     end
   end
 
+  @doc """
+  POST /api/credentials/:id/positions/close
+
+  Closes a single futures position by symbol.
+  Body: {"symbol": "BTCUSDT_260327", "side": "LONG", "quantity": 0.109, "entry_price": 71786.16}
+
+  If quantity is omitted, fetches position risk to get current amount.
+  """
+  def close_position(conn, %{"id" => credential_id} = params) do
+    symbol = params["symbol"]
+
+    if is_nil(symbol) or symbol == "" do
+      conn |> put_status(400) |> json(%{error: "symbol is required"})
+    else
+      # Get current position details from exchange if quantity not provided
+      {quantity, entry, side} = case {params["quantity"], params["entry_price"], params["side"]} do
+        {q, e, s} when not is_nil(q) and not is_nil(e) and not is_nil(s) ->
+          {parse_float(q), parse_float(e), String.upcase(to_string(s))}
+
+        _ ->
+          # Fetch from exchange
+          case Executor.get_position_risk(credential_id, symbol: symbol) do
+            {:ok, [pos | _]} ->
+              amt = abs(parse_float(pos.position_amount))
+              ep = parse_float(pos.entry_price)
+              ps = to_string(pos.position_side || "") |> String.upcase()
+              sd = if amt < 0 or ps == "SHORT", do: "SHORT", else: "LONG"
+              {abs(amt), ep, sd}
+
+            _ ->
+              {0.0, 0.0, "LONG"}
+          end
+      end
+
+      if quantity == 0.0 do
+        conn |> put_status(400) |> json(%{error: "No open position found for #{symbol}"})
+      else
+        result = if side == "SHORT" do
+          Executor.close_short(credential_id, symbol, quantity, entry, market_type: "usds_futures")
+        else
+          Executor.close_long(credential_id, symbol, quantity, entry, market_type: "usds_futures")
+        end
+
+        case result do
+          {:ok, data} ->
+            json(conn, %{
+              data: Map.merge(%{symbol: symbol, side: side, quantity: quantity, status: "closed"}, data)
+            })
+
+          {:error, %{code: code, message: msg}} ->
+            conn |> put_status(502) |> json(%{error: "Exchange error: #{msg}", code: code})
+
+          {:error, reason} ->
+            conn |> put_status(502) |> json(%{error: "Failed to close position: #{inspect(reason)}"})
+        end
+      end
+    end
+  end
+
   defp parse_float(nil), do: 0.0
   defp parse_float(n) when is_number(n), do: n * 1.0
   defp parse_float(s) when is_binary(s) do

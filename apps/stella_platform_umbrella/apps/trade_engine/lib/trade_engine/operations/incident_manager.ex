@@ -38,6 +38,7 @@ defmodule TradeEngine.Operations.IncidentManager do
     "drawdown_breach" => %{priority: "P2", category: "risk_breach"},
     "bot_error" => %{priority: "P2", category: "bot_error"},
     "exchange_down" => %{priority: "P2", category: "exchange_failure"},
+    "orphaned_position" => %{priority: "P1", category: "risk_breach"},
   }
 
   # ── Public API ──

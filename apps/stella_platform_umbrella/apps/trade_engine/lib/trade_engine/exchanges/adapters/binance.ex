@@ -639,7 +639,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
               liquidation_price: parse_float_safe(p["liquidationPrice"]),
               leverage: parse_float_safe(p["leverage"]),
               margin_type: p["marginType"],
-              notional: parse_float_safe(p["notional"])
+              notional: parse_float_safe(p["notional"]),
+              update_time: p["updateTime"]
             }
           end)
 

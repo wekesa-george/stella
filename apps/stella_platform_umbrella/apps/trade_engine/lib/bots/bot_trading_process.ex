@@ -135,9 +135,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         Process.send_after(self(), :update_prices, @price_update_interval_ms)
         Process.send_after(self(), :poll_candles, @candle_poll_interval_ms)
 
-        # Grid bot: check for filled orders every 10s
+        # Grid bot: check for filled orders every 10s + adopt exchange positions
         if is_grid do
           Process.send_after(self(), :grid_check_fills, 10_000)
+          Process.send_after(self(), :adopt_exchange_positions, 3_000)
         end
 
         Logger.info("BotTradingProcess started for #{bot.name} (#{bot_id}) — strategy: #{inspect(strategy_module)} — pairs: #{inspect(bot.trading_pairs)}")
@@ -268,6 +269,15 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   def handle_info(:update_prices, state) do
     Process.send_after(self(), :update_prices, @price_update_interval_ms)
     {:noreply, update_prices(state)}
+  end
+
+  @impl true
+  def handle_info(:adopt_exchange_positions, state) do
+    if state.is_grid do
+      {:noreply, adopt_exchange_positions(state)}
+    else
+      {:noreply, state}
+    end
   end
 
   @impl true
@@ -1711,6 +1721,118 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         e -> Logger.warning("Grid reconciliation failed: #{Exception.message(e)}")
       end
     end)
+  end
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # EXCHANGE POSITION ADOPTION (on bot startup)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  defp adopt_exchange_positions(state) do
+    credential_id = state.credential_id
+    bot_id = state.bot_id
+    trading_pairs = state.trading_pairs || []
+
+    # Normalize bot's trading pairs to match exchange symbol format
+    bot_symbols = Enum.map(trading_pairs, fn pair ->
+      pair |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+    end) |> MapSet.new()
+
+    case Executor.get_position_risk(credential_id) do
+      {:ok, positions} when is_list(positions) ->
+        # Filter to positions matching this bot's symbols
+        matching = Enum.filter(positions, fn pos ->
+          MapSet.member?(bot_symbols, pos.symbol)
+        end)
+
+        if matching == [] do
+          BotLogger.info(bot_id, :grid, "No existing exchange positions to adopt", %{})
+          state
+        else
+          Enum.each(matching, fn pos ->
+            amt = pos.position_amount || 0
+            entry = pos.entry_price || 0
+            pnl = pos.unrealized_pnl || 0
+            side = to_string(pos.position_side || "") |> String.upcase()
+            direction = if amt < 0 or side == "SHORT", do: "short", else: "long"
+
+            BotLogger.info(bot_id, :grid, "Adopting exchange position", %{
+              symbol: pos.symbol,
+              side: direction,
+              quantity: abs(amt),
+              entry_price: entry,
+              unrealized_pnl: pnl,
+              leverage: pos.leverage
+            })
+
+            # Check if DB already has this position
+            import Ecto.Query
+            existing = TradeEngine.Repo.one(
+              from(p in TradeEngine.Trading.Position,
+                where: p.bot_id == ^bot_id and p.status == "open",
+                where: fragment("? LIKE ?", p.symbol, ^"%#{pos.symbol}%"),
+                limit: 1
+              )
+            )
+
+            if existing do
+              # Update existing DB position with exchange values
+              TradeEngine.Repo.query(
+                """
+                UPDATE trading.positions
+                SET quantity = $1, entry_price = $2, current_price = $3,
+                    unrealized_pnl_usd = $4, leverage = $5, updated_at = NOW()
+                WHERE id = $6
+                """,
+                [Decimal.from_float(abs(amt + 0.0)), Decimal.from_float(entry + 0.0),
+                 Decimal.from_float((pos.mark_price || entry) + 0.0),
+                 Decimal.from_float(pnl + 0.0), trunc(pos.leverage || 1),
+                 existing.id]
+              )
+            else
+              # Create new DB position record
+              now = DateTime.utc_now()
+              symbol = List.first(trading_pairs) || pos.symbol
+
+              TradeEngine.Repo.query(
+                """
+                INSERT INTO trading.positions
+                  (id, bot_id, user_id, credential_id, trading_pair, side, status,
+                   entry_price, current_price, quantity, leverage,
+                   unrealized_pnl_usd, opened_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, $9, $10, $11, $12, $12, $12)
+                ON CONFLICT DO NOTHING
+                """,
+                [Ecto.UUID.generate(), bot_id, state.user_id, credential_id,
+                 symbol, direction,
+                 Decimal.from_float(entry + 0.0), Decimal.from_float((pos.mark_price || entry) + 0.0),
+                 Decimal.from_float(abs(amt + 0.0)), trunc(pos.leverage || 1),
+                 Decimal.from_float(pnl + 0.0), now]
+              )
+            end
+
+            # Alert about adoption
+            Phoenix.PubSub.broadcast(TradeEngine.PubSub, "alerts:new", {:new_alert, %{
+              alert_type: "position_adopted",
+              category: "bot",
+              severity: "info",
+              title: "Bot adopted exchange position: #{pos.symbol}",
+              message: "Bot #{bot_id |> String.slice(0, 8)} adopted existing #{direction} #{abs(amt)} #{pos.symbol} @ $#{entry} (PnL: $#{pnl})",
+              metadata: %{bot_id: bot_id, symbol: pos.symbol, side: direction, quantity: abs(amt), entry_price: entry, unrealized_pnl: pnl},
+              source: "bot_trading_process"
+            }})
+          end)
+
+          state
+        end
+
+      {:error, reason} ->
+        BotLogger.warn(bot_id, :grid, "Could not check exchange positions for adoption", %{error: inspect(reason)})
+        state
+    end
+  rescue
+    e ->
+      BotLogger.warn(state.bot_id, :grid, "Exchange position adoption failed", %{error: Exception.message(e)})
+      state
   end
 
   # ════════════════════════════════════════════════════════════════════════════

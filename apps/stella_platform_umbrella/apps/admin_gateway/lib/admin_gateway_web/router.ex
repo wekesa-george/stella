@@ -25,6 +25,7 @@ defmodule AdminGatewayWeb.Router do
     # Credential endpoints
     get "/credentials/:id/balance", CredentialController, :balance
     get "/credentials/:id/positions", CredentialController, :positions
+    post "/credentials/:id/positions/close", CredentialController, :close_position
     post "/credentials/:id/positions/close-all", CredentialController, :close_all_positions
   end
 

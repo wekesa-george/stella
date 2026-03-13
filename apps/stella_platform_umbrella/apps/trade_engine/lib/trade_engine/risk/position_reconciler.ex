@@ -386,27 +386,37 @@ defmodule TradeEngine.Risk.PositionReconciler do
     }
 
     if ghosts_found != [] do
-      Logger.warning("PositionReconciler: #{length(ghosts_found)} ghost position(s) detected on exchange")
+      Logger.warning("PositionReconciler: #{length(ghosts_found)} orphaned position(s) on exchange")
 
       Enum.each(ghosts_found, fn ghost ->
-        event = %{
-          type: "ghost_detected",
-          symbol: ghost.symbol,
-          credential_id: ghost.credential_id,
-          position_amount: ghost.position_amount,
-          entry_price: ghost.entry_price,
-          unrealized_pnl: ghost.unrealized_pnl,
-          action: "alert_created",
-          timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
-        }
+        pnl = ghost.unrealized_pnl || 0
+        amt = ghost.position_amount || 0
+        side = ghost[:position_side] || (if amt >= 0, do: "LONG", else: "SHORT")
+        orphan_type = ghost[:orphan_type] || "unknown"
 
-        broadcast_reconciliation(%{event |
-          type: "ghost_detected",
-          position_id: nil,
-          bot_id: nil,
-          symbol: ghost.symbol,
-          action: "ghost_on_exchange"
-        })
+        severity = if abs(pnl) > 50 or orphan_type == "no_bot_no_db", do: "critical", else: "warning"
+
+        Phoenix.PubSub.broadcast(@pubsub, "alerts:new", {:new_alert, %{
+          alert_type: "orphaned_position",
+          category: "risk",
+          severity: severity,
+          title: "Orphaned position: #{ghost.symbol} #{side}",
+          message: "Exchange has #{side} #{abs(amt)} #{ghost.symbol} (entry $#{ghost.entry_price}, PnL $#{pnl}) with no active bot. Type: #{orphan_type}",
+          metadata: %{
+            symbol: ghost.symbol,
+            credential_id: ghost.credential_id,
+            position_side: side,
+            position_amount: amt,
+            entry_price: ghost.entry_price,
+            mark_price: ghost.mark_price,
+            unrealized_pnl: pnl,
+            leverage: ghost.leverage,
+            orphan_type: orphan_type,
+            has_running_bot: ghost[:has_running_bot],
+            has_db_position: ghost[:has_db_position]
+          },
+          source: "position_reconciler"
+        }})
       end)
     end
 
@@ -419,21 +429,37 @@ defmodule TradeEngine.Risk.PositionReconciler do
   end
 
   defp detect_ghost_positions do
-    # Get all active credential IDs from running bots
-    active_credentials = try do
-      BotRegistry.list_bots()
-      |> Enum.map(fn bot -> Map.get(bot, :credential_id) end)
-      |> Enum.uniq()
-      |> Enum.reject(&is_nil/1)
+    # Get ALL enabled futures credentials (not just running bot credentials)
+    all_credentials = try do
+      {:ok, %{rows: rows}} = Repo.query(
+        "SELECT id, config_overrides FROM exchange.user_credentials WHERE is_enabled = true",
+        [],
+        timeout: 10_000
+      )
+
+      rows
+      |> Enum.filter(fn [_id, config] ->
+        market = (config || %{})["market_type"] || ""
+        String.contains?(market, "futures")
+      end)
+      |> Enum.map(fn [id, _config] -> id end)
     rescue
-      _ -> []
+      _ ->
+        # Fallback: use credentials from all bots (running or not)
+        try do
+          BotRegistry.list_bots()
+          |> Enum.map(fn bot -> Map.get(bot, :credential_id) end)
+          |> Enum.uniq()
+          |> Enum.reject(&is_nil/1)
+        rescue
+          _ -> []
+        end
     end
 
-    if active_credentials == [] do
+    if all_credentials == [] do
       []
     else
-      # For each credential, check exchange positions vs DB
-      active_credentials
+      all_credentials
       |> Enum.take(@max_api_calls_per_cycle)
       |> Enum.flat_map(fn cred_id ->
         check_credential_ghosts(cred_id)
@@ -451,14 +477,14 @@ defmodule TradeEngine.Risk.PositionReconciler do
     if exchange_positions == [] do
       []
     else
-      # Get DB open positions for this credential
+      # Get ALL DB open positions for this credential (not just running bots)
       db_symbols = from(p in Position,
         where: p.status == "open" and p.credential_id == ^credential_id,
-        select: p.symbol
+        select: p.trading_pair
       )
       |> Repo.all(timeout: 10_000)
       |> Enum.map(fn sym ->
-        sym
+        (sym || "")
         |> String.split(":")
         |> List.first()
         |> String.replace("/", "")
@@ -466,13 +492,44 @@ defmodule TradeEngine.Risk.PositionReconciler do
       end)
       |> MapSet.new()
 
-      # Find exchange positions not tracked in DB
+      # Also check which bots are running for this credential
+      running_bot_symbols = try do
+        BotRegistry.list_bots()
+        |> Enum.filter(fn bot ->
+          Map.get(bot, :credential_id) == credential_id and
+          Map.get(bot, :status) in ["running", "initializing"]
+        end)
+        |> Enum.flat_map(fn bot ->
+          (Map.get(bot, :trading_pairs) || [])
+          |> Enum.map(fn pair ->
+            pair |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+          end)
+        end)
+        |> MapSet.new()
+      rescue
+        _ -> MapSet.new()
+      end
+
+      # Find exchange positions not tracked in DB AND not assigned to a running bot
       exchange_positions
       |> Enum.filter(fn ep ->
-        not MapSet.member?(db_symbols, ep.symbol)
+        sym = ep.symbol
+        not MapSet.member?(db_symbols, sym) or not MapSet.member?(running_bot_symbols, sym)
       end)
       |> Enum.map(fn ep ->
-        Map.put(ep, :credential_id, credential_id)
+        has_running_bot = MapSet.member?(running_bot_symbols, ep.symbol)
+        has_db_position = MapSet.member?(db_symbols, ep.symbol)
+        Map.merge(ep, %{
+          credential_id: credential_id,
+          has_running_bot: has_running_bot,
+          has_db_position: has_db_position,
+          orphan_type: cond do
+            not has_running_bot and not has_db_position -> "no_bot_no_db"
+            not has_running_bot -> "bot_stopped"
+            not has_db_position -> "no_db_record"
+            true -> "drift"
+          end
+        })
       end)
     end
   rescue
