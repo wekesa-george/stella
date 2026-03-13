@@ -22,8 +22,10 @@ defmodule AdminGatewayWeb.Router do
     get "/phoenix/services/health/category/:category", InfraController, :services_health_by_category
     get "/phoenix/services/health/:name", InfraController, :service_health_by_name
 
-    # Credential balance endpoint
+    # Credential endpoints
     get "/credentials/:id/balance", CredentialController, :balance
+    get "/credentials/:id/positions", CredentialController, :positions
+    post "/credentials/:id/positions/close-all", CredentialController, :close_all_positions
   end
 
   # Authenticated admin routes
