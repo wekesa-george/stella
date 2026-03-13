@@ -251,7 +251,10 @@ defmodule TradeEngine.API.Enrichment do
       exchange_order_id: get_field(order, :exchange_order_id),
       time_in_force: get_field(order, :time_in_force) || "GTC",
       position_id: get_field(order, :position_id),
-      user_id: get_field(order, :user_id)
+      user_id: get_field(order, :user_id),
+      submitted_at: get_field(order, :submitted_at),
+      first_fill_at: get_field(order, :first_fill_at),
+      completed_at: get_field(order, :execution_time)
     }
   end
 
