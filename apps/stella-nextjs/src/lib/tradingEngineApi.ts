@@ -435,6 +435,14 @@ export async function closeAllCredentialPositions(id: string) {
   return request(`/api/credentials/${id}/positions/close-all`, { method: 'POST' }, 'gateway');
 }
 
+export async function closeCredentialPosition(id: string, symbol: string, side: string, quantity: number, entryPrice: number) {
+  return request(`/api/credentials/${id}/positions/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol, side, quantity, entry_price: entryPrice }),
+  }, 'gateway');
+}
+
 export async function createCredential(data: {
   service_account_id?: string;
   user_id?: string;

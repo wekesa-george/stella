@@ -5,7 +5,7 @@ import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
-import { listBots, getInfraMetrics, getServiceHealth, getExchangeHealth, listServiceAccounts, listServiceAccountCredentials, listAdapters, getCredentialBalance, getCredentialPositions, closeAllCredentialPositions, getRecentOrders, getPlatformEquityCurve, getAllCapitalAllocations, getSystemAlerts, getOpenIncidents, acknowledgeSystemAlert, pauseBot, startBot, stopBot, stopTrading, resolveIncident } from "@/lib/tradingEngineApi";
+import { listBots, getInfraMetrics, getServiceHealth, getExchangeHealth, listServiceAccounts, listServiceAccountCredentials, listAdapters, getCredentialBalance, getCredentialPositions, closeAllCredentialPositions, closeCredentialPosition, getRecentOrders, getPlatformEquityCurve, getAllCapitalAllocations, getSystemAlerts, getOpenIncidents, acknowledgeSystemAlert, pauseBot, startBot, stopBot, stopTrading, resolveIncident } from "@/lib/tradingEngineApi";
 import { useRouter } from "next/navigation";
 import { TrainingProvider, useTraining } from "@/lib/training/TrainingContext";
 import { getInfrastructureStatus } from "@/lib/stellaAdminApi";
@@ -1608,6 +1608,33 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     }
   }, [posModal, fetchBalances]);
 
+  // Close a single position from modal
+  const [closingSingle, setClosingSingle] = useState<string | null>(null);
+  const handleCloseSingle = useCallback(async (pos: any) => {
+    if (!posModal) return;
+    const sym = pos.symbol;
+    const amt = Math.abs(parseFloat(pos.position_amount || '0'));
+    const entry = parseFloat(pos.entry_price || '0');
+    const side = (pos.position_side || (amt >= 0 ? 'LONG' : 'SHORT')).toUpperCase();
+    if (!confirm(`Close ${side} ${amt} ${sym} at market?`)) return;
+    setClosingSingle(sym);
+    setPosModalResult(null);
+    try {
+      const res = await closeCredentialPosition(posModal.credId, sym, side, amt, entry);
+      const body = (res.data as any)?.data ?? res.data;
+      setPosModalResult({ closed: 1, failed: 0, results: [body] });
+      // Refresh
+      const res2 = await getCredentialPositions(posModal.credId);
+      const body2 = (res2.data as any)?.data ?? res2.data;
+      setPosModalData(body2?.positions ?? []);
+      fetchBalances();
+    } catch (err: any) {
+      setPosModalResult({ error: `Failed to close ${sym}: ${err?.message || 'unknown'}` });
+    } finally {
+      setClosingSingle(null);
+    }
+  }, [posModal, fetchBalances]);
+
   // Resolve adapter name from adapter_id
   const adapterMap = useMemo(() => {
     const m = new Map<string, any>();
@@ -1956,7 +1983,7 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                   <table style={{ width:"100%", fontFamily:"var(--mono)", fontSize:10, borderCollapse:"collapse" }}>
                     <thead>
                       <tr style={{ borderBottom:"1px solid var(--b2)" }}>
-                        {['Symbol', 'Side', 'Qty', 'Entry', 'Mark', 'Liq', 'Lev', 'Margin', 'PnL'].map(h => (
+                        {['Symbol', 'Side', 'Qty', 'Entry', 'Mark', 'Liq', 'Lev', 'Margin', 'PnL', 'Updated', ''].map(h => (
                           <th key={h} style={{ padding:"4px 6px", textAlign:"left", fontSize:8, color:"var(--t2)", fontWeight:600 }}>{h}</th>
                         ))}
                       </tr>
@@ -1968,8 +1995,8 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                         const mark = parseFloat(pos.mark_price || '0');
                         const pnl = parseFloat(pos.unrealized_pnl || '0');
                         const liq = parseFloat(pos.liquidation_price || '0');
-                        const notional = Math.abs(parseFloat(pos.notional || '0'));
                         const side = (pos.position_side || (amt >= 0 ? 'LONG' : 'SHORT')).toUpperCase();
+                        const updatedAt = pos.update_time ? new Date(pos.update_time).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '--';
                         return (
                           <tr key={i} style={{ borderBottom:"1px solid var(--b2)" }}>
                             <td style={{ padding:"6px", fontWeight:700, color:"var(--t0)" }}>{pos.symbol}</td>
@@ -1988,6 +2015,21 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                             <td style={{ padding:"6px", color:"var(--t1)", fontSize:9 }}>{pos.margin_type}</td>
                             <td style={{ padding:"6px", fontWeight:700, color: pnl >= 0 ? "var(--g)" : "var(--r)" }}>
                               {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+                            </td>
+                            <td style={{ padding:"6px", color:"var(--t2)", fontSize:8 }}>{updatedAt}</td>
+                            <td style={{ padding:"6px" }}>
+                              <button
+                                onClick={() => handleCloseSingle(pos)}
+                                disabled={closingSingle === pos.symbol}
+                                style={{
+                                  background:"rgba(255,71,87,0.1)", border:"1px solid rgba(255,71,87,0.3)",
+                                  borderRadius:2, color: closingSingle === pos.symbol ? "var(--t3)" : "var(--r)",
+                                  cursor: closingSingle === pos.symbol ? "default" : "pointer",
+                                  fontFamily:"var(--mono)", fontSize:7, fontWeight:700, padding:"2px 6px",
+                                }}
+                              >
+                                {closingSingle === pos.symbol ? '...' : 'CLOSE'}
+                              </button>
                             </td>
                           </tr>
                         );
