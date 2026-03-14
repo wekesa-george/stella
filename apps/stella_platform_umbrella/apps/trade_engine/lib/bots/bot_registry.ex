@@ -697,17 +697,8 @@ defmodule TradeEngine.Bots.BotRegistry do
   def handle_call(:kill_all_bots, _from, state) do
     Logger.warning("🚨 NUCLEAR KILL: Stopping ALL bot processes")
     now = DateTime.utc_now()
-    killed = []
 
-    # 1. Terminate every child in BotSupervisor (brute force)
-    BotSupervisor.which_children()
-    |> Enum.each(fn {_, pid, _, _} ->
-      if is_pid(pid) and Process.alive?(pid) do
-        DynamicSupervisor.terminate_child(BotSupervisor, pid)
-      end
-    end)
-
-    # 2. Set every bot in ETS to stopped
+    # 1. Set EVERY bot in ETS + DB to stopped FIRST (prevents auto-restart race)
     killed = :ets.tab2list(@ets_table)
     |> Enum.filter(fn {_id, runtime} -> runtime.status != "stopped" end)
     |> Enum.map(fn {bot_id, runtime} ->
@@ -720,6 +711,29 @@ defmodule TradeEngine.Bots.BotRegistry do
       broadcast_bot_event(:bot_stopped, updated)
       broadcast_transition(bot_id, runtime.status, "stopped")
       %{id: bot_id, name: runtime.name, was: runtime.status}
+    end)
+
+    # 2. Now brutally kill every child process in BotSupervisor
+    BotSupervisor.which_children()
+    |> Enum.each(fn
+      {_, pid, _, _} when is_pid(pid) ->
+        try do
+          DynamicSupervisor.terminate_child(BotSupervisor, pid)
+        catch
+          _, _ -> :ok
+        end
+        # Belt and suspenders: if it's still alive, force kill it
+        if Process.alive?(pid), do: Process.exit(pid, :kill)
+      _ -> :ok
+    end)
+
+    # 3. Double-check: find any orphan processes and kill those too
+    BotSupervisor.which_children()
+    |> Enum.each(fn
+      {_, pid, _, _} when is_pid(pid) ->
+        Logger.warning("🚨 Orphan bot process still alive after kill: #{inspect(pid)}")
+        Process.exit(pid, :kill)
+      _ -> :ok
     end)
 
     Logger.warning("🚨 NUCLEAR KILL complete: #{length(killed)} bots stopped")

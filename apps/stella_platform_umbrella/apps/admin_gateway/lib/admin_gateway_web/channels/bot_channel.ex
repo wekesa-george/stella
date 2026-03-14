@@ -110,6 +110,7 @@ defmodule AdminGatewayWeb.BotChannel do
 
   def handle_in("stop_bot", %{"bot_id" => bot_id}, socket) do
     case BotRegistry.stop_bot(bot_id) do
+      {:ok, _} -> {:reply, {:ok, %{status: "stopped"}}, socket}
       :ok -> {:reply, {:ok, %{status: "stopped"}}, socket}
       {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
     end

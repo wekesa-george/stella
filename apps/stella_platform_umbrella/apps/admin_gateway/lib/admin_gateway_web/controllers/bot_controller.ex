@@ -19,4 +19,17 @@ defmodule AdminGatewayWeb.BotController do
         |> json(%{status: "error", reason: inspect(reason)})
     end
   end
+
+  @doc "Stop a single bot"
+  def stop(conn, %{"id" => bot_id}) do
+    case BotRegistry.stop_bot(bot_id) do
+      {:ok, _} ->
+        json(conn, %{status: "stopped", bot_id: bot_id})
+
+      {:error, reason} ->
+        conn
+        |> put_status(422)
+        |> json(%{status: "error", reason: inspect(reason)})
+    end
+  end
 end
