@@ -2215,12 +2215,12 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         end
 
       {:error, reason} ->
-        BotLogger.warn(bot_id, :grid, "Could not check exchange positions for adoption", %{error: inspect(reason)})
+        BotLogger.warning(bot_id, :grid, "Could not check exchange positions for adoption", %{error: inspect(reason)})
         state
     end
   rescue
     e ->
-      BotLogger.warn(state.bot_id, :grid, "Exchange position adoption failed", %{error: Exception.message(e)})
+      BotLogger.warning(state.bot_id, :grid, "Exchange position adoption failed", %{error: Exception.message(e)})
       state
   end
 
@@ -2251,7 +2251,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             BotLogger.debug(bot_id, :lifecycle, "Leverage already #{target_leverage}x for #{pair}")
 
           {:error, reason} ->
-            BotLogger.warn(bot_id, :lifecycle, "Failed to set leverage for #{pair}", %{
+            BotLogger.warning(bot_id, :lifecycle, "Failed to set leverage for #{pair}", %{
               target: target_leverage,
               error: inspect(reason)
             })
@@ -2264,7 +2264,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     state
   rescue
     e ->
-      BotLogger.warn(state.bot_id, :lifecycle, "Leverage sync failed", %{error: Exception.message(e)})
+      BotLogger.warning(state.bot_id, :lifecycle, "Leverage sync failed", %{error: Exception.message(e)})
       state
   end
 
