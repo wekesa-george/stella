@@ -1914,7 +1914,7 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
             onClick={e => e.stopPropagation()}
             style={{
               background:"var(--bg1)", border:"1px solid var(--b2)", borderRadius:6,
-              width:"min(560px, 90vw)", maxHeight:"80vh", display:"flex", flexDirection:"column",
+              width:"min(900px, 92vw)", maxHeight:"85vh", display:"flex", flexDirection:"column",
               boxShadow:"0 20px 60px rgba(0,0,0,0.5)",
             }}
           >
