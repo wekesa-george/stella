@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve, deployBot, deploySystemBot } from "@/lib/tradingEngineApi";
+import { stopBot, pauseBot, startBot, deleteBot, getBotEquityCurve, deployBot, deploySystemBot, killAllBots } from "@/lib/tradingEngineApi";
 import type { BotListFilters } from "@/lib/tradingEngineApi";
 import { acknowledgeAlert as ackAlertApi } from "@/lib/stellaAdminApi";
 import { useBotChannel, useAlertChannel } from "@/hooks/usePhoenixChannel";
 import { mapWsAlertToUiAlert } from "@/lib/api/mappers";
 import type { Bot, Alert } from "@/lib/types/dashboard";
-import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye, Play, Pause, Square, Trash2, LayoutGrid, TableProperties, Copy, Loader2, AlertCircle, Check } from "lucide-react";
+import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye, Play, Pause, Square, Trash2, LayoutGrid, TableProperties, Copy, Loader2, AlertCircle, Check, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BotGridSkeleton } from "@/components/ui/skeleton";
@@ -77,6 +77,9 @@ export default function BotFleetPage() {
   const [cloneSubmitting, setCloneSubmitting] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<{ total: number; done: number; errors: string[] } | null>(null);
   const [cloneError, setCloneError] = useState<string | null>(null);
+  const [killSwitchModal, setKillSwitchModal] = useState(false);
+  const [killSwitchLoading, setKillSwitchLoading] = useState(false);
+  const [killSwitchResult, setKillSwitchResult] = useState<{ killed: number } | null>(null);
   const router = useRouter();
 
   const { bots: wsBots } = useBotChannel();
@@ -249,6 +252,21 @@ export default function BotFleetPage() {
     }
   };
 
+  const confirmKillAll = async () => {
+    setKillSwitchLoading(true);
+    try {
+      const result = await killAllBots();
+      if (result.data) {
+        setKillSwitchResult({ killed: (result.data as any).killed_count ?? 0 });
+      } else {
+        setKillSwitchResult({ killed: 0 });
+      }
+    } catch {
+      setKillSwitchResult({ killed: -1 });
+    }
+    setKillSwitchLoading(false);
+  };
+
   // Fleet equity metrics (from current page bots — fleet-wide stats come from API)
   const fleetMetrics = useMemo(() => {
     const totalEquity = bots.reduce((sum, b) => sum + b.equity, 0);
@@ -406,6 +424,13 @@ export default function BotFleetPage() {
                     {unackedCount}
                   </span>
                 )}
+              </button>
+              <button
+                onClick={() => { setKillSwitchModal(true); setKillSwitchResult(null); }}
+                className="px-3 py-1.5 rounded bg-[#ff4757] text-white text-[10px] font-bold uppercase tracking-wider hover:bg-[#ff2233] transition-all whitespace-nowrap flex items-center gap-1"
+                title="Emergency: Kill all running bots"
+              >
+                <Zap className="h-3 w-3" /> Kill All
               </button>
               <button
                 onClick={() => router.push("/dashboard/bot-fleet/new-bot")}
@@ -1290,6 +1315,56 @@ export default function BotFleetPage() {
                   ? `Cloning ${cloneProgress?.done ?? 0}/${cloneProgress?.total ?? cloneCount}...`
                   : `Clone ${cloneCount} Bot${cloneCount !== 1 ? "s" : ""}`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kill All Bots Modal */}
+      {killSwitchModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-card border border-[rgba(255,71,87,0.4)] rounded-lg p-6 w-[420px] space-y-4">
+            <div className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-[#ff4757]" />
+              <h3 className="text-sm font-bold text-[#ff4757]">Emergency Kill Switch</h3>
+            </div>
+            <p className="text-xs text-[#8fa3b8] leading-relaxed">
+              This will <span className="text-[#ff4757] font-bold">immediately terminate ALL running bot processes</span> on the trading engine and set every bot to stopped. No bot will auto-restart after this action.
+            </p>
+            <div className="px-3 py-2 bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] rounded text-[10px] text-[#ff4757]">
+              This is a nuclear option. Use only in emergencies (rogue bots, runaway orders, exchange limit hits).
+            </div>
+
+            {killSwitchResult && (
+              <div className={`px-3 py-2 rounded text-xs font-mono ${
+                killSwitchResult.killed >= 0
+                  ? "bg-[rgba(0,229,160,0.08)] border border-[rgba(0,229,160,0.2)] text-[#00e5a0]"
+                  : "bg-[rgba(255,71,87,0.08)] border border-[rgba(255,71,87,0.2)] text-[#ff4757]"
+              }`}>
+                {killSwitchResult.killed >= 0
+                  ? `Done — ${killSwitchResult.killed} bot(s) killed and stopped.`
+                  : "Failed to reach the trading engine. Is it running?"}
+              </div>
+            )}
+
+            <div className="flex gap-2.5 justify-end">
+              <button
+                onClick={() => setKillSwitchModal(false)}
+                disabled={killSwitchLoading}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-dark hover:border-dark-2 hover:text-foreground transition-all disabled:opacity-50"
+              >
+                {killSwitchResult ? "Close" : "Cancel"}
+              </button>
+              {!killSwitchResult && (
+                <button
+                  onClick={confirmKillAll}
+                  disabled={killSwitchLoading}
+                  className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-[#ff4757] text-white hover:bg-[#ff2233] transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {killSwitchLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {killSwitchLoading ? "Killing..." : "Kill All Bots"}
+                </button>
+              )}
             </div>
           </div>
         </div>

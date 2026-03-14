@@ -157,6 +157,10 @@ export async function stopBot(botId: string) {
   return request(`/api/bots/${botId}/stop`, { method: 'POST' });
 }
 
+export async function killAllBots() {
+  return request('/api/bots/kill-all', { method: 'POST' });
+}
+
 export async function placeManualOrder(botId: string, order: { side: string; size: number }) {
   return request(`/api/bots/${botId}/manual-order`, {
     method: 'POST',
