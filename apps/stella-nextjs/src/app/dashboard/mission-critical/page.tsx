@@ -1620,7 +1620,14 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     try {
       const res = await closeAllCredentialPositions(posModal.credId);
       const body = (res.data as any)?.data ?? res.data;
-      setPosModalResult(body);
+      console.log('[CloseAll] raw response:', JSON.stringify(res.data));
+      console.log('[CloseAll] parsed body:', JSON.stringify(body));
+      console.log('[CloseAll] body.results:', JSON.stringify(body?.results));
+      // Sanitize results: ensure every item is an object with a status field
+      const sanitized = body?.results
+        ? { ...body, results: (Array.isArray(body.results) ? body.results : []).filter((r: any) => r && typeof r === 'object') }
+        : body;
+      setPosModalResult(sanitized);
       // Refresh positions
       const res2 = await getCredentialPositions(posModal.credId);
       const body2 = (res2.data as any)?.data ?? res2.data;
@@ -1647,7 +1654,10 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     try {
       const res = await closeCredentialPosition(posModal.credId, sym, side, amt, entry);
       const body = (res.data as any)?.data ?? res.data;
-      setPosModalResult({ closed: 1, failed: 0, results: [body] });
+      console.log('[CloseSingle] raw response:', JSON.stringify(res.data));
+      console.log('[CloseSingle] parsed body:', JSON.stringify(body));
+      const result = (body && typeof body === 'object' && !Array.isArray(body)) ? body : { status: 'completed', raw: body };
+      setPosModalResult({ closed: 1, failed: 0, results: [result] });
       // Refresh
       const res2 = await getCredentialPositions(posModal.credId);
       const body2 = (res2.data as any)?.data ?? res2.data;
@@ -1981,13 +1991,17 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                 {posModalResult.error
                   ? `Error: ${posModalResult.error}`
                   : `Closed: ${posModalResult.closed ?? 0} | Failed: ${posModalResult.failed ?? 0}`}
-                {posModalResult.results && posModalResult.results.length > 0 && (
+                {Array.isArray(posModalResult.results) && posModalResult.results.length > 0 && (
                   <div style={{ marginTop:4, fontSize:9 }}>
-                    {posModalResult.results.map((r: any, i: number) => (
-                      <div key={i} style={{ color: r.status === 'closed' ? "var(--g)" : r.status === 'failed' ? "var(--r)" : "var(--t2)" }}>
-                        {r.symbol} {r.side} — {r.status}{r.error ? `: ${r.error}` : ''}{r.pnl != null ? ` (PnL: $${parseFloat(r.pnl).toFixed(2)})` : ''}
-                      </div>
-                    ))}
+                    {posModalResult.results.map((r: any, i: number) => {
+                      if (!r || typeof r !== 'object') return null;
+                      const st = r.status ?? 'unknown';
+                      return (
+                        <div key={i} style={{ color: st === 'closed' ? "var(--g)" : st === 'failed' ? "var(--r)" : "var(--t2)" }}>
+                          {r.symbol ?? '?'} {r.side ?? '?'} — {st}{r.error ? `: ${r.error}` : ''}{r.pnl != null ? ` (PnL: $${parseFloat(r.pnl).toFixed(2)})` : ''}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
