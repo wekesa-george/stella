@@ -161,6 +161,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           Process.send_after(self(), :grid_check_fills, 10_000)
           Process.send_after(self(), :adopt_exchange_positions, 3_000)
           Process.send_after(self(), :reconcile_grid_orders_with_exchange, 5_000)
+          Process.send_after(self(), :sync_exchange_positions, 60_000)
         end
 
         # Futures: sync leverage on exchange to match bot config
@@ -330,6 +331,15 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       else
         {:noreply, state}
       end
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:sync_exchange_positions, state) do
+    if state.is_grid and state.market_type in ["usds_futures", "coinm_futures"] do
+      Process.send_after(self(), :sync_exchange_positions, 60_000)
+      {:noreply, sync_exchange_positions_to_db(state)}
     else
       {:noreply, state}
     end
@@ -1258,7 +1268,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     end
   end
 
-  defp place_grid_limit_order(state, symbol, side, quantity, price_level) do
+  defp place_grid_limit_order(state, symbol, side, quantity, price_level, opts \\ []) do
     alias TradeEngine.Trading.BinanceFilterValidator
 
     # Round price to exchange precision
@@ -1281,9 +1291,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     if is_nil(validated_qty) or validated_qty <= 0 do
       state
     else
-      # Validate notional meets exchange minimum ($5 futures, $10 spot)
+      # Validate notional meets exchange minimum (fetched from exchange info, fallback to safe defaults)
       is_futures = state.market_type in ["usds_futures", "coinm_futures"]
-      min_notional = if is_futures, do: 5.0, else: 10.0
+      trading_sym = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+      exchange_min = TradeEngine.Exchanges.Binance.ExchangeInfoCache.min_notional(trading_sym)
+      min_notional = exchange_min || if(is_futures, do: 100.0, else: 10.0)
       notional = validated_qty * rounded_price
 
       if notional < min_notional do
@@ -1301,6 +1313,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         bot_prefix = String.slice(state.bot_id, 0, 8)
         client_oid = "#{bot_prefix}_#{System.system_time(:millisecond)}_#{:erlang.unique_integer([:positive, :monotonic])}"
 
+        is_reduce_only = Keyword.get(opts, :reduce_only, false)
+
         bot_context = [
           user_id: state.user_id,
           bot_id: state.bot_id,
@@ -1308,7 +1322,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           strategy_id: state.strategy_id,
           market_type: state.market_type,
           grid_level: price_level,
-          client_order_id: client_oid
+          client_order_id: client_oid,
+          reduce_only: is_reduce_only
         ]
 
         case OrderManager.place_limit_order(
@@ -1716,8 +1731,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     })
 
     # Place counter-order if we have a valid price level
+    # Counter-orders use reduceOnly on futures to close the position opened by the fill
     if counter_price do
-      place_grid_limit_order(state, symbol, counter_side, filled_entry.quantity, counter_price)
+      place_grid_limit_order(state, symbol, counter_side, filled_entry.quantity, counter_price, reduce_only: true)
     else
       upper = get_strategy_param(state.config, "upper_price", 0)
       lower = get_strategy_param(state.config, "lower_price", 0)
@@ -1827,6 +1843,116 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         e -> Logger.warning("Grid position update failed: #{Exception.message(e)}")
       end
     end)
+  end
+
+  # Periodic sync: fetch exchange positions and update DB to match reality
+  defp sync_exchange_positions_to_db(state) do
+    symbol = List.first(state.trading_pairs)
+    if is_nil(symbol) do
+      state
+    else
+      case Executor.get_position_risk(state.credential_id, symbol: symbol) do
+        {:ok, exchange_positions} when is_list(exchange_positions) ->
+          Task.start(fn ->
+            try do
+              import Ecto.Query
+              alias TradeEngine.Trading.Position
+
+              # Find our DB position for this bot
+              db_pos = Repo.one(
+                from(p in Position,
+                  where: p.bot_id == ^state.bot_id and p.status == "open",
+                  limit: 1
+                )
+              )
+
+              # Get exchange position for our symbol (non-zero)
+              exchange_pos = Enum.find(exchange_positions, fn p ->
+                amt = if is_number(p.position_amount), do: p.position_amount, else: 0.0
+                amt != 0.0
+              end)
+
+              cond do
+                # Exchange has position, DB doesn't → create it
+                exchange_pos && is_nil(db_pos) ->
+                  amt = if is_number(exchange_pos.position_amount), do: exchange_pos.position_amount, else: 0.0
+                  entry = if is_number(exchange_pos.entry_price), do: exchange_pos.entry_price, else: 0.0
+                  mark = if is_number(exchange_pos.mark_price), do: exchange_pos.mark_price, else: entry
+                  pnl = if is_number(exchange_pos.unrealized_pnl), do: exchange_pos.unrealized_pnl, else: 0.0
+                  pos_type = if amt >= 0, do: "long", else: "short"
+
+                  attrs = %{
+                    symbol: symbol,
+                    position_type: pos_type,
+                    quantity: Decimal.from_float(abs(amt)),
+                    remaining_quantity: Decimal.from_float(abs(amt)),
+                    entry_price: Decimal.from_float(entry),
+                    current_price: Decimal.from_float(mark),
+                    profit_loss: Decimal.from_float(pnl),
+                    status: "open",
+                    entry_time: DateTime.utc_now(),
+                    user_id: state.user_id,
+                    strategy_id: state.strategy_id,
+                    credential_id: state.credential_id,
+                    bot_id: state.bot_id,
+                    metadata: %{"type" => "grid_aggregate", "synced_from" => "exchange"}
+                  }
+                  case Repo.insert(Position.changeset(%Position{}, attrs)) do
+                    {:ok, pos} -> Logger.info("Position synced from exchange: #{pos.id} #{pos_type} #{abs(amt)} #{symbol}")
+                    {:error, err} -> Logger.warning("Failed to sync position from exchange: #{inspect(err)}")
+                  end
+
+                # Exchange has position, DB has position → update mark price + PnL
+                exchange_pos && db_pos ->
+                  amt = if is_number(exchange_pos.position_amount), do: exchange_pos.position_amount, else: 0.0
+                  mark = if is_number(exchange_pos.mark_price), do: exchange_pos.mark_price, else: 0.0
+                  pnl = if is_number(exchange_pos.unrealized_pnl), do: exchange_pos.unrealized_pnl, else: 0.0
+
+                  Repo.update(Position.changeset(db_pos, %{
+                    quantity: Decimal.from_float(abs(amt)),
+                    remaining_quantity: Decimal.from_float(abs(amt)),
+                    current_price: Decimal.from_float(mark),
+                    profit_loss: Decimal.from_float(pnl)
+                  }))
+
+                # Exchange has NO position, DB has open position → close it
+                is_nil(exchange_pos) && db_pos ->
+                  mark = Decimal.to_float(db_pos.current_price)
+                  Repo.update(Position.changeset(db_pos, %{
+                    quantity: Decimal.new(0),
+                    remaining_quantity: Decimal.new(0),
+                    exit_price: Decimal.from_float(mark),
+                    status: "closed",
+                    exit_time: DateTime.utc_now()
+                  }))
+                  Logger.info("Position closed in DB (no longer on exchange): #{db_pos.id}")
+
+                # Both nil — nothing to do
+                true -> :ok
+              end
+            rescue
+              e -> Logger.warning("sync_exchange_positions_to_db failed: #{Exception.message(e)}")
+            end
+          end)
+
+          # Update open position count in registry
+          active_count = Enum.count(exchange_positions, fn p ->
+            amt = if is_number(p.position_amount), do: p.position_amount, else: 0.0
+            amt != 0.0
+          end)
+          BotRegistry.update_position_count(state.bot_id, active_count)
+
+          state
+
+        {:error, reason} ->
+          BotLogger.warning(state.bot_id, :grid, "Failed to sync exchange positions", %{reason: inspect(reason)})
+          state
+      end
+    end
+  rescue
+    e ->
+      BotLogger.warning(state.bot_id, :grid, "sync_exchange_positions_to_db failed", %{error: Exception.message(e)})
+      state
   end
 
   # Update DB order from "open" to "filled" when grid_check_fills detects fill.

@@ -610,6 +610,14 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
     }
     |> maybe_add_position_side(is_hedge, position_side)
 
+    # For futures counter-orders (closing a position), add reduceOnly in one-way mode
+    params = if Keyword.get(opts, :reduce_only, false) and not is_hedge and
+                market_type in ["usds_futures", "coinm_futures"] do
+      Map.put(params, "reduceOnly", "true")
+    else
+      params
+    end
+
     # Add client order ID if provided (useful for grid order tracking)
     params = case Keyword.get(opts, :client_order_id) do
       nil -> params
