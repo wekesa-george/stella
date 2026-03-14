@@ -77,6 +77,7 @@ interface Order {
   pair: string;
   type: string;
   price: number;
+  execPrice: number;
   qty: number;
   status: string;
   createdAt: string;
@@ -1098,7 +1099,8 @@ function TabHistory({ botId }: { botId: string }) {
             side: (o.side ?? "BUY").toUpperCase(),
             pair: o.trading_pair ?? o.symbol ?? o.pair ?? "",
             type: (o.order_type ?? o.type ?? "MARKET").toUpperCase(),
-            price: Number(o.execution_price ?? o.order_price ?? o.price ?? o.avg_fill_price ?? 0),
+            price: Number(o.order_price || o.price || o.limit_price || 0),
+            execPrice: Number(o.execution_price || o.avg_fill_price || 0),
             qty: Number(o.order_size ?? o.filled_quantity ?? o.quantity ?? o.qty ?? 0),
             status: (o.order_status ?? o.status ?? "UNKNOWN").toUpperCase(),
             createdAt: o.timestamp ? new Date(o.timestamp).toLocaleString() : o.created_at ? new Date(o.created_at).toLocaleString() : "--",
@@ -1195,7 +1197,8 @@ function TabHistory({ botId }: { botId: string }) {
                     <th>Side</th>
                     <th>Pair</th>
                     <th>Type</th>
-                    <th className="bdp-r">Price</th>
+                    <th className="bdp-r">Order Price</th>
+                    <th className="bdp-r">Fill Price</th>
                     <th className="bdp-r">Qty</th>
                     <th>Status</th>
                     <th>Created</th>
@@ -1209,7 +1212,8 @@ function TabHistory({ botId }: { botId: string }) {
                       </td>
                       <td><div className="bdp-cell-pair">{o.pair}</div><div className="bdp-cell-id">{o.id}</div></td>
                       <td className="bdp-mono" style={{ fontSize:9, color:"var(--text2)" }}>{o.type}</td>
-                      <td className="bdp-mono bdp-r">{o.price.toLocaleString()}</td>
+                      <td className="bdp-mono bdp-r">{o.price > 0 ? `$${o.price.toLocaleString()}` : '--'}</td>
+                      <td className="bdp-mono bdp-r" style={{ color: o.execPrice > 0 ? "var(--green, #00e5a0)" : "var(--text3)" }}>{o.execPrice > 0 ? `$${o.execPrice.toLocaleString()}` : '--'}</td>
                       <td className="bdp-mono bdp-r">{o.qty}</td>
                       <td><span className={`bdp-tag ${statusCls(o.status)}`}>{o.status}</span></td>
                       <td className="bdp-mono" style={{ color:"var(--text2)", fontSize:9 }}>{o.createdAt}</td>
@@ -1637,7 +1641,8 @@ export default function BotDetailPage() {
             side: (o.side ?? "BUY").toUpperCase(),
             pair: o.trading_pair ?? o.symbol ?? o.pair ?? "",
             type: (o.order_type ?? o.type ?? "MARKET").toUpperCase(),
-            price: Number(o.execution_price ?? o.order_price ?? o.price ?? o.avg_fill_price ?? 0),
+            price: Number(o.order_price || o.price || o.limit_price || 0),
+            execPrice: Number(o.execution_price || o.avg_fill_price || 0),
             qty: Number(o.order_size ?? o.filled_quantity ?? o.quantity ?? o.qty ?? 0),
             status: (o.order_status ?? o.status ?? "UNKNOWN").toUpperCase(),
             createdAt: o.timestamp ? new Date(o.timestamp).toLocaleString() : o.created_at ? new Date(o.created_at).toLocaleString() : "--",
@@ -2152,7 +2157,8 @@ export default function BotDetailPage() {
                             <th>Side</th>
                             <th>Pair</th>
                             <th>Type</th>
-                            <th className="bdp-r">Price</th>
+                            <th className="bdp-r">Order Price</th>
+                            <th className="bdp-r">Fill Price</th>
                             <th>Status</th>
                             <th>Created</th>
                           </tr>
@@ -2163,7 +2169,8 @@ export default function BotDetailPage() {
                               <td><span className={`bdp-tag ${o.side === "BUY" ? "bdp-tag-long" : "bdp-tag-short"}`}>{o.side}</span></td>
                               <td><div className="bdp-cell-pair">{o.pair}</div></td>
                               <td className="bdp-mono" style={{ fontSize:9, color:"var(--text2)" }}>{o.type}</td>
-                              <td className="bdp-mono bdp-r">{o.price.toLocaleString()}</td>
+                              <td className="bdp-mono bdp-r">{o.price > 0 ? `$${o.price.toLocaleString()}` : '--'}</td>
+                              <td className="bdp-mono bdp-r" style={{ color: o.execPrice > 0 ? "var(--green, #00e5a0)" : "var(--text3)" }}>{o.execPrice > 0 ? `$${o.execPrice.toLocaleString()}` : '--'}</td>
                               <td><span className={`bdp-tag ${statusCls(o.status)}`}>{o.status}</span></td>
                               <td className="bdp-mono" style={{ color:"var(--text2)", fontSize:9 }}>{o.createdAt}</td>
                             </tr>
