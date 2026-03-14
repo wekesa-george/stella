@@ -2165,6 +2165,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
             if existing do
               # Update existing DB position with exchange values
+              {:ok, existing_id_bin} = Ecto.UUID.dump(existing.id)
               TradeEngine.Repo.query(
                 """
                 UPDATE trading.positions
@@ -2175,12 +2176,17 @@ defmodule TradeEngine.Bots.BotTradingProcess do
                 [Decimal.from_float(abs(amt + 0.0)), Decimal.from_float(entry + 0.0),
                  Decimal.from_float((pos.mark_price || entry) + 0.0),
                  Decimal.from_float(pnl + 0.0), trunc(pos.leverage || 1),
-                 existing.id]
+                 existing_id_bin]
               )
             else
               # Create new DB position record
               now = DateTime.utc_now()
-              symbol = List.first(trading_pairs) || pos.symbol
+              pos_symbol = List.first(trading_pairs) || pos.symbol
+
+              {:ok, uuid_bin} = Ecto.UUID.dump(Ecto.UUID.generate())
+              {:ok, bot_bin} = Ecto.UUID.dump(bot_id)
+              {:ok, cred_bin} = Ecto.UUID.dump(credential_id)
+              user_bin = if state.user_id, do: elem(Ecto.UUID.dump(state.user_id), 1), else: nil
 
               TradeEngine.Repo.query(
                 """
@@ -2191,8 +2197,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
                 VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, $9, $10, $11, $12, $12, $12)
                 ON CONFLICT DO NOTHING
                 """,
-                [Ecto.UUID.generate(), bot_id, state.user_id, credential_id,
-                 symbol, direction,
+                [uuid_bin, bot_bin, user_bin, cred_bin,
+                 pos_symbol, direction,
                  Decimal.from_float(entry + 0.0), Decimal.from_float((pos.mark_price || entry) + 0.0),
                  Decimal.from_float(abs(amt + 0.0)), trunc(pos.leverage || 1),
                  Decimal.from_float(pnl + 0.0), now]
