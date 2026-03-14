@@ -78,5 +78,6 @@ defmodule TradeEngine.Trading.Order do
     |> validate_inclusion(:side, ["buy", "sell"])
     |> validate_inclusion(:order_type, ["market", "limit", "stop", "stop_limit"])
     |> validate_inclusion(:status, ["pending", "submitted", "open", "filled", "partially_filled", "cancelled", "rejected", "failed"])
+    |> unique_constraint(:client_order_id, name: :orders_client_order_id_key)
   end
 end

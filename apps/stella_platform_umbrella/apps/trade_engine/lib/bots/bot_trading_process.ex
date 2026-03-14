@@ -1296,7 +1296,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         # Generate a unique client_order_id prefixed with bot_id (first 8 chars)
         # This prevents multi-bot credential collision when bots share the same exchange credential
         bot_prefix = String.slice(state.bot_id, 0, 8)
-        client_oid = "#{bot_prefix}_#{:erlang.unique_integer([:positive])}"
+        client_oid = "#{bot_prefix}_#{System.system_time(:millisecond)}_#{:erlang.unique_integer([:positive, :monotonic])}"
 
         bot_context = [
           user_id: state.user_id,
