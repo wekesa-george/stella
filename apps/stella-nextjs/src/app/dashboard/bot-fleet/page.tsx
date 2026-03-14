@@ -11,7 +11,8 @@ import { Search, Bell, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Eye,
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BotGridSkeleton } from "@/components/ui/skeleton";
-import { useBots, useAlerts as useAlertsQuery } from "@/hooks/useQueries";
+import { useBots, useAlerts as useAlertsQuery, queryKeys } from "@/hooks/useQueries";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -77,10 +78,12 @@ export default function BotFleetPage() {
   const [cloneSubmitting, setCloneSubmitting] = useState(false);
   const [cloneProgress, setCloneProgress] = useState<{ total: number; done: number; errors: string[] } | null>(null);
   const [cloneError, setCloneError] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [killSwitchModal, setKillSwitchModal] = useState(false);
   const [killSwitchLoading, setKillSwitchLoading] = useState(false);
   const [killSwitchResult, setKillSwitchResult] = useState<{ killed: number } | null>(null);
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { bots: wsBots } = useBotChannel();
   const { alerts: wsAlerts } = useAlertChannel();
@@ -184,6 +187,7 @@ export default function BotFleetPage() {
 
   const confirmDelete = async () => {
     if (deleteModal) {
+      setDeleteLoading(true);
       const result = await deleteBot(deleteModal).catch((err: Error) => {
         console.error("Delete bot error:", err);
         alert(`Failed to delete bot: ${err.message}`);
@@ -191,7 +195,10 @@ export default function BotFleetPage() {
       });
       if (result && result.error) {
         alert(`Failed to delete bot: ${result.error}`);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["bots"] });
       }
+      setDeleteLoading(false);
       setDeleteModal(null);
     }
   };
@@ -1196,15 +1203,18 @@ export default function BotFleetPage() {
             <div className="flex gap-2.5 justify-end">
               <button
                 onClick={() => setDeleteModal(null)}
-                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-dark hover:border-dark-2 hover:text-foreground transition-all"
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-transparent text-[#8fa3b8] border border-dark hover:border-dark-2 hover:text-foreground transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-[#ff4757] text-white hover:bg-[#ff2233] transition-all"
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-[#ff4757] text-white hover:bg-[#ff2233] transition-all disabled:opacity-50 flex items-center gap-2"
               >
-                Delete Forever
+                {deleteLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                {deleteLoading ? "Deleting..." : "Delete Forever"}
               </button>
             </div>
           </div>

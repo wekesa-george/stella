@@ -558,12 +558,18 @@ function DeleteBotModal({ bot, onClose, onConfirm }: {
   bot: Bot; onClose: () => void; onConfirm: () => void;
 }) {
   const [typed, setTyped] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const handleConfirm = async () => {
+    setDeleting(true);
+    await onConfirm();
+    setDeleting(false);
+  };
   return (
-    <div className="bdp-modal-backdrop" onClick={(e: any) => e.target === e.currentTarget && onClose()}>
+    <div className="bdp-modal-backdrop" onClick={(e: any) => !deleting && e.target === e.currentTarget && onClose()}>
       <div className="bdp-modal">
         <div className="bdp-modal-hdr">
           <span className="bdp-modal-title" style={{ color:"var(--red)" }}>Delete Bot</span>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:"var(--text2)", cursor:"pointer" }}>
+          <button onClick={onClose} disabled={deleting} style={{ background:"none", border:"none", color:"var(--text2)", cursor:"pointer", opacity: deleting ? 0.5 : 1 }}>
             <IcoClose size={16} />
           </button>
         </div>
@@ -584,12 +590,15 @@ function DeleteBotModal({ bot, onClose, onConfirm }: {
             placeholder={bot.id}
             value={typed}
             onChange={e => setTyped(e.target.value)}
+            disabled={deleting}
           />
         </div>
         <div className="bdp-modal-footer">
-          <button className="bdp-btn bdp-btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="bdp-btn bdp-btn-red" disabled={typed !== bot.id} onClick={onConfirm}>
-            <IcoTrash size={12} /> Delete Bot
+          <button className="bdp-btn bdp-btn-ghost" onClick={onClose} disabled={deleting}>Cancel</button>
+          <button className="bdp-btn bdp-btn-red" disabled={typed !== bot.id || deleting} onClick={handleConfirm}
+            style={{ display:"flex", alignItems:"center", gap:6 }}>
+            {deleting ? <span style={{ display:"inline-block", width:12, height:12, border:"2px solid rgba(255,255,255,0.3)", borderTopColor:"#fff", borderRadius:"50%", animation:"spin 0.6s linear infinite" }} /> : <IcoTrash size={12} />}
+            {deleting ? "Deleting..." : "Delete Bot"}
           </button>
         </div>
       </div>
