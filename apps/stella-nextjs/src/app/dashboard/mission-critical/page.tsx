@@ -13,6 +13,7 @@ import { useBotChannel, useInfraChannel, useAlertChannel, usePlatformChannel, us
 import { mapApiBotToUiBot, mapWsAlertToUiAlert, mapWsInfraToTradeEngineMetrics } from "@/lib/api/mappers";
 import type { Bot, TradeEngineMetrics, Alert } from "@/lib/types/dashboard";
 import ReconciliationModal from "@/components/dashboard/ReconciliationModal";
+import { TokenIcon } from "@web3icons/react/dynamic";
 
 /* ─────────────────────────── FONTS & BASE ────────────────────────────────── */
 const FONT = `@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');`;
@@ -317,7 +318,7 @@ ${FONT}
 .mc-cap-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
 /* ── EXCHANGE TILES ── */
-.mc-ex-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px; flex: 1; align-content: start; }
+.mc-ex-grid { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 8px; flex: 1; align-content: start; }
 .mc-ex-tile { background: var(--bg3); border: 1px solid var(--b1); border-radius: 4px; padding: 8px 10px; border-left: 3px solid; transition: border-color .2s; }
 
 /* ── CIRCUIT BREAKER CARD ── */
@@ -328,31 +329,55 @@ ${FONT}
 .mc-scrl { overflow-y: auto; flex: 1; }
 
 /* ── EXPLICIT GRID PLACEMENT ── */
-.mc-grid-left .mc-equity-card     { grid-column: 1 / 7;   grid-row: 1 / 5; }
-.mc-grid-left .mc-pnl-card        { grid-column: 7 / 11;  grid-row: 1 / 3; }
-.mc-grid-left .mc-winrate-card    { grid-column: 11 / 14; grid-row: 1 / 3; }
-.mc-grid-left .mc-activebots-card { grid-column: 14 / 17; grid-row: 1 / 3; }
-.mc-grid-left .mc-openpos-card    { grid-column: 7 / 11;  grid-row: 3 / 5; }
-.mc-grid-left .mc-circuit-card    { grid-column: 11 / 14; grid-row: 3 / 5; }
-.mc-grid-left .mc-volume-card     { grid-column: 14 / 17; grid-row: 3 / 5; }
-.mc-grid-left .mc-trades-card     { grid-column: 1 / 4;   grid-row: 5 / 7; }
-.mc-grid-left .mc-failed-card     { grid-column: 4 / 7;   grid-row: 5 / 7; }
-.mc-grid-left .mc-fillrate-card    { grid-column: 7 / 9;   grid-row: 5 / 7; }
-.mc-grid-left .mc-sharpe-card     { grid-column: 9 / 11;  grid-row: 5 / 7; }
-.mc-grid-left .mc-drawdown-card   { grid-column: 11 / 13; grid-row: 5 / 7; }
-.mc-grid-left .mc-avgexec-card    { grid-column: 13 / 15; grid-row: 5 / 7; }
-.mc-grid-left .mc-profitfactor-card { grid-column: 15 / 17; grid-row: 5 / 7; }
-.mc-grid-left .mc-orders-card     { grid-column: 1 / 11;  grid-row: 7 / 12; }
-.mc-grid-left .mc-exchange-card   { grid-column: 11 / 17; grid-row: 7 / 12; }
-.mc-grid-left .mc-latency-card    { grid-column: 1 / 10;  grid-row: 12 / 16; }
-.mc-grid-left .mc-capital-card    { grid-column: 10 / 17; grid-row: 12 / 16; }
-.mc-grid-left .mc-services-card   { grid-column: 1 / 10;  grid-row: 16 / 20; }
-.mc-grid-left .mc-uptime-card     { grid-column: 10 / 17; grid-row: 16 / 20; }
-.mc-grid-left .mc-recon-card      { grid-column: 1 / 4;   grid-row: 20 / 22; }
-.mc-grid-left .mc-corr-card       { grid-column: 4 / 7;   grid-row: 20 / 22; }
-.mc-grid-left .mc-cred-card       { grid-column: 7 / 10;  grid-row: 20 / 22; }
-.mc-grid-left .mc-exhealth-card   { grid-column: 10 / 13; grid-row: 20 / 22; }
-.mc-grid-left .mc-fills-card      { grid-column: 13 / 17; grid-row: 20 / 22; }
+.mc-grid-left .mc-exchange-card   { grid-column: 1 / 11;  grid-row: 1 / 7; }
+.mc-grid-left .mc-pnl-card        { grid-column: 11 / 14; grid-row: 1 / 3; }
+.mc-grid-left .mc-winrate-card    { grid-column: 14 / 17; grid-row: 1 / 3; }
+.mc-grid-left .mc-activebots-card { grid-column: 11 / 14; grid-row: 3 / 5; }
+.mc-grid-left .mc-openpos-card    { grid-column: 14 / 17; grid-row: 3 / 5; }
+.mc-grid-left .mc-circuit-card    { grid-column: 11 / 14; grid-row: 5 / 7; }
+.mc-grid-left .mc-volume-card     { grid-column: 14 / 17; grid-row: 5 / 7; }
+.mc-grid-left .mc-trades-card     { grid-column: 1 / 4;   grid-row: 7 / 9; }
+.mc-grid-left .mc-failed-card     { grid-column: 4 / 7;   grid-row: 7 / 9; }
+.mc-grid-left .mc-fillrate-card    { grid-column: 7 / 9;   grid-row: 7 / 9; }
+.mc-grid-left .mc-sharpe-card     { grid-column: 9 / 11;  grid-row: 7 / 9; }
+.mc-grid-left .mc-drawdown-card   { grid-column: 11 / 13; grid-row: 7 / 9; }
+.mc-grid-left .mc-avgexec-card    { grid-column: 13 / 15; grid-row: 7 / 9; }
+.mc-grid-left .mc-profitfactor-card { grid-column: 15 / 17; grid-row: 7 / 9; }
+.mc-grid-left .mc-orders-card     { grid-column: 1 / 11;  grid-row: 9 / 14; }
+.mc-grid-left .mc-equity-card     { grid-column: 11 / 17; grid-row: 9 / 14; }
+.mc-grid-left .mc-latency-card    { grid-column: 1 / 10;  grid-row: 14 / 18; }
+.mc-grid-left .mc-capital-card    { grid-column: 10 / 17; grid-row: 14 / 18; }
+.mc-grid-left .mc-services-card   { grid-column: 1 / 10;  grid-row: 18 / 22; }
+.mc-grid-left .mc-uptime-card     { grid-column: 10 / 17; grid-row: 18 / 22; }
+.mc-grid-left .mc-recon-card      { grid-column: 1 / 4;   grid-row: 22 / 24; }
+.mc-grid-left .mc-corr-card       { grid-column: 4 / 7;   grid-row: 22 / 24; }
+.mc-grid-left .mc-cred-card       { grid-column: 7 / 10;  grid-row: 22 / 24; }
+.mc-grid-left .mc-exhealth-card   { grid-column: 10 / 13; grid-row: 22 / 24; }
+.mc-grid-left .mc-fills-card      { grid-column: 13 / 17; grid-row: 22 / 24; }
+
+/* ── EXCHANGE CAROUSEL ── */
+.mc-ex-carousel { position: relative; flex: 1; overflow: hidden; }
+.mc-ex-track { display: flex; transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1); height: 100%; }
+.mc-ex-slide { min-width: 100%; height: 100%; display: flex; flex-direction: column; padding: 10px; box-sizing: border-box; }
+.mc-ex-dots { display: flex; gap: 6px; justify-content: center; padding: 6px 0; }
+.mc-ex-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--b2); border: none; cursor: pointer; padding: 0; transition: background 0.2s, transform 0.2s; }
+.mc-ex-dot.active { background: var(--g); transform: scale(1.3); }
+.mc-ex-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: 1px solid var(--b2); border-radius: 3px; color: var(--t1); cursor: pointer; font-size: 14px; padding: 8px 4px; z-index: 2; backdrop-filter: blur(4px); transition: background 0.2s; }
+.mc-ex-nav:hover { background: rgba(0,0,0,0.8); }
+.mc-ex-nav.prev { left: 4px; }
+.mc-ex-nav.next { right: 4px; }
+.mc-ex-wallet-big { font-family: var(--mono); font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; }
+.mc-ex-wallet-avail { font-family: var(--mono); font-size: 18px; font-weight: 600; margin-top: 4px; }
+.mc-ex-wallet-pnl { font-family: var(--mono); font-size: 16px; font-weight: 600; margin-top: 3px; }
+.mc-ex-info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 8px; }
+.mc-ex-actions { display: flex; gap: 6px; padding-top: 8px; border-top: 1px solid var(--b2); justify-content: flex-start; flex-wrap: wrap; }
+.mc-ex-actions button { flex: 0 0 auto !important; min-width: 90px; max-width: 140px; }
+.mc-ex-asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 10px; flex: 1; align-content: start; }
+.mc-ex-asset-card { background: var(--bg2); border: 1px solid var(--b2); border-radius: 4px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.mc-ex-asset-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 9px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.mc-ex-asset-info { flex: 1; min-width: 0; }
+.mc-ex-asset-name { font-family: var(--mono); font-size: 10px; font-weight: 700; color: var(--t0); }
+.mc-ex-asset-bal { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--t1); margin-top: 1px; }
 
 /* ── TOPBAR RESPONSIVE HELPERS ── */
 .mc-tb-stats { font-family: var(--mono); font-size: 8px; color: var(--t2); display: flex; gap: 12px; }
@@ -373,11 +398,11 @@ ${FONT}
   }
 
   /* Reset all explicit placements to auto-flow in 8-col grid */
-  .mc-grid-left .mc-equity-card     { grid-column: 1 / 5;  grid-row: span 4; }
-  .mc-grid-left .mc-pnl-card        { grid-column: 5 / 9;  grid-row: span 2; }
-  .mc-grid-left .mc-winrate-card    { grid-column: 5 / 7;  grid-row: span 2; }
-  .mc-grid-left .mc-activebots-card { grid-column: 7 / 9;  grid-row: span 2; }
-  .mc-grid-left .mc-openpos-card    { grid-column: span 2; grid-row: span 2; }
+  .mc-grid-left .mc-exchange-card   { grid-column: 1 / 9;  grid-row: span 5; }
+  .mc-grid-left .mc-pnl-card        { grid-column: 1 / 3;  grid-row: span 2; }
+  .mc-grid-left .mc-winrate-card    { grid-column: 3 / 5;  grid-row: span 2; }
+  .mc-grid-left .mc-activebots-card { grid-column: 5 / 7;  grid-row: span 2; }
+  .mc-grid-left .mc-openpos-card    { grid-column: 7 / 9;  grid-row: span 2; }
   .mc-grid-left .mc-circuit-card    { grid-column: span 2; grid-row: span 2; }
   .mc-grid-left .mc-volume-card     { grid-column: span 2; grid-row: span 2; }
   .mc-grid-left .mc-trades-card     { grid-column: span 2; grid-row: span 2; }
@@ -388,7 +413,7 @@ ${FONT}
   .mc-grid-left .mc-avgexec-card    { grid-column: span 2; grid-row: span 2; }
   .mc-grid-left .mc-profitfactor-card { grid-column: span 2; grid-row: span 2; }
   .mc-grid-left .mc-orders-card     { grid-column: 1 / 5;  grid-row: span 5; }
-  .mc-grid-left .mc-exchange-card   { grid-column: 5 / 9;  grid-row: span 5; }
+  .mc-grid-left .mc-equity-card     { grid-column: 5 / 9;  grid-row: span 5; }
   .mc-grid-left .mc-latency-card    { grid-column: 1 / 5;  grid-row: span 4; }
   .mc-grid-left .mc-capital-card    { grid-column: 5 / 9;  grid-row: span 4; }
   .mc-grid-left .mc-services-card   { grid-column: 1 / 5;  grid-row: span 4; }
@@ -426,7 +451,7 @@ ${FONT}
   }
 
   /* All cards flow in 4-col grid */
-  .mc-grid-left .mc-equity-card     { grid-column: 1 / 5;  grid-row: span 3; }
+  .mc-grid-left .mc-exchange-card   { grid-column: 1 / 5;  grid-row: span 5; }
   .mc-grid-left .mc-pnl-card        { grid-column: 1 / 3;  grid-row: span 2; }
   .mc-grid-left .mc-winrate-card    { grid-column: 3 / 5;  grid-row: span 2; }
   .mc-grid-left .mc-activebots-card { grid-column: 1 / 3;  grid-row: span 2; }
@@ -441,7 +466,7 @@ ${FONT}
   .mc-grid-left .mc-avgexec-card    { grid-column: 3 / 5;  grid-row: span 2; }
   .mc-grid-left .mc-profitfactor-card { grid-column: 1 / 5; grid-row: span 2; }
   .mc-grid-left .mc-orders-card     { grid-column: 1 / 5;  grid-row: span 5; }
-  .mc-grid-left .mc-exchange-card   { grid-column: 1 / 5;  grid-row: span 4; }
+  .mc-grid-left .mc-equity-card     { grid-column: 1 / 5;  grid-row: span 4; }
   .mc-grid-left .mc-latency-card    { grid-column: 1 / 5;  grid-row: span 4; }
   .mc-grid-left .mc-capital-card    { grid-column: 1 / 5;  grid-row: span 3; }
   .mc-grid-left .mc-services-card   { grid-column: 1 / 5;  grid-row: span 4; }
@@ -467,7 +492,7 @@ ${FONT}
     grid-auto-rows: 48px;
   }
 
-  .mc-grid-left .mc-equity-card     { grid-column: 1 / 3;  grid-row: span 3; }
+  .mc-grid-left .mc-exchange-card   { grid-column: 1 / 3;  grid-row: span 5; }
   .mc-grid-left .mc-pnl-card        { grid-column: 1 / 3;  grid-row: span 2; }
   .mc-grid-left .mc-winrate-card    { grid-column: 1 / 2;  grid-row: span 2; }
   .mc-grid-left .mc-activebots-card { grid-column: 2 / 3;  grid-row: span 2; }
@@ -482,7 +507,7 @@ ${FONT}
   .mc-grid-left .mc-avgexec-card    { grid-column: 2 / 3;  grid-row: span 2; }
   .mc-grid-left .mc-profitfactor-card { grid-column: 1 / 3; grid-row: span 2; }
   .mc-grid-left .mc-orders-card     { grid-column: 1 / 3;  grid-row: span 6; }
-  .mc-grid-left .mc-exchange-card   { grid-column: 1 / 3;  grid-row: span 4; }
+  .mc-grid-left .mc-equity-card     { grid-column: 1 / 3;  grid-row: span 4; }
   .mc-grid-left .mc-latency-card    { grid-column: 1 / 3;  grid-row: span 4; }
   .mc-grid-left .mc-capital-card    { grid-column: 1 / 3;  grid-row: span 3; }
   .mc-grid-left .mc-services-card   { grid-column: 1 / 3;  grid-row: span 5; }
@@ -1683,7 +1708,8 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   // Format balance value
   const fmtBal = (v: number | null | undefined) => {
     if (v == null) return '--';
-    if (Math.abs(v) >= 1000) return `$${(v / 1000).toFixed(1)}k`;
+    if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(v) >= 1000) return `$${(v / 1000).toFixed(2)}k`;
     return `$${v.toFixed(2)}`;
   };
 
@@ -1739,13 +1765,42 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   const statusColor = (s: string) => s === "healthy" ? "var(--g)" : s === "degraded" ? "var(--a)" : s === "unknown" ? "var(--t2)" : "var(--r)";
   const latColor = (ms: number) => ms < 50 ? "var(--g)" : ms < 150 ? "var(--a)" : "var(--r)";
 
+  // Carousel state
+  const [carouselIdx, setCarouselIdx] = useState(0);
+  const autoSlideRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const slideCount = tiles.length;
+
+  // Auto-slide every 6 seconds
+  useEffect(() => {
+    if (slideCount <= 1) return;
+    autoSlideRef.current = setInterval(() => {
+      setCarouselIdx(prev => (prev + 1) % slideCount);
+    }, 12000);
+    return () => { if (autoSlideRef.current) clearInterval(autoSlideRef.current); };
+  }, [slideCount]);
+
+  const goToSlide = (idx: number) => {
+    setCarouselIdx(idx);
+    if (autoSlideRef.current) clearInterval(autoSlideRef.current);
+    autoSlideRef.current = setInterval(() => {
+      setCarouselIdx(prev => (prev + 1) % slideCount);
+    }, 12000);
+  };
+
+  // Big balance formatter
+  const fmtBigBal = (v: number | null | undefined) => {
+    if (v == null) return { whole: '--', suffix: '' };
+    if (Math.abs(v) >= 1_000_000) return { whole: (v / 1_000_000).toFixed(2), suffix: 'M' };
+    if (Math.abs(v) >= 1_000) return { whole: (v / 1_000).toFixed(2), suffix: 'k' };
+    return { whole: v.toFixed(2), suffix: '' };
+  };
+
   return (
     <div className="mc-card mc-exchange-card">
       <div className="mc-card-accent" style={{ background: tiles.some(t => t.status !== 'healthy') ? "var(--a)" : "var(--g)" }}/>
       <div className="mc-ch">
         <div className="mc-ct">Exchange Adapters</div>
         <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-          {/* Refresh button */}
           <button
             onClick={fetchBalances}
             disabled={refreshingBalances || loadingSA || loadingCreds}
@@ -1759,7 +1814,6 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
           >
             {refreshingBalances ? '...' : 'REFRESH'}
           </button>
-          {/* SA selector */}
           {serviceAccounts.length > 1 ? (
             <select
               value={selectedSA || ''}
@@ -1777,9 +1831,14 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
           ) : serviceAccounts.length === 1 ? (
             <span className="mc-tag mc-td">{serviceAccounts[0].name || 'SA'}</span>
           ) : null}
+          {slideCount > 1 && (
+            <span style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)" }}>
+              {carouselIdx + 1}/{slideCount}
+            </span>
+          )}
         </div>
       </div>
-      <div className="mc-cb" style={{ flex:1, padding:0 }}>
+      <div className="mc-cb" style={{ flex:1, padding:0, overflow:"hidden" }}>
         {loadingSA || loadingCreds ? (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"center", flex:1, fontFamily:"var(--mono)", fontSize:9, color:"var(--t2)" }}>
             Loading...
@@ -1789,115 +1848,169 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
             {serviceAccounts.length === 0 ? 'No service accounts configured' : 'No credentials for this service account'}
           </div>
         ) : (
-          <div className="mc-ex-grid">
-            {tiles.map(ex => (
-              <div key={ex.id} className="mc-ex-tile" style={{ borderColor: statusColor(ex.status), opacity: ex.enabled ? 1 : 0.5 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:2 }}>
-                  <span className={`mc-sdot mc-${ex.status}`}/>
-                  <span style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700, color:"var(--t0)" }}>{ex.name}</span>
-                  {ex.sandbox && <span className="mc-tag mc-ta" style={{ fontSize:6 }}>SANDBOX</span>}
-                  {!ex.enabled && <span className="mc-tag mc-td" style={{ fontSize:6 }}>DISABLED</span>}
-                </div>
-                {ex.label !== ex.name && (
-                  <div style={{ fontFamily:"var(--mono)", fontSize:7, color:"var(--t2)", marginBottom:4, paddingLeft:11 }}>{ex.label}</div>
-                )}
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 8px", marginTop: ex.label === ex.name ? 4 : 0 }}>
-                  <div>
-                    <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Latency</div>
-                    <div style={{ fontFamily:"var(--mono)", fontSize:12, fontWeight:600, color: ex.lat > 0 ? latColor(ex.lat) : "var(--t2)" }}>{ex.lat > 0 ? `${ex.lat}ms` : '--'}</div>
-                  </div>
-                  <div>
-                    <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Market</div>
-                    <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:"var(--t1)", textTransform:"uppercase" }}>{ex.market}</div>
-                  </div>
-                  <div>
-                    <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Status</div>
-                    <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:statusColor(ex.status), textTransform:"uppercase" }}>{ex.status}</div>
-                  </div>
-                  <div>
-                    <div className="mc-sub" style={{ fontSize:7, marginBottom:1 }}>Currency</div>
-                    <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:"var(--t1)" }}>{ex.balanceCurrency}</div>
-                  </div>
-                </div>
-
-                {/* Balance breakdown */}
-                <div style={{ marginTop:6, borderTop:"1px solid var(--b2)", paddingTop:5 }}>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"3px 8px" }}>
-                    <div>
-                      <div className="mc-sub" style={{ fontSize:6, marginBottom:1 }}>Wallet</div>
-                      <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700, color: ex.balanceError ? "var(--r)" : ex.walletBalance != null ? "var(--g)" : "var(--t3)" }}>
-                        {ex.balanceError ? 'ERR' : fmtBal(ex.walletBalance)}
-                      </div>
+          <div className="mc-ex-carousel">
+            {slideCount > 1 && (
+              <>
+                <button className="mc-ex-nav prev" onClick={() => goToSlide((carouselIdx - 1 + slideCount) % slideCount)}>&lsaquo;</button>
+                <button className="mc-ex-nav next" onClick={() => goToSlide((carouselIdx + 1) % slideCount)}>&rsaquo;</button>
+              </>
+            )}
+            <div className="mc-ex-track" style={{ transform: `translateX(-${carouselIdx * 100}%)` }}>
+              {tiles.map(ex => {
+                const bigBal = fmtBigBal(ex.walletBalance);
+                return (
+                  <div key={ex.id} className="mc-ex-slide">
+                    {/* Header: name + status badges */}
+                    <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                      <span className={`mc-sdot mc-${ex.status}`}/>
+                      <span style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700, color:"var(--t0)" }}>{ex.name}</span>
+                      {ex.sandbox && <span className="mc-tag mc-ta" style={{ fontSize:7 }}>SANDBOX</span>}
+                      {!ex.enabled && <span className="mc-tag mc-td" style={{ fontSize:7 }}>DISABLED</span>}
+                      <span style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:statusColor(ex.status), textTransform:"uppercase", marginLeft:"auto" }}>{ex.status}</span>
                     </div>
-                    <div>
-                      <div className="mc-sub" style={{ fontSize:6, marginBottom:1 }}>Available</div>
-                      <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:700, color: ex.availableBalance != null ? "var(--b)" : "var(--t3)" }}>
-                        {fmtBal(ex.availableBalance)}
-                      </div>
-                    </div>
-                    {ex.isFutures && (
-                      <div style={{ gridColumn:"span 2" }}>
-                        <div className="mc-sub" style={{ fontSize:6, marginBottom:1 }}>Unrealized PnL</div>
-                        <div style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color: ex.unrealizedPnl != null ? (ex.unrealizedPnl >= 0 ? "var(--g)" : "var(--r)") : "var(--t3)" }}>
-                          {ex.unrealizedPnl != null ? `${ex.unrealizedPnl >= 0 ? '+' : ''}${fmtBal(ex.unrealizedPnl)}` : '--'}
-                        </div>
-                      </div>
+                    {ex.label !== ex.name && (
+                      <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:6, paddingLeft:14 }}>{ex.label}</div>
                     )}
-                  </div>
 
-                  {/* Per-asset breakdown (show non-zero assets) */}
-                  {ex.assets.length > 0 && ex.assets.length <= 5 && (
-                    <div style={{ marginTop:4, display:"flex", flexWrap:"wrap", gap:3 }}>
-                      {ex.assets.map((a: any, i: number) => (
-                        <div key={i} style={{
-                          background:"var(--bg2)", border:"1px solid var(--b2)", borderRadius:2,
-                          padding:"2px 4px", fontFamily:"var(--mono)", fontSize:7, color:"var(--t1)",
-                        }}>
-                          <span style={{ color:"var(--t2)" }}>{a.asset}</span>{' '}
-                          {a.wallet_balance >= 1000 ? `${(a.wallet_balance/1000).toFixed(1)}k` : a.wallet_balance.toFixed(2)}
-                          {ex.isFutures && a.unrealized_pnl !== 0 && (
-                            <span style={{ color: a.unrealized_pnl >= 0 ? "var(--g)" : "var(--r)", marginLeft:2 }}>
-                              {a.unrealized_pnl >= 0 ? '+' : ''}{a.unrealized_pnl.toFixed(2)}
-                            </span>
+                    {/* Balance row — horizontal, evenly spaced */}
+                    <div style={{ display:"flex", alignItems:"baseline", gap:0, padding:"10px 0", borderTop:"1px solid var(--b2)", borderBottom:"1px solid var(--b2)" }}>
+                      <div style={{ flex:1 }}>
+                        <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Wallet Balance</div>
+                        <div className="mc-ex-wallet-big" style={{ color: ex.balanceError ? "var(--r)" : ex.walletBalance != null ? "var(--t0)" : "var(--t3)" }}>
+                          {ex.balanceError ? 'ERROR' : (
+                            <>
+                              <span style={{ color:"var(--t2)", fontSize:18 }}>$</span>
+                              {bigBal.whole}
+                              {bigBal.suffix && <span style={{ fontSize:16, color:"var(--t2)" }}>{bigBal.suffix}</span>}
+                            </>
                           )}
                         </div>
-                      ))}
+                      </div>
+                      <div style={{ flex:1, borderLeft:"1px solid var(--b2)", paddingLeft:16 }}>
+                        <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Available</div>
+                        <div className="mc-ex-wallet-big" style={{ color: ex.availableBalance != null ? "var(--g)" : "var(--t3)" }}>
+                          {ex.balanceError ? 'ERROR' : fmtBal(ex.availableBalance)}
+                        </div>
+                      </div>
+                      {ex.isFutures && (
+                        <div style={{ flex:1, borderLeft:"1px solid var(--b2)", paddingLeft:16 }}>
+                          <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Unrealized PnL</div>
+                          <div className="mc-ex-wallet-big" style={{ color: ex.unrealizedPnl != null ? (ex.unrealizedPnl >= 0 ? "var(--g)" : "var(--r)") : "var(--t3)" }}>
+                            {ex.unrealizedPnl != null ? `${ex.unrealizedPnl >= 0 ? '+' : ''}${fmtBal(ex.unrealizedPnl)}` : '--'}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {ex.assets.length > 5 && (
-                    <div style={{ marginTop:3, fontFamily:"var(--mono)", fontSize:7, color:"var(--t2)" }}>
-                      {ex.assets.length} assets
-                    </div>
-                  )}
-                </div>
 
-                {/* Positions + Reconcile buttons (futures only) */}
-                {ex.isFutures && (
-                  <div style={{ marginTop:6, borderTop:"1px solid var(--b2)", paddingTop:5, display:"flex", gap:4 }}>
-                    <button
-                      onClick={() => openPosModal(ex.id, ex.name)}
-                      style={{
-                        flex:1, background:"none", border:"1px solid var(--b2)", borderRadius:2,
-                        color:"var(--t1)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:8,
-                        padding:"3px 0", fontWeight:600,
-                      }}
-                    >
-                      POSITIONS
-                    </button>
-                    <button
-                      onClick={() => setShowReconciliation({ credId: ex.id, name: ex.name, sandbox: ex.sandbox })}
-                      style={{
-                        flex:1, background:"rgba(255,180,0,0.08)", border:"1px solid rgba(255,180,0,0.3)", borderRadius:2,
-                        color:"var(--y, #ffb400)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:8,
-                        padding:"3px 0", fontWeight:700,
-                      }}
-                    >
-                      RECONCILE
-                    </button>
+                    {/* Mid section: Info + Assets side by side */}
+                    <div style={{ display:"flex", gap:12, flex:1, marginTop:8, minHeight:0 }}>
+                      {/* Left: Info grid */}
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px 16px", alignContent:"start", minWidth:160 }}>
+                        <div>
+                          <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Latency</div>
+                          <div style={{ fontFamily:"var(--mono)", fontSize:13, fontWeight:600, color: ex.lat > 0 ? latColor(ex.lat) : "var(--t2)" }}>
+                            {ex.lat > 0 ? `${ex.lat}ms` : '--'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Market</div>
+                          <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:600, color:"var(--t1)", textTransform:"uppercase" }}>{ex.market}</div>
+                        </div>
+                        <div>
+                          <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Currency</div>
+                          <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:600, color:"var(--t1)" }}>{ex.balanceCurrency}</div>
+                        </div>
+                        <div>
+                          <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Assets</div>
+                          <div style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:600, color:"var(--t1)" }}>{ex.assets.length}</div>
+                        </div>
+                        {/* Action buttons inline */}
+                        <div style={{ gridColumn:"span 2", display:"flex", gap:6, marginTop:4 }}>
+                          {ex.isFutures && (
+                            <>
+                              <button
+                                onClick={() => openPosModal(ex.id, ex.name)}
+                                style={{
+                                  background:"none", border:"1px solid var(--b2)", borderRadius:3,
+                                  color:"var(--t1)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:9,
+                                  padding:"5px 10px", fontWeight:600,
+                                }}
+                              >
+                                POSITIONS
+                              </button>
+                              <button
+                                onClick={() => setShowReconciliation({ credId: ex.id, name: ex.name, sandbox: ex.sandbox })}
+                                style={{
+                                  background:"rgba(255,180,0,0.08)", border:"1px solid rgba(255,180,0,0.3)", borderRadius:3,
+                                  color:"var(--y, #ffb400)", cursor:"pointer", fontFamily:"var(--mono)", fontSize:9,
+                                  padding:"5px 10px", fontWeight:700,
+                                }}
+                              >
+                                RECONCILE
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Asset cards with icons */}
+                      <div style={{ flex:1, borderLeft:"1px solid var(--b2)", paddingLeft:12 }}>
+                        <div className="mc-sub" style={{ fontSize:8, marginBottom:6 }}>Asset Holdings</div>
+                        {ex.assets.length > 0 ? (
+                          <div className="mc-ex-asset-grid">
+                            {ex.assets.slice(0, 12).map((a: any, i: number) => {
+                              const fallbackIcon = (
+                                <span className="mc-ex-asset-icon" style={{ background:"#1e2d40" }}>
+                                  {a.asset.slice(0, 2)}
+                                </span>
+                              );
+                              return (
+                                <div key={i} className="mc-ex-asset-card">
+                                  <TokenIcon
+                                    symbol={a.asset.toUpperCase()}
+                                    size={24}
+                                    variant="branded"
+                                    fallback={fallbackIcon}
+                                  />
+                                  <div className="mc-ex-asset-info">
+                                    <div className="mc-ex-asset-name">{a.asset}</div>
+                                    <div className="mc-ex-asset-bal">
+                                      {a.wallet_balance >= 1000 ? `${(a.wallet_balance/1000).toFixed(1)}k` : a.wallet_balance.toFixed(2)}
+                                    </div>
+                                    {ex.isFutures && a.unrealized_pnl !== 0 && (
+                                      <div style={{ fontFamily:"var(--mono)", fontSize:9, fontWeight:600, color: a.unrealized_pnl >= 0 ? "var(--g)" : "var(--r)", marginTop:1 }}>
+                                        {a.unrealized_pnl >= 0 ? '+' : ''}{a.unrealized_pnl.toFixed(2)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {ex.assets.length > 12 && (
+                              <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--t2)", padding:"8px 0", gridColumn:"span 2" }}>
+                                +{ex.assets.length - 12} more assets
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--t3)", padding:"12px 0" }}>
+                            No assets
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
+                );
+              })}
+            </div>
+            {/* Dots */}
+            {slideCount > 1 && (
+              <div className="mc-ex-dots">
+                {tiles.map((_, i) => (
+                  <button key={i} className={`mc-ex-dot ${i === carouselIdx ? 'active' : ''}`} onClick={() => goToSlide(i)} />
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
@@ -3173,9 +3286,9 @@ function MissionCriticalDashboard() {
               <div className="mc-left">
                 <div className="mc-grid-left">
                   {/* ── ROW 1: KEY METRICS ── */}
-                  {botsError && equityError ? <CardError label="Platform Equity" /> :
-                   !botsReady || !equityReady ? <CardSkeleton label="Platform Equity" /> :
-                   <EquityCard equity={totalEquity} activeBots={runningBots} curveData={equityCurve} />}
+                  {exchangeError ? <CardError label="Exchanges" /> :
+                   !exchangeReady ? <CardSkeleton label="Exchanges" /> :
+                   <ExchangeCard exchangeHealth={exchangeHealthData} />}
 
                   {botsError ? <CardError label="24h Realized P&L" /> :
                    !botsReady ? <CardSkeleton label="24h Realized P&L" /> :
@@ -3230,9 +3343,9 @@ function MissionCriticalDashboard() {
                    !ordersReady ? <CardSkeleton label="Live Orders" /> :
                    <LiveOrdersFeed orders={liveOrders} />}
 
-                  {exchangeError ? <CardError label="Exchanges" /> :
-                   !exchangeReady ? <CardSkeleton label="Exchanges" /> :
-                   <ExchangeCard exchangeHealth={exchangeHealthData} />}
+                  {botsError && equityError ? <CardError label="Platform Equity" /> :
+                   !botsReady || !equityReady ? <CardSkeleton label="Platform Equity" /> :
+                   <EquityCard equity={totalEquity} activeBots={runningBots} curveData={equityCurve} />}
 
                   {/* ── LATENCY + CAPITAL ── */}
                   {infraError ? <CardError label="API Latency" /> :
