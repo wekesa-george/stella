@@ -155,6 +155,9 @@ export default function NewBotPage() {
   const [gridRestartOnStopLoss, setGridRestartOnStopLoss] = useState(true);
   const [gridLeverage, setGridLeverage] = useState("1");
 
+  // Leverage (for non-grid futures strategies like physics momentum)
+  const [leverage, setLeverage] = useState("1");
+
   // Shared state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -406,6 +409,8 @@ export default function NewBotPage() {
           ...(gridTakeProfit ? { take_profit_price: Number(gridTakeProfit) } : {}),
           ...(Number(gridLeverage) > 1 ? { leverage: Number(gridLeverage) } : {}),
         };
+      } else if (Number(leverage) > 1) {
+        payload.config = { leverage: Number(leverage) };
       }
 
       try {
@@ -1252,6 +1257,50 @@ export default function NewBotPage() {
                 </div>
               )}
 
+              {/* Leverage for non-grid futures strategies (physics momentum, etc.) */}
+              {!isGridStrategy && (marketType === "usds_futures" || marketType === "coinm_futures") && (
+                <div className="border border-[rgba(255,215,0,0.25)] rounded-md overflow-hidden">
+                  <div className="px-3 py-2 bg-[rgba(255,215,0,0.06)] border-b border-[rgba(255,215,0,0.15)]">
+                    <span className="text-[9px] text-[#FFD700] uppercase tracking-widest font-bold">
+                      Leverage
+                    </span>
+                  </div>
+                  <div className="p-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        value={leverage}
+                        onChange={(e) => setLeverage(e.target.value)}
+                        min="1"
+                        max="125"
+                        step="1"
+                        className="flex-1 accent-[#FFD700]"
+                      />
+                      <input
+                        value={leverage}
+                        onChange={(e) => setLeverage(String(Math.max(1, Math.min(125, parseInt(e.target.value) || 1))))}
+                        type="number"
+                        min="1"
+                        max="125"
+                        className="w-16 bg-dark-elevated border border-dark rounded-sm px-2 py-2 text-xs text-foreground font-mono text-center focus:outline-none focus:border-dark-2"
+                      />
+                      <span className="text-xs text-foreground font-mono">x</span>
+                    </div>
+                    {Number(leverage) > 10 && (
+                      <p className="text-[9px] text-[#ffaa00] mt-1">
+                        High leverage increases liquidation risk. Platform max is enforced server-side.
+                      </p>
+                    )}
+                    {Number(leverage) > 1 && allocatedCapital && (
+                      <p className="text-[9px] text-[#5a7090] mt-0.5">
+                        Effective capital: <span className="text-foreground font-mono">${(Number(allocatedCapital) * Number(leverage)).toLocaleString()}</span>
+                        {" "}({leverage}x of ${Number(allocatedCapital).toLocaleString()})
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Summary */}
               <div className="border border-dark rounded-md overflow-hidden">
                 <div className="px-3 py-2 bg-dark-elevated border-b border-dark">
@@ -1345,6 +1394,9 @@ export default function NewBotPage() {
                         <SummaryRow label="Leverage" value={`${gridLeverage}x`} />
                       )}
                     </>
+                  )}
+                  {!isGridStrategy && Number(leverage) > 1 && (
+                    <SummaryRow label="Leverage" value={`${leverage}x`} />
                   )}
                 </div>
               </div>
