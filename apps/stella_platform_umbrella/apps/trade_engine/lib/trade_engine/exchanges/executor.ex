@@ -441,6 +441,9 @@ defmodule TradeEngine.Exchanges.Executor do
         {:error, {:unknown_adapter, adapter_code}}
 
       adapter_module ->
+        # Ensure module is loaded so function_exported? works reliably
+        Code.ensure_loaded(adapter_module)
+
         base_url = if row.is_sandbox do
           row.adapter_sandbox_base_url || row.adapter_base_url
         else

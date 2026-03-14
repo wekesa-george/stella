@@ -1654,18 +1654,34 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             entry.order_id && not MapSet.member?(open_ids, to_string(entry.order_id))
           end)
 
-        if length(filled) == 0 do
-          state
+        # Filter out stale entries with price 0 (recovered from old bug) — these aren't real fills
+        {real_fills, stale} = Enum.split_with(filled, fn {price_level, _entry} ->
+          is_number(price_level) && price_level > 0
+        end)
+
+        if length(stale) > 0 do
+          BotLogger.warning(state.bot_id, :grid, "Discarded stale grid entries with zero price", %{
+            count: length(stale)
+          })
+        end
+
+        if length(real_fills) == 0 do
+          # Remove stale entries from grid_orders but don't process them
+          if length(stale) > 0 do
+            %{state | grid_orders: Map.new(still_open)}
+          else
+            state
+          end
         else
           BotLogger.info(state.bot_id, :grid, "Grid fills detected", %{
-            filled_count: length(filled),
+            filled_count: length(real_fills),
             open_count: length(still_open)
           })
 
           # Process each filled order: place counter-order
           state = %{state | grid_orders: Map.new(still_open)}
 
-          Enum.reduce(filled, state, fn {price_level, entry}, acc ->
+          Enum.reduce(real_fills, state, fn {price_level, entry}, acc ->
             process_grid_fill(acc, symbol, entry, price_level)
           end)
         end
