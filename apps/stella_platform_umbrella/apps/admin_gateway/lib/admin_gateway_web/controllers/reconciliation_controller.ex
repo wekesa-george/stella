@@ -47,6 +47,74 @@ defmodule AdminGatewayWeb.ReconciliationController do
     json(conn, %{data: sanitize(Reconciliation.get_summary())})
   end
 
+  @doc "POST /api/reconciliation/cancel-orphans — Cancel exchange orders not in DB"
+  def cancel_orphans(conn, _params) do
+    case Reconciliation.reconcile_orders() do
+      {:ok, %{missing_db: orphans}} when is_list(orphans) and length(orphans) > 0 ->
+        results = Enum.map(orphans, fn order ->
+          cred_id = order[:credential_id]
+          symbol = order[:symbol]
+          order_id = order[:exchange_order_id]
+          market_type = order[:market_type] || "usds_futures"
+
+          if cred_id && symbol && order_id do
+            case TradeEngine.Exchanges.Executor.cancel_order(cred_id, symbol, order_id, market_type: market_type) do
+              {:ok, _} -> %{order_id: order_id, symbol: symbol, status: "cancelled"}
+              {:error, reason} -> %{order_id: order_id, symbol: symbol, status: "failed", error: inspect(reason)}
+            end
+          else
+            %{order_id: order_id, symbol: symbol, status: "skipped", error: "missing credential or symbol"}
+          end
+        end)
+
+        cancelled = Enum.count(results, &(&1.status == "cancelled"))
+        failed = Enum.count(results, &(&1.status == "failed"))
+        json(conn, %{data: sanitize(%{cancelled: cancelled, failed: failed, total: length(results), results: results})})
+
+      {:ok, _} ->
+        json(conn, %{data: %{cancelled: 0, failed: 0, total: 0, message: "No orphan orders found"}})
+
+      {:error, reason} ->
+        conn |> put_status(502) |> json(%{error: "Failed to reconcile: #{inspect(reason)}"})
+    end
+  end
+
+  @doc "POST /api/reconciliation/clean-stale — Mark DB orders as cancelled if gone from exchange"
+  def clean_stale(conn, _params) do
+    case Reconciliation.reconcile_orders() do
+      {:ok, %{stale_exchange: stale}} when is_list(stale) and length(stale) > 0 ->
+        import Ecto.Query
+        alias TradeEngine.Repo
+        alias TradeEngine.Trading.Order
+
+        results = Enum.map(stale, fn order ->
+          db_id = order[:id]
+          if db_id do
+            case Repo.get(Order, db_id) do
+              nil -> %{id: db_id, status: "not_found"}
+              record ->
+                changeset = Order.changeset(record, %{status: "cancelled", cancel_reason: "reconciliation: gone from exchange"})
+                case Repo.update(changeset) do
+                  {:ok, _} -> %{id: db_id, exchange_order_id: order[:exchange_order_id], status: "cleaned"}
+                  {:error, _} -> %{id: db_id, status: "update_failed"}
+                end
+            end
+          else
+            %{id: nil, status: "skipped"}
+          end
+        end)
+
+        cleaned = Enum.count(results, &(&1.status == "cleaned"))
+        json(conn, %{data: sanitize(%{cleaned: cleaned, total: length(results), results: results})})
+
+      {:ok, _} ->
+        json(conn, %{data: %{cleaned: 0, total: 0, message: "No stale orders found"}})
+
+      {:error, reason} ->
+        conn |> put_status(502) |> json(%{error: "Failed to reconcile: #{inspect(reason)}"})
+    end
+  end
+
   defp parse_int(nil, default), do: default
   defp parse_int(s, default) when is_binary(s) do
     case Integer.parse(s) do

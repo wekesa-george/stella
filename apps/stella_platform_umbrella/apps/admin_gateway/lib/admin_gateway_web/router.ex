@@ -38,6 +38,8 @@ defmodule AdminGatewayWeb.Router do
     get "/reconciliation/orders", ReconciliationController, :orders
     get "/reconciliation/balances", ReconciliationController, :balances
     get "/reconciliation/trades/:credential_id", ReconciliationController, :trades
+    post "/reconciliation/cancel-orphans", ReconciliationController, :cancel_orphans
+    post "/reconciliation/clean-stale", ReconciliationController, :clean_stale
   end
 
   # Authenticated admin routes

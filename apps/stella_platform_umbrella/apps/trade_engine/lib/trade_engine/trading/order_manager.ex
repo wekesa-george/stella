@@ -83,8 +83,8 @@ defmodule TradeEngine.Trading.OrderManager do
         finalize_order(order, exchange_result)
 
       {:error, changeset} ->
-        Logger.error("OrderManager: failed to insert limit order: #{inspect(changeset.errors)}")
-        Executor.place_limit_order(credential_id, symbol, side, quantity, price, opts)
+        Logger.error("OrderManager: failed to insert limit order — NOT placing on exchange: #{inspect(changeset.errors)}")
+        {:error, {:db_insert_failed, changeset.errors}}
     end
   end
 
@@ -165,9 +165,8 @@ defmodule TradeEngine.Trading.OrderManager do
         finalize_order(order, exchange_result)
 
       {:error, changeset} ->
-        Logger.error("OrderManager: failed to insert order: #{inspect(changeset.errors)}")
-        # Fall through to Executor anyway so trading isn't blocked by DB issues
-        call_executor(action, credential_id, symbol, quantity, entry_price, opts)
+        Logger.error("OrderManager: failed to insert order — NOT placing on exchange: #{inspect(changeset.errors)}")
+        {:error, {:db_insert_failed, changeset.errors}}
     end
   end
 

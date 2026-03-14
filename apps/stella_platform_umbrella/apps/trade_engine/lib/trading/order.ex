@@ -46,6 +46,9 @@ defmodule TradeEngine.Trading.Order do
     field :rejection_reason, :string
     field :exchange_response, :map
     field :metadata, :map
+    field :retry_count, :integer, default: 0
+    field :correlation_id, :binary_id
+    field :parent_order_id, :binary_id
 
     # Relationships
     belongs_to :user, SysAdmin.Accounts.User, foreign_key: :user_id
@@ -68,7 +71,8 @@ defmodule TradeEngine.Trading.Order do
       :remaining_quantity, :total_fees, :fee_asset, :fee_usd,
       :leverage, :is_margin, :signal_id, :submitted_at, :first_fill_at,
       :cancelled_at, :cancel_reason, :rejection_reason,
-      :exchange_response, :metadata
+      :exchange_response, :metadata,
+      :retry_count, :correlation_id, :parent_order_id
     ])
     |> validate_required([:symbol, :side, :order_type, :quantity])
     |> validate_inclusion(:side, ["buy", "sell"])
