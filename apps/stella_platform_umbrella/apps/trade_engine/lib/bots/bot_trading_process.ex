@@ -942,7 +942,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
           :short ->
             # Selling: need base currency
-            norm = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+            norm = normalize_to_exchange_symbol(symbol)
             base = Enum.find_value(["USDT", "USDC", "BUSD"], norm, fn q ->
               if String.ends_with?(norm, q), do: String.replace_suffix(norm, q, "")
             end)
@@ -982,7 +982,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
   defp get_fresh_price(credential_id, symbol, market_type) do
     # Try ETS cache first and check freshness
-    norm = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+    norm = normalize_to_exchange_symbol(symbol)
 
     cached_result = try do
       case :ets.lookup(:binance_ticker_cache, norm) do
@@ -1085,6 +1085,23 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   defp get_strategy_param(_, _, default), do: default
+
+  # Normalize CCXT symbol to exchange format
+  # "BTC/USDT:USDT-260327" → "BTCUSDT_260327" (delivery futures)
+  # "BTC/USDT:USDT" → "BTCUSDT" (perpetual)
+  # "BTC/USDT" → "BTCUSDT" (spot)
+  defp normalize_to_exchange_symbol(pair) do
+    case String.split(pair, ":") do
+      [base_quote, settle_part] ->
+        base = String.replace(base_quote, "/", "") |> String.upcase()
+        case String.split(settle_part, "-") do
+          [_settle, expiry] -> base <> "_" <> expiry
+          _ -> base
+        end
+      _ ->
+        pair |> String.replace("/", "") |> String.upcase()
+    end
+  end
 
   defp get_signal_target(signal) do
     cond do
@@ -1293,7 +1310,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     else
       # Validate notional meets exchange minimum (fetched from exchange info, fallback to safe defaults)
       is_futures = state.market_type in ["usds_futures", "coinm_futures"]
-      trading_sym = symbol |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+      trading_sym = normalize_to_exchange_symbol(symbol)
       exchange_min = TradeEngine.Exchanges.Binance.ExchangeInfoCache.min_notional(trading_sym)
       min_notional = exchange_min || if(is_futures, do: 100.0, else: 10.0)
       notional = validated_qty * rounded_price
@@ -1625,7 +1642,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           String.starts_with?(coid, bot_prefix) or coid == ""
         end)
 
-        open_ids = MapSet.new(my_open_orders, fn o -> o.order_id end)
+        # Build set of exchange order IDs as strings (DB stores them as strings)
+        open_ids = MapSet.new(my_open_orders, fn o -> to_string(o.order_id) end)
 
         # Reconcile DB: cancel orphaned "open" orders not on exchange
         reconcile_stale_db_orders(state.bot_id, open_ids)
@@ -1633,7 +1651,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         # Find grid orders that are no longer open on exchange → they were filled
         {filled, still_open} = state.grid_orders
           |> Enum.split_with(fn {_level, entry} ->
-            entry.order_id && not MapSet.member?(open_ids, entry.order_id)
+            entry.order_id && not MapSet.member?(open_ids, to_string(entry.order_id))
           end)
 
         if length(filled) == 0 do
@@ -2103,8 +2121,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     trading_pairs = state.trading_pairs || []
 
     # Normalize bot's trading pairs to match exchange symbol format
+    # Handles CCXT delivery futures format: "BTC/USDT:USDT-260327" → "BTCUSDT_260327"
     bot_symbols = Enum.map(trading_pairs, fn pair ->
-      pair |> String.split(":") |> List.first() |> String.replace("/", "") |> String.upcase()
+      normalize_to_exchange_symbol(pair)
     end) |> MapSet.new()
 
     case Executor.get_position_risk(credential_id) do
