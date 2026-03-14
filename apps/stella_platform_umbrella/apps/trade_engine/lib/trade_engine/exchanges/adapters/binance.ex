@@ -558,12 +558,15 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
     case signed_request(:delete, url, params, credentials) do
       {:ok, order} ->
+        Logger.info("Binance cancel_order response: symbol=#{trading_symbol} orderId=#{order_id} market=#{market_type} | status=#{order["status"]} | raw=#{inspect(order)}")
         {:ok, %{
           order_id: order["orderId"],
           status: order["status"],
           symbol: order["symbol"]
         }}
-      error -> error
+      {:error, reason} = err ->
+        Logger.warning("Binance cancel_order FAILED: symbol=#{trading_symbol} orderId=#{order_id} market=#{market_type} | error=#{inspect(reason)}")
+        err
     end
   end
 
@@ -587,6 +590,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
     case signed_request(:get, url, params, credentials) do
       {:ok, orders} when is_list(orders) ->
+        Logger.info("Binance get_open_orders: symbol=#{trading_symbol} market=#{market_type} | count=#{length(orders)} | sample=#{inspect(Enum.take(orders, 2))}")
         parsed = Enum.map(orders, fn order ->
           %{
             order_id: order["orderId"],
