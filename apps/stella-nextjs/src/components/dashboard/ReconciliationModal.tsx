@@ -6,6 +6,8 @@ import {
   getReconciliationPositions,
   getReconciliationOrders,
   getReconciliationBalances,
+  cancelOrphanOrders,
+  cleanStaleOrders,
 } from '@/lib/tradingEngineApi';
 
 type Tab = 'positions' | 'orders' | 'balances';
@@ -250,7 +252,7 @@ export default function ReconciliationModal({ onClose, credentialId, credentialN
           ) : tab === 'positions' && posData ? (
             <PositionsTab data={posData} credentialMap={credentialMap} />
           ) : tab === 'orders' && ordData ? (
-            <OrdersTab data={ordData} credentialMap={credentialMap} />
+            <OrdersTab data={ordData} credentialMap={credentialMap} onRefresh={() => fetchTab('orders')} />
           ) : tab === 'balances' && balData ? (
             <BalancesTab data={balData} credentialMap={credentialMap} />
           ) : (
@@ -368,8 +370,42 @@ function PositionsTab({ data, credentialMap }: { data: any; credentialMap?: Reco
 }
 
 /* ── ORDERS TAB ── */
-function OrdersTab({ data, credentialMap }: { data: any; credentialMap?: Record<string, CredentialInfo> }) {
+function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMap?: Record<string, CredentialInfo>; onRefresh?: () => void }) {
   const totals = data.totals || {};
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<any>(null);
+
+  const handleCancelOrphans = async () => {
+    if (!confirm(`Cancel ${totals.missing_db || 0} orphan orders on exchange?`)) return;
+    setActionLoading('cancel');
+    setActionResult(null);
+    try {
+      const res = await cancelOrphanOrders();
+      const body = (res.data as any)?.data ?? res.data;
+      setActionResult({ type: 'cancel', ...body });
+      onRefresh?.();
+    } catch (e: any) {
+      setActionResult({ type: 'cancel', error: e.message || 'Failed' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCleanStale = async () => {
+    if (!confirm(`Mark ${totals.stale_exchange || 0} stale DB orders as cancelled?`)) return;
+    setActionLoading('clean');
+    setActionResult(null);
+    try {
+      const res = await cleanStaleOrders();
+      const body = (res.data as any)?.data ?? res.data;
+      setActionResult({ type: 'clean', ...body });
+      onRefresh?.();
+    } catch (e: any) {
+      setActionResult({ type: 'clean', error: e.message || 'Failed' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const sections = [
     { key: 'missing_db', label: 'On Exchange but Missing in DB', color: 'var(--r)', items: data.missing_db || [] },
@@ -380,6 +416,53 @@ function OrdersTab({ data, credentialMap }: { data: any; credentialMap?: Record<
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {(totals.missing_db || 0) > 0 && (
+          <button
+            onClick={handleCancelOrphans}
+            disabled={!!actionLoading}
+            style={{
+              padding: '6px 14px', borderRadius: 4, border: '1px solid var(--r)',
+              background: 'rgba(255,71,87,0.1)', color: 'var(--r)', fontFamily: 'var(--mono)',
+              fontSize: 10, fontWeight: 700, cursor: actionLoading ? 'wait' : 'pointer', opacity: actionLoading ? 0.5 : 1,
+            }}
+          >
+            {actionLoading === 'cancel' ? 'CANCELLING...' : `CANCEL ${totals.missing_db} ORPHANS`}
+          </button>
+        )}
+        {(totals.stale_exchange || 0) > 0 && (
+          <button
+            onClick={handleCleanStale}
+            disabled={!!actionLoading}
+            style={{
+              padding: '6px 14px', borderRadius: 4, border: '1px solid var(--y)',
+              background: 'rgba(255,193,7,0.1)', color: 'var(--y)', fontFamily: 'var(--mono)',
+              fontSize: 10, fontWeight: 700, cursor: actionLoading ? 'wait' : 'pointer', opacity: actionLoading ? 0.5 : 1,
+            }}
+          >
+            {actionLoading === 'clean' ? 'CLEANING...' : `CLEAN ${totals.stale_exchange} STALE`}
+          </button>
+        )}
+      </div>
+
+      {/* Action result banner */}
+      {actionResult && (
+        <div style={{
+          padding: '6px 10px', borderRadius: 3, fontFamily: 'var(--mono)', fontSize: 10,
+          background: actionResult.error ? 'rgba(255,71,87,0.1)' : 'rgba(0,212,170,0.1)',
+          border: `1px solid ${actionResult.error ? 'rgba(255,71,87,0.3)' : 'rgba(0,212,170,0.3)'}`,
+          color: actionResult.error ? 'var(--r)' : 'var(--g)',
+        }}>
+          {actionResult.error
+            ? `Error: ${actionResult.error}`
+            : actionResult.type === 'cancel'
+              ? `Cancelled: ${actionResult.cancelled ?? 0} | Failed: ${actionResult.failed ?? 0}`
+              : `Cleaned: ${actionResult.cleaned ?? 0} / ${actionResult.total ?? 0}`
+          }
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {[
           { label: 'Matched', value: totals.matched || 0, color: 'var(--g)' },

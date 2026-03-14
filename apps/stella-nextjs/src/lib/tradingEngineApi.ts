@@ -463,6 +463,12 @@ export async function getReconciliationBalances() {
 export async function getReconciliationTrades(credentialId: string, symbol: string, limit = 50) {
   return request(`/api/reconciliation/trades/${credentialId}?symbol=${encodeURIComponent(symbol)}&limit=${limit}`, {}, 'gateway');
 }
+export async function cancelOrphanOrders() {
+  return request('/api/reconciliation/cancel-orphans', { method: 'POST' }, 'gateway');
+}
+export async function cleanStaleOrders() {
+  return request('/api/reconciliation/clean-stale', { method: 'POST' }, 'gateway');
+}
 
 export async function createCredential(data: {
   service_account_id?: string;
