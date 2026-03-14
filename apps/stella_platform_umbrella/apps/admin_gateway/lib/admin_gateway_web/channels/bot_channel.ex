@@ -115,6 +115,15 @@ defmodule AdminGatewayWeb.BotChannel do
     end
   end
 
+  def handle_in("kill_all_bots", _payload, socket) do
+    case BotRegistry.kill_all_bots() do
+      {:ok, killed} ->
+        {:reply, {:ok, %{killed: length(killed), bots: killed}}, socket}
+      {:error, reason} ->
+        {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
   def handle_in("pause_bot", %{"bot_id" => bot_id}, socket) do
     case BotRegistry.pause_bot(bot_id) do
       :ok -> {:reply, {:ok, %{status: "paused"}}, socket}

@@ -141,6 +141,9 @@ defmodule TradeEngine.API do
   @doc "Stop a bot — terminates trading process"
   def stop_bot(bot_id), do: BotRegistry.stop_bot(bot_id)
 
+  @doc "NUCLEAR: Kill all running bot processes and set every bot to stopped"
+  def kill_all_bots, do: BotRegistry.kill_all_bots()
+
   @doc "Place a manual order through a running bot's trading process"
   def place_manual_order(bot_id, params) do
     case BotSupervisor.find_process(bot_id) do

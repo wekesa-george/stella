@@ -118,6 +118,11 @@ defmodule TradeEngine.Bots.BotRegistry do
     GenServer.call(__MODULE__, {:stop_bot, bot_id})
   end
 
+  @doc "NUCLEAR: Kill ALL bot processes and set every bot to stopped. No auto-restart."
+  def kill_all_bots do
+    GenServer.call(__MODULE__, :kill_all_bots, 30_000)
+  end
+
   @doc "Record a heartbeat (called by the trading process)"
   def heartbeat(bot_id) do
     GenServer.cast(__MODULE__, {:heartbeat, bot_id})
@@ -686,6 +691,39 @@ defmodule TradeEngine.Bots.BotRegistry do
 
     Process.send_after(self(), :sync_stats_to_db, @stats_sync_interval_ms)
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_call(:kill_all_bots, _from, state) do
+    Logger.warning("🚨 NUCLEAR KILL: Stopping ALL bot processes")
+    now = DateTime.utc_now()
+    killed = []
+
+    # 1. Terminate every child in BotSupervisor (brute force)
+    BotSupervisor.which_children()
+    |> Enum.each(fn {_, pid, _, _} ->
+      if is_pid(pid) and Process.alive?(pid) do
+        DynamicSupervisor.terminate_child(BotSupervisor, pid)
+      end
+    end)
+
+    # 2. Set every bot in ETS to stopped
+    killed = :ets.tab2list(@ets_table)
+    |> Enum.filter(fn {_id, runtime} -> runtime.status != "stopped" end)
+    |> Enum.map(fn {bot_id, runtime} ->
+      BotFSM.transition(bot_id, runtime.status, "stopped",
+        trigger: "kill_all", reason: "Nuclear kill — all bots stopped", triggered_by: "admin")
+
+      updated = %{runtime | status: "stopped", stopped_at: now, elixir_pid: nil, init_step: nil}
+      :ets.insert(@ets_table, {bot_id, updated})
+      update_bot_db(bot_id, %{status: "stopped", stopped_at: now, elixir_pid: nil, init_step: nil})
+      broadcast_bot_event(:bot_stopped, updated)
+      broadcast_transition(bot_id, runtime.status, "stopped")
+      %{id: bot_id, name: runtime.name, was: runtime.status}
+    end)
+
+    Logger.warning("🚨 NUCLEAR KILL complete: #{length(killed)} bots stopped")
+    {:reply, {:ok, killed}, state}
   end
 
   @impl true

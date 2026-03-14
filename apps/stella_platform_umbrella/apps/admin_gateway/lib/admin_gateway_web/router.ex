@@ -28,6 +28,9 @@ defmodule AdminGatewayWeb.Router do
     post "/credentials/:id/positions/close", CredentialController, :close_position
     post "/credentials/:id/positions/close-all", CredentialController, :close_all_positions
 
+    # Emergency kill switch
+    post "/bots/kill-all", BotController, :kill_all
+
     # Reconciliation endpoints (admin dashboard)
     get "/reconciliation/summary", ReconciliationController, :summary
     get "/reconciliation/positions", ReconciliationController, :positions
