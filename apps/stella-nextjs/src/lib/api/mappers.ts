@@ -42,7 +42,7 @@ export function mapApiBotToUiBot(api: Record<string, any>): Bot {
     status: normalizeStatus(api.status),
     pnl: totalPnl,
     pnlPct: Math.round(pnlPct * 100) / 100,
-    equity: activeCapital || allocatedCapital,
+    equity: allocatedCapital + totalPnl,
     allocatedCapital,
     activeCapital,
     openPositions: toNum(api.open_positions ?? api.open_positions_count ?? api.open_position_count ?? 0),
