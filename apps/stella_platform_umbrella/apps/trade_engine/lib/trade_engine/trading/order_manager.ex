@@ -55,6 +55,8 @@ defmodule TradeEngine.Trading.OrderManager do
       side: to_string(side) |> String.downcase(),
       order_type: "limit",
       quantity: to_decimal(quantity),
+      price: to_decimal(price),
+      limit_price: to_decimal(price),
       status: "submitted",
       submitted_at: DateTime.utc_now(),
       user_id: Keyword.get(opts, :user_id),
