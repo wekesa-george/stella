@@ -185,8 +185,13 @@ export default function NewBotPage() {
     const investmentPerGrid = capital > 0 ? capital / levels : 0;
     const rangePct = ((upper - lower) / lower) * 100;
     const minSpacingRequired = feeRate * 2 * 100 * 2; // 2x round-trip fees minimum
+    // Estimate notional per grid order (USD value = qty * price)
+    // qty = investmentPerGrid / midPrice, notional = qty * midPrice = investmentPerGrid
+    const notionalPerGrid = investmentPerGrid;
+    const minNotional = marketType === "spot" ? 10 : 100;
+    const isBelowMinNotional = notionalPerGrid > 0 && notionalPerGrid < minNotional;
 
-    return { spacingPct, profitPerGridPct, investmentPerGrid, rangePct, minSpacingRequired, isProfitable: profitPerGridPct > 0 };
+    return { spacingPct, profitPerGridPct, investmentPerGrid, rangePct, minSpacingRequired, isProfitable: profitPerGridPct > 0, notionalPerGrid, minNotional, isBelowMinNotional };
   }, [gridUpperPrice, gridLowerPrice, gridLevels, gridType, gridFeeRate, allocatedCapital]);
 
   const selectedAdapterRaw = selectedCredential ? adapters.find((a) => a.id === selectedCredential.adapter_id) : undefined;
@@ -335,6 +340,7 @@ export default function NewBotPage() {
           const upper = Number(gridUpperPrice);
           const lower = Number(gridLowerPrice);
           if (!upper || !lower || upper <= lower) return false;
+          if (gridMetrics?.isBelowMinNotional) return false;
         }
         return true;
       }
@@ -1092,8 +1098,11 @@ export default function NewBotPage() {
                         </div>
                         {gridMetrics.investmentPerGrid > 0 && (
                           <div className="flex justify-between text-[10px]">
-                            <span className="text-[#5a7090]">Investment per grid</span>
-                            <span className="text-foreground font-mono">${gridMetrics.investmentPerGrid.toFixed(2)}</span>
+                            <span className="text-[#5a7090]">Notional per grid order</span>
+                            <span className={`font-mono ${gridMetrics.isBelowMinNotional ? "text-[#ff4757]" : "text-foreground"}`}>
+                              ${gridMetrics.notionalPerGrid.toFixed(2)}
+                              {gridMetrics.isBelowMinNotional && <span className="text-[#ff4757] ml-1">(min ${gridMetrics.minNotional})</span>}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -1103,6 +1112,13 @@ export default function NewBotPage() {
                     {gridMetrics && !gridMetrics.isProfitable && (
                       <div className="text-[10px] text-[#ff4757] bg-[rgba(255,71,87,0.06)] border border-[rgba(255,71,87,0.15)] rounded-sm px-2.5 py-1.5">
                         Grid spacing ({gridMetrics.spacingPct.toFixed(3)}%) is less than 2x round-trip fees ({(Number(gridFeeRate) * 2 * 100).toFixed(2)}%). Every trade will lose money. Reduce grid levels or widen the price range.
+                      </div>
+                    )}
+
+                    {/* Min notional warning */}
+                    {gridMetrics && gridMetrics.isBelowMinNotional && (
+                      <div className="text-[10px] text-[#ff4757] bg-[rgba(255,71,87,0.06)] border border-[rgba(255,71,87,0.15)] rounded-sm px-2.5 py-1.5">
+                        Each grid order is ${gridMetrics.notionalPerGrid.toFixed(2)} — below the exchange minimum of ${gridMetrics.minNotional}. Orders will be rejected. Increase capital or reduce grid levels.
                       </div>
                     )}
 
