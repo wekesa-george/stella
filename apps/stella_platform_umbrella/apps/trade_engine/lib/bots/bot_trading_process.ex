@@ -454,6 +454,22 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             current_price: signal.current_price
           })
 
+          # Grid boundary protection: alert when price breaks outside grid range
+          if signal[:grid_breakout] do
+            upper = get_strategy_param(state.config, "upper_price", 0)
+            lower = get_strategy_param(state.config, "lower_price", 0)
+            severity = if signal[:grid_breakout_pct] >= 2.0, do: :warning, else: :info
+            log_fn = if severity == :warning, do: &BotLogger.warning/4, else: &BotLogger.info/4
+
+            log_fn.(state.bot_id, :grid, "Price outside grid range", %{
+              current_price: signal.current_price,
+              upper: upper,
+              lower: lower,
+              breach: signal[:grid_breakout],
+              breach_pct: signal[:grid_breakout_pct]
+            })
+          end
+
           new_state = %{state |
             recent_signals: Map.put(state.recent_signals, symbol, now)
           }
@@ -1512,39 +1528,51 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       sorted_levels |> Enum.reverse() |> Enum.find(fn l -> l < filled_price end)
     end
 
-    pnl = if filled_entry.side == "SELL" do
-      # A sell fill completes a grid cycle — estimate profit
-      # (sell_price - buy_price) * quantity, approximated by grid spacing
-      grid_spacing = if length(sorted_levels) >= 2 do
-        Enum.at(sorted_levels, 1) - Enum.at(sorted_levels, 0)
-      else
-        0.0
-      end
-      grid_spacing * filled_entry.quantity
+    # Fetch actual fill details from exchange (price, commission)
+    fill_details = fetch_fill_for_order(state, filled_entry)
+    actual_fill_price = (fill_details[:price] || filled_price) / 1.0
+    commission = (fill_details[:commission] || 0.0) / 1.0
+
+    {pnl, net_pnl} = if filled_entry.side == "SELL" do
+      # A sell fill completes a grid cycle — compute actual profit
+      # The corresponding buy was at the grid level below this sell level
+      buy_level = counter_price || filled_price
+      gross_pnl = (actual_fill_price - buy_level) * filled_entry.quantity
+      net = gross_pnl - commission
+      {gross_pnl, net}
     else
-      0.0
+      {0.0, 0.0}
     end
 
-    if pnl > 0 do
-      BotRegistry.report_trade(state.bot_id, pnl, true)
+    if net_pnl != 0 do
+      BotRegistry.report_trade(state.bot_id, net_pnl, net_pnl >= 0)
     end
 
-    state = if pnl > 0 do
-      %{state |
-        winning_trades: state.winning_trades + 1,
-        total_realized_pnl: state.total_realized_pnl + pnl
-      }
-    else
-      state
+    state = cond do
+      net_pnl > 0 ->
+        %{state |
+          winning_trades: state.winning_trades + 1,
+          total_realized_pnl: state.total_realized_pnl + net_pnl
+        }
+      net_pnl < 0 ->
+        %{state |
+          losing_trades: state.losing_trades + 1,
+          total_realized_pnl: state.total_realized_pnl + net_pnl
+        }
+      true ->
+        state
     end
 
     BotLogger.info(state.bot_id, :grid, "Grid fill processed", %{
       filled_side: filled_entry.side,
       filled_price: filled_price,
+      actual_fill_price: actual_fill_price,
       filled_qty: filled_entry.quantity,
       counter_side: counter_side,
       counter_price: counter_price,
-      estimated_pnl: Float.round(pnl, 4),
+      gross_pnl: Float.round(pnl, 4),
+      commission: Float.round(commission, 6),
+      net_pnl: Float.round(net_pnl, 4),
       exchange_order_id: filled_entry.order_id
     })
 
@@ -1552,9 +1580,17 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     if counter_price do
       place_grid_limit_order(state, symbol, counter_side, filled_entry.quantity, counter_price)
     else
-      BotLogger.warning(state.bot_id, :grid, "No counter-level found (price at grid boundary)", %{
+      upper = get_strategy_param(state.config, "upper_price", 0)
+      lower = get_strategy_param(state.config, "lower_price", 0)
+      boundary = if filled_entry.side == "BUY", do: "lower (no sell level above)", else: "upper (no buy level below)"
+
+      BotLogger.warning(state.bot_id, :grid, "GRID BOUNDARY BREACHED — no counter-level available", %{
         filled_price: filled_price,
-        side: filled_entry.side
+        side: filled_entry.side,
+        boundary: boundary,
+        upper: upper,
+        lower: lower,
+        action: "Position held without counter-order. Monitor manually or adjust grid range."
       })
       state
     end

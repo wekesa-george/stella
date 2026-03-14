@@ -80,6 +80,20 @@ defmodule TradeEngine.Strategies.GridBot do
         grid_levels = compute_grid_levels(config)
         grid_state = analyze_grid_state(grid_levels, current_price, context)
 
+        # Detect if price has broken outside the grid range
+        breakout = cond do
+          current_price > upper -> :above
+          current_price < lower -> :below
+          true -> nil
+        end
+
+        # Calculate how far outside the range (as percentage of range width)
+        breakout_pct = case breakout do
+          :above -> (current_price - upper) / upper * 100
+          :below -> (lower - current_price) / lower * 100
+          nil -> 0.0
+        end
+
         {:ok, %{
           direction: :grid,
           symbol: Map.get(context, :symbol),
@@ -92,7 +106,9 @@ defmodule TradeEngine.Strategies.GridBot do
           grid_type: config["grid_type"],
           quantity_per_grid: resolve_quantity_per_grid(config, current_price),
           stop_loss_price: config["stop_loss_price"],
-          take_profit_price: config["take_profit_price"]
+          take_profit_price: config["take_profit_price"],
+          grid_breakout: breakout,
+          grid_breakout_pct: Float.round(breakout_pct, 2)
         }}
       end
     end

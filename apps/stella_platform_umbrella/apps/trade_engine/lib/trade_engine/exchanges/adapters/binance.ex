@@ -932,7 +932,9 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   defp do_signed_request(method, url, params, credentials) do
     timestamp = System.system_time(:millisecond)
 
-    params_with_ts = Map.put(params, "timestamp", timestamp)
+    params_with_ts = params
+      |> Map.put("timestamp", timestamp)
+      |> Map.put("recvWindow", "5000")
     query_string = URI.encode_query(params_with_ts)
 
     signature =
