@@ -519,7 +519,7 @@ export async function startTrading() {
 }
 
 export async function stopTrading() {
-  return request('/api/trading/stop', { method: 'POST' });
+  return request('/api/bots/kill-all', { method: 'POST' });
 }
 
 export async function restartTrading() {
