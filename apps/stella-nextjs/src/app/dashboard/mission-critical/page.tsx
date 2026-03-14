@@ -1645,9 +1645,12 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
   const handleCloseSingle = useCallback(async (pos: any) => {
     if (!posModal) return;
     const sym = pos.symbol;
-    const amt = Math.abs(parseFloat(pos.position_amount || '0'));
+    const rawAmt = parseFloat(pos.position_amount || '0');
+    const amt = Math.abs(rawAmt);
     const entry = parseFloat(pos.entry_price || '0');
-    const side = (pos.position_side || (amt >= 0 ? 'LONG' : 'SHORT')).toUpperCase();
+    // Determine side from positionAmt sign (negative = SHORT) since Binance one-way mode returns "BOTH"
+    const posSide = (pos.position_side || '').toUpperCase();
+    const side = posSide === 'SHORT' ? 'SHORT' : posSide === 'LONG' ? 'LONG' : rawAmt < 0 ? 'SHORT' : 'LONG';
     if (!confirm(`Close ${side} ${amt} ${sym} at market?`)) return;
     setClosingSingle(sym);
     setPosModalResult(null);
