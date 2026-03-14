@@ -632,12 +632,14 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
       case signed_request(:get, futures_url <> "/v2/positionRisk", params, credentials) do
         {:ok, positions} when is_list(positions) ->
-          parsed = positions
-          |> Enum.filter(fn p ->
+          non_zero = Enum.filter(positions, fn p ->
             amt = parse_float_safe(p["positionAmt"])
             amt != 0.0
           end)
-          |> Enum.map(fn p ->
+
+          Logger.info("Binance positionRisk: url=#{futures_url}/v2/positionRisk total=#{length(positions)} non_zero=#{length(non_zero)} | raw_non_zero=#{inspect(non_zero)}")
+
+          parsed = Enum.map(non_zero, fn p ->
             %{
               symbol: p["symbol"],
               position_side: p["positionSide"],
