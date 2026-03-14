@@ -20,6 +20,65 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   @http_timeout_ms 10_000
 
   # ========================================================================
+  # HEDGE MODE (position side) DETECTION
+  # ========================================================================
+
+  @doc """
+  Check if the account uses hedge mode (dual position side).
+  Calls GET /fapi/v1/positionSide/dual on the futures endpoint.
+  Returns {:ok, true} for hedge mode, {:ok, false} for one-way mode.
+  """
+  def get_position_mode(credentials, _opts \\ []) do
+    futures_url = resolve_futures_base_url(credentials)
+
+    if futures_url == "" do
+      {:ok, false}
+    else
+      case signed_request(:get, futures_url <> "/v1/positionSide/dual", %{}, credentials) do
+        {:ok, %{"dualSidePosition" => dual}} -> {:ok, dual}
+        {:ok, _} -> {:ok, false}
+        {:error, _} -> {:ok, false}
+      end
+    end
+  end
+
+  # Lazy-cached hedge mode check per API key. Uses process dictionary
+  # to avoid repeated network calls within the same process (e.g. BotTradingProcess).
+  # Position mode rarely changes, so caching per-process lifetime is safe.
+  defp get_hedge_mode(credentials) do
+    key = {:binance_hedge_mode, credentials.api_key}
+
+    case Process.get(key) do
+      nil ->
+        {:ok, dual} = get_position_mode(credentials)
+        Process.put(key, dual)
+        dual
+
+      val ->
+        val
+    end
+  end
+
+  # Check hedge mode only for futures market types, returns false for spot.
+  defp is_hedge_mode?(market_type, credentials) do
+    if market_type in ["usds_futures", "coinm_futures"] do
+      get_hedge_mode(credentials)
+    else
+      false
+    end
+  end
+
+  # Add positionSide param when in hedge mode. Must NOT include reduceOnly
+  # when positionSide is set (Binance rejects the combination).
+  defp maybe_add_position_side(params, false, _position_side), do: params
+
+  defp maybe_add_position_side(params, true, position_side) do
+    params
+    |> Map.put("positionSide", position_side)
+    |> Map.delete("reduceOnly")
+  end
+
+  # ========================================================================
   # TRADING — ExchangeAdapter callbacks
   # ========================================================================
 
@@ -40,6 +99,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
     Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
+    is_hedge = is_hedge_mode?(market_type, credentials)
+
     params = %{
       "symbol" => trading_symbol,
       "side" => "BUY",
@@ -47,6 +108,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "quantity" => qty_str,
       "newOrderRespType" => "RESULT"
     }
+    |> maybe_add_position_side(is_hedge, "LONG")
 
     case signed_request(:post, url, params, credentials) do
       {:ok, order} ->
@@ -76,6 +138,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "coinm_futures" -> {"COIN-M FUTURES SHORT", coinm_futures_order_url(credentials)}
       end
 
+      is_hedge = is_hedge_mode?(market_type, credentials)
+
       Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
       params = %{
@@ -85,6 +149,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "quantity" => qty_str,
         "newOrderRespType" => "RESULT"
       }
+      |> maybe_add_position_side(is_hedge, "SHORT")
 
       case signed_request(:post, url, params, credentials) do
         {:ok, order} ->
@@ -158,6 +223,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         {"SPOT SELL (close long)", spot_url(credentials) <> "/v3/order"}
     end
 
+    is_hedge = is_hedge_mode?(market_type, credentials)
+
     Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
     params = %{
@@ -167,10 +234,16 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "quantity" => qty_str,
       "newOrderRespType" => "RESULT"
     }
-    # For futures, add reduceOnly to close the position instead of opening a new short
-    params = if market_type in ["usds_futures", "coinm_futures"],
-      do: Map.put(params, "reduceOnly", "true"),
-      else: params
+    # For futures in hedge mode, use positionSide instead of reduceOnly.
+    # For futures in one-way mode, use reduceOnly to avoid opening a new short.
+    params = cond do
+      is_hedge ->
+        maybe_add_position_side(params, true, "LONG")
+      market_type in ["usds_futures", "coinm_futures"] ->
+        Map.put(params, "reduceOnly", "true")
+      true ->
+        params
+    end
 
     case signed_request(:post, url, params, credentials) do
       {:ok, order} ->
@@ -207,6 +280,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "coinm_futures" -> {"COIN-M FUTURES BUY (close short)", coinm_futures_order_url(credentials)}
       end
 
+      is_hedge = is_hedge_mode?(market_type, credentials)
+
       Logger.info("Binance #{label}: #{trading_symbol} qty=#{qty_str}")
 
       params = %{
@@ -214,9 +289,14 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "side" => "BUY",
         "type" => "MARKET",
         "quantity" => qty_str,
-        "reduceOnly" => "true",
         "newOrderRespType" => "RESULT"
       }
+      # For hedge mode, use positionSide; for one-way mode, use reduceOnly
+      params = if is_hedge do
+        maybe_add_position_side(params, true, "SHORT")
+      else
+        Map.put(params, "reduceOnly", "true")
+      end
 
       case signed_request(:post, url, params, credentials) do
         {:ok, order} ->
@@ -509,15 +589,26 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       _ -> spot_url(credentials) <> "/v3/order"
     end
 
+    is_hedge = is_hedge_mode?(market_type, credentials)
+    side_str = String.upcase(to_string(side))
+
+    # In hedge mode, determine positionSide from the order side.
+    # An explicit :position_side opt can override this for close orders.
+    position_side = case Keyword.get(opts, :position_side) do
+      nil -> if(side_str == "BUY", do: "LONG", else: "SHORT")
+      ps -> String.upcase(to_string(ps))
+    end
+
     params = %{
       "symbol" => trading_symbol,
-      "side" => String.upcase(to_string(side)),
+      "side" => side_str,
       "type" => "LIMIT",
       "quantity" => qty_str,
       "price" => price_str,
       "timeInForce" => Keyword.get(opts, :time_in_force, "GTC"),
       "newOrderRespType" => "RESULT"
     }
+    |> maybe_add_position_side(is_hedge, position_side)
 
     # Add client order ID if provided (useful for grid order tracking)
     params = case Keyword.get(opts, :client_order_id) do
@@ -915,17 +1006,66 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   # PRIVATE — HMAC-signed requests
   # ========================================================================
 
-  defp signed_request(method, url, params, credentials) do
+  defp estimate_weight(url, method) do
+    cond do
+      String.contains?(url, "/openOrders") -> 3
+      String.contains?(url, "/order") and method == :post -> 1
+      String.contains?(url, "/order") and method == :delete -> 1
+      String.contains?(url, "/order") -> 2
+      String.contains?(url, "/positionRisk") -> 5
+      String.contains?(url, "/account") -> 5
+      String.contains?(url, "/userTrades") -> 5
+      String.contains?(url, "/exchangeInfo") -> 10
+      String.contains?(url, "/leverage") -> 1
+      true -> 1
+    end
+  end
+
+  defp signed_request(method, url, params, credentials, retries \\ 2) do
     # Enforce rate limits before making the request
-    weight = if String.contains?(url, "/order"), do: 1, else: 5
+    weight = estimate_weight(url, method)
     rate_type = if String.contains?(url, "/order") and method == :post, do: :orders_second, else: :weight
 
-    case acquire_rate_limit(rate_type, weight) do
-      :ok -> do_signed_request(method, url, params, credentials)
-      {:error, :rate_limited, wait_ms} ->
-        Logger.warning("Binance rate limited — waiting #{wait_ms}ms before retry")
-        Process.sleep(min(wait_ms, 5_000))
-        do_signed_request(method, url, params, credentials)
+    result =
+      case acquire_rate_limit(rate_type, weight) do
+        :ok -> do_signed_request(method, url, params, credentials)
+        {:error, :rate_limited, wait_ms} ->
+          Logger.warning("Binance rate limited — waiting #{wait_ms}ms before retry")
+          Process.sleep(min(wait_ms, 5_000))
+          do_signed_request(method, url, params, credentials)
+      end
+
+    case result do
+      {:error, reason} when retries > 0 ->
+        if retryable_network_error?(reason) do
+          backoff_ms = (3 - retries) * 1_000
+          Logger.warning("Binance network error, retrying in #{backoff_ms}ms (#{retries} left): #{inspect(reason)}")
+          Process.sleep(backoff_ms)
+          signed_request(method, url, params, credentials, retries - 1)
+        else
+          {:error, reason}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  # Only retry on network-level failures — never on auth, rate limit, or business logic errors
+  defp retryable_network_error?(reason) do
+    case reason do
+      :timeout -> true
+      :connect_timeout -> true
+      :checkout_timeout -> true
+      :closed -> true
+      :econnrefused -> true
+      :econnreset -> true
+      :ehostunreach -> true
+      :enetunreach -> true
+      %{auth_failed: true} -> false
+      %{rate_limited: true} -> false
+      %{code: _} -> false
+      _ -> false
     end
   end
 
