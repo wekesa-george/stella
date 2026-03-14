@@ -1199,11 +1199,13 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       else
         buy_levels = Enum.take(signal.buy_levels, available_slots)
 
+        pre_buy_count = map_size(state.grid_orders)
         {state, _capital_left} = Enum.reduce(buy_levels, {state, remaining_capital}, fn price_level, {acc, capital} ->
           order_cost = qty * price_level
           if map_size(acc.grid_orders) < max_orders and capital >= order_cost do
+            pre = map_size(acc.grid_orders)
             new_state = place_grid_limit_order(acc, symbol, "BUY", qty, price_level)
-            if map_size(new_state.grid_orders) > map_size(acc.grid_orders) do
+            if map_size(new_state.grid_orders) > pre do
               {new_state, capital - order_cost}
             else
               {new_state, capital}
@@ -1213,7 +1215,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           end
         end)
 
-        placed_buy_count = map_size(state.grid_orders) - current_order_count
+        placed_buy_count = map_size(state.grid_orders) - pre_buy_count
 
         state = if is_spot do
           BotLogger.info(state.bot_id, :grid, "Spot grid orders placed", %{
@@ -1227,6 +1229,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           remaining_slots = max(0, max_orders - map_size(state.grid_orders))
           sell_levels = Enum.take(signal.sell_levels, remaining_slots)
 
+          pre_sell_count = map_size(state.grid_orders)
           state = Enum.reduce(sell_levels, state, fn price_level, acc ->
             if map_size(acc.grid_orders) < max_orders do
               place_grid_limit_order(acc, symbol, "SELL", qty, price_level)
@@ -1235,7 +1238,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             end
           end)
 
-          placed_sell_count = map_size(state.grid_orders) - current_order_count - placed_buy_count
+          placed_sell_count = map_size(state.grid_orders) - pre_sell_count
 
           BotLogger.info(state.bot_id, :grid, "Futures grid orders placed", %{
             buy_orders_placed: placed_buy_count,
@@ -1425,6 +1428,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   # - Exchange orders NOT in our recovered set are orphans from before DB tracking — cancel them.
   # - DB entries whose orders are no longer on exchange are removed from state.
   defp reconcile_grid_orders_with_exchange(state, symbol) do
+    bot_prefix = String.slice(state.bot_id, 0, 8)
+
     recovered_order_ids = state.grid_orders
       |> Map.values()
       |> Enum.map(& &1.order_id)
@@ -1432,13 +1437,19 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
     case Executor.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
       {:ok, exchange_orders} when is_list(exchange_orders) ->
-        exchange_order_ids = exchange_orders
+        # Only consider orders belonging to THIS bot (by clientOrderId prefix)
+        my_exchange_orders = Enum.filter(exchange_orders, fn o ->
+          coid = o[:client_order_id] || ""
+          String.starts_with?(coid, bot_prefix)
+        end)
+
+        my_exchange_order_ids = my_exchange_orders
           |> Enum.map(fn o -> o[:order_id] || o["orderId"] end)
           |> Enum.filter(& &1)
           |> MapSet.new()
 
-        # Cancel exchange orders that are NOT in our DB recovery set (true orphans)
-        orphans_to_cancel = Enum.filter(exchange_orders, fn o ->
+        # Cancel MY orphan orders (mine but not in local grid_orders)
+        orphans_to_cancel = Enum.filter(my_exchange_orders, fn o ->
           oid = o[:order_id] || o["orderId"]
           oid && not MapSet.member?(recovered_order_ids, oid)
         end)
@@ -1451,10 +1462,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           end
         end)
 
-        # Remove DB entries whose orders are no longer on exchange (already filled/cancelled)
+        # Remove local entries whose orders are no longer on exchange (filled/cancelled)
         pruned_grid_orders = state.grid_orders
           |> Enum.filter(fn {_level, entry} ->
-            MapSet.member?(exchange_order_ids, entry.order_id)
+            MapSet.member?(my_exchange_order_ids, entry.order_id)
           end)
           |> Map.new()
 
@@ -1466,7 +1477,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           still_on_exchange: map_size(pruned_grid_orders),
           removed_stale_db_entries: removed_count,
           orphans_cancelled: cancelled_count,
-          exchange_orders_found: length(exchange_orders)
+          my_exchange_orders: length(my_exchange_orders),
+          total_exchange_orders: length(exchange_orders)
         })
 
         %{state | grid_orders: pruned_grid_orders, grid_consecutive_failures: 0}
@@ -1483,12 +1495,20 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       state
   end
 
-  # Cancel ALL open orders on exchange for a symbol (not just ones we track locally)
-  # This clears stale orders from previous bot runs that cause -2025
+  # Cancel open orders on exchange for a symbol — only orders belonging to THIS bot
+  # Uses clientOrderId prefix to avoid cancelling other bots' orders on shared credentials
   defp cancel_all_exchange_orders_for_symbol(state, symbol) do
+    bot_prefix = String.slice(state.bot_id, 0, 8)
+
     case Executor.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
       {:ok, open_orders} when is_list(open_orders) ->
-        cancelled = Enum.reduce(open_orders, 0, fn order, count ->
+        # Only cancel orders that belong to this bot (matching clientOrderId prefix)
+        my_orders = Enum.filter(open_orders, fn order ->
+          coid = order[:client_order_id] || ""
+          String.starts_with?(coid, bot_prefix)
+        end)
+
+        cancelled = Enum.reduce(my_orders, 0, fn order, count ->
           oid = order[:order_id] || order["orderId"]
           if oid do
             case OrderManager.cancel_order(state.credential_id, symbol, oid, market_type: state.market_type) do
@@ -1501,10 +1521,10 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         end)
 
         BotLogger.info(state.bot_id, :grid, "Cancelled stale exchange orders", %{
-          found: length(open_orders), cancelled: cancelled, symbol: symbol
+          found: length(open_orders), mine: length(my_orders), cancelled: cancelled, symbol: symbol
         })
 
-        # Clear local grid orders since we just cancelled everything
+        # Clear local grid orders since we cancelled our orders
         %{state | grid_orders: %{}, grid_consecutive_failures: 0}
 
       _ ->
