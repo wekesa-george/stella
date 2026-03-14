@@ -167,6 +167,10 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
       "quantity" => qty_str,
       "newOrderRespType" => "RESULT"
     }
+    # For futures, add reduceOnly to close the position instead of opening a new short
+    params = if market_type in ["usds_futures", "coinm_futures"],
+      do: Map.put(params, "reduceOnly", "true"),
+      else: params
 
     case signed_request(:post, url, params, credentials) do
       {:ok, order} ->
@@ -210,6 +214,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         "side" => "BUY",
         "type" => "MARKET",
         "quantity" => qty_str,
+        "reduceOnly" => "true",
         "newOrderRespType" => "RESULT"
       }
 
