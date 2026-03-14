@@ -121,9 +121,19 @@ defmodule AdminGatewayWeb.CredentialController do
       else
         results = Enum.map(positions, fn pos ->
           symbol = pos.symbol || pos[:symbol]
-          amount = abs(parse_float(pos.position_amount || pos[:position_amount]))
+          raw_amount = parse_float(pos.position_amount || pos[:position_amount])
+          amount = abs(raw_amount)
           entry = parse_float(pos.entry_price || pos[:entry_price])
-          side = to_string(pos.position_side || pos[:position_side] || "") |> String.upcase()
+          position_side = to_string(pos.position_side || pos[:position_side] || "") |> String.upcase()
+
+          # Determine actual side: negative positionAmt = SHORT, positive = LONG
+          # position_side "BOTH" means one-way mode — use the sign of positionAmt
+          side = cond do
+            position_side == "SHORT" -> "SHORT"
+            position_side == "LONG" -> "LONG"
+            raw_amount < 0 -> "SHORT"
+            true -> "LONG"
+          end
 
           cond do
             amount == 0.0 ->
@@ -137,7 +147,6 @@ defmodule AdminGatewayWeb.CredentialController do
               end
 
             true ->
-              # LONG or BOTH — close as long
               cancel_open_orders(credential_id, symbol)
               case Executor.close_long(credential_id, symbol, amount, entry, market_type: "usds_futures") do
                 {:ok, result} -> Map.merge(%{symbol: symbol, side: "LONG", status: "closed"}, result)
@@ -193,11 +202,17 @@ defmodule AdminGatewayWeb.CredentialController do
           # Fetch from exchange
           case Executor.get_position_risk(credential_id, symbol: symbol) do
             {:ok, [pos | _]} ->
-              amt = abs(parse_float(pos.position_amount))
+              raw_amt = parse_float(pos.position_amount)
               ep = parse_float(pos.entry_price)
               ps = to_string(pos.position_side || "") |> String.upcase()
-              sd = if amt < 0 or ps == "SHORT", do: "SHORT", else: "LONG"
-              {abs(amt), ep, sd}
+              # Determine side from positionAmt sign (negative = short) or explicit position_side
+              sd = cond do
+                ps == "SHORT" -> "SHORT"
+                ps == "LONG" -> "LONG"
+                raw_amt < 0 -> "SHORT"
+                true -> "LONG"
+              end
+              {abs(raw_amt), ep, sd}
 
             _ ->
               {0.0, 0.0, "LONG"}
