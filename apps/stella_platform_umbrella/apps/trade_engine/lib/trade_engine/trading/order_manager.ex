@@ -62,6 +62,7 @@ defmodule TradeEngine.Trading.OrderManager do
       credential_id: Keyword.get(opts, :credential_id, credential_id),
       strategy_id: Keyword.get(opts, :strategy_id),
       position_id: Keyword.get(opts, :position_id),
+      client_order_id: Keyword.get(opts, :client_order_id),
       metadata: %{
         action: "limit_#{side}",
         market_type: Keyword.get(opts, :market_type, "spot"),

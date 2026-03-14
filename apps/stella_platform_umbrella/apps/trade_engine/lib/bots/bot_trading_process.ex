@@ -122,12 +122,23 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           max_positions: Map.get(merged_config, "max_positions", 3),
           # Grid bot state (only used when strategy is GridBot)
           is_grid: is_grid,
-          grid_orders: %{},          # %{price_level => %{order_id, side, status}}
-          grid_initialized: false,
+          grid_orders: if(is_grid, do: load_grid_orders_from_db(bot_id), else: %{}),  # %{price_level => %{order_id, side, status}}
+          grid_initialized: false,  # set true below if orders were recovered from DB
           grid_restart_pending: false, # Set true after stop-loss to trigger grid redeployment
           grid_placement_cooldown_until: nil,  # DateTime — backoff after exchange rejects
           grid_consecutive_failures: 0         # Track consecutive placement failures for backoff
         }
+
+        # If grid orders were recovered from DB, mark grid as initialized
+        state = if is_grid and map_size(state.grid_orders) > 0 do
+          BotLogger.info(bot_id, :grid, "Recovered grid orders from DB on restart", %{
+            recovered_count: map_size(state.grid_orders),
+            price_levels: Map.keys(state.grid_orders) |> Enum.sort()
+          })
+          %{state | grid_initialized: true}
+        else
+          state
+        end
 
         # Step 5: Ready
         BotRegistry.report_init_step(bot_id, "ready")
@@ -145,11 +156,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         Process.send_after(self(), :poll_candles, @candle_poll_interval_ms)
 
         # Grid bot: check for filled orders every 10s + adopt exchange positions
-        # Also cancel stale exchange orders from previous runs on startup
+        # Reconcile exchange orders with DB-recovered grid orders on startup
         if is_grid do
           Process.send_after(self(), :grid_check_fills, 10_000)
           Process.send_after(self(), :adopt_exchange_positions, 3_000)
-          Process.send_after(self(), :clear_stale_exchange_orders, 5_000)
+          Process.send_after(self(), :reconcile_grid_orders_with_exchange, 5_000)
         end
 
         # Futures: sync leverage on exchange to match bot config
@@ -311,12 +322,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     end
   end
 
-  def handle_info(:clear_stale_exchange_orders, state) do
+  def handle_info(:reconcile_grid_orders_with_exchange, state) do
     if state.is_grid do
       symbol = List.first(state.trading_pairs)
       if symbol do
-        BotLogger.info(state.bot_id, :grid, "Startup: clearing stale exchange orders", %{symbol: symbol})
-        {:noreply, cancel_all_exchange_orders_for_symbol(state, symbol)}
+        {:noreply, reconcile_grid_orders_with_exchange(state, symbol)}
       else
         {:noreply, state}
       end
@@ -1283,13 +1293,19 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         })
         state
       else
+        # Generate a unique client_order_id prefixed with bot_id (first 8 chars)
+        # This prevents multi-bot credential collision when bots share the same exchange credential
+        bot_prefix = String.slice(state.bot_id, 0, 8)
+        client_oid = "#{bot_prefix}_#{:erlang.unique_integer([:positive])}"
+
         bot_context = [
           user_id: state.user_id,
           bot_id: state.bot_id,
           credential_id: state.credential_id,
           strategy_id: state.strategy_id,
           market_type: state.market_type,
-          grid_level: price_level
+          grid_level: price_level,
+          client_order_id: client_oid
         ]
 
         case OrderManager.place_limit_order(
@@ -1370,6 +1386,101 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         end
       end
     end
+  end
+
+  # Load grid orders from the trading.orders table for a bot that is restarting.
+  # Returns a map of %{price_level => %{order_id, side, quantity, price, symbol, status, placed_at}}
+  # matching the in-memory grid_orders structure.
+  defp load_grid_orders_from_db(bot_id) do
+    import Ecto.Query
+
+    alias TradeEngine.Trading.Order
+
+    orders = Repo.all(
+      from o in Order,
+        where: o.bot_id == ^bot_id and o.status in ["open", "submitted", "partially_filled"],
+        select: o
+    )
+
+    Map.new(orders, fn o ->
+      price = to_float(o.price) || to_float(o.execution_price) || 0.0
+      {price, %{
+        order_id: o.exchange_order_id,
+        side: String.upcase(o.side || ""),
+        quantity: to_float(o.quantity),
+        price: price,
+        symbol: o.symbol,
+        status: String.upcase(o.status || "NEW"),
+        placed_at: o.submitted_at || o.created_at
+      }}
+    end)
+  rescue
+    e ->
+      Logger.warning("[BotTrading] Failed to load grid orders from DB for bot #{bot_id}: #{inspect(e)}")
+      %{}
+  end
+
+  # Reconcile DB-recovered grid orders with actual exchange open orders on startup.
+  # - Exchange orders matching our recovered set are kept (they're valid).
+  # - Exchange orders NOT in our recovered set are orphans from before DB tracking — cancel them.
+  # - DB entries whose orders are no longer on exchange are removed from state.
+  defp reconcile_grid_orders_with_exchange(state, symbol) do
+    recovered_order_ids = state.grid_orders
+      |> Map.values()
+      |> Enum.map(& &1.order_id)
+      |> MapSet.new()
+
+    case Executor.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
+      {:ok, exchange_orders} when is_list(exchange_orders) ->
+        exchange_order_ids = exchange_orders
+          |> Enum.map(fn o -> o[:order_id] || o["orderId"] end)
+          |> Enum.filter(& &1)
+          |> MapSet.new()
+
+        # Cancel exchange orders that are NOT in our DB recovery set (true orphans)
+        orphans_to_cancel = Enum.filter(exchange_orders, fn o ->
+          oid = o[:order_id] || o["orderId"]
+          oid && not MapSet.member?(recovered_order_ids, oid)
+        end)
+
+        cancelled_count = Enum.reduce(orphans_to_cancel, 0, fn order, count ->
+          oid = order[:order_id] || order["orderId"]
+          case OrderManager.cancel_order(state.credential_id, symbol, oid, market_type: state.market_type) do
+            {:ok, _} -> count + 1
+            {:error, _} -> count
+          end
+        end)
+
+        # Remove DB entries whose orders are no longer on exchange (already filled/cancelled)
+        pruned_grid_orders = state.grid_orders
+          |> Enum.filter(fn {_level, entry} ->
+            MapSet.member?(exchange_order_ids, entry.order_id)
+          end)
+          |> Map.new()
+
+        removed_count = map_size(state.grid_orders) - map_size(pruned_grid_orders)
+
+        BotLogger.info(state.bot_id, :grid, "Startup reconciliation complete", %{
+          symbol: symbol,
+          recovered_from_db: map_size(state.grid_orders),
+          still_on_exchange: map_size(pruned_grid_orders),
+          removed_stale_db_entries: removed_count,
+          orphans_cancelled: cancelled_count,
+          exchange_orders_found: length(exchange_orders)
+        })
+
+        %{state | grid_orders: pruned_grid_orders, grid_consecutive_failures: 0}
+
+      _ ->
+        BotLogger.warning(state.bot_id, :grid, "Could not fetch exchange orders for reconciliation", %{symbol: symbol})
+        state
+    end
+  rescue
+    e ->
+      BotLogger.warning(state.bot_id, :grid, "reconcile_grid_orders_with_exchange failed", %{
+        error: Exception.message(e)
+      })
+      state
   end
 
   # Cancel ALL open orders on exchange for a symbol (not just ones we track locally)
@@ -1471,7 +1582,15 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   defp do_grid_check_fills(state, symbol) do
     case OrderManager.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
       {:ok, open_orders} ->
-        open_ids = MapSet.new(open_orders, fn o -> o.order_id end)
+        # Filter exchange orders to only those belonging to this bot.
+        # Prevents multi-bot credential collision on shared credentials.
+        bot_prefix = String.slice(state.bot_id, 0, 8)
+        my_open_orders = Enum.filter(open_orders, fn o ->
+          coid = o[:client_order_id] || ""
+          String.starts_with?(coid, bot_prefix) or coid == ""
+        end)
+
+        open_ids = MapSet.new(my_open_orders, fn o -> o.order_id end)
 
         # Reconcile DB: cancel orphaned "open" orders not on exchange
         reconcile_stale_db_orders(state.bot_id, open_ids)
