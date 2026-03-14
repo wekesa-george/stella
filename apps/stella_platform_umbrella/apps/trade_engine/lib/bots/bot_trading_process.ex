@@ -1364,7 +1364,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         cancelled = Enum.reduce(open_orders, 0, fn order, count ->
           oid = order[:order_id] || order["orderId"]
           if oid do
-            case OrderManager.cancel_order(state.credential_id, symbol, oid) do
+            case OrderManager.cancel_order(state.credential_id, symbol, oid, market_type: state.market_type) do
               {:ok, _} -> count + 1
               {:error, _} -> count
             end
@@ -1399,7 +1399,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     Enum.each(state.grid_orders, fn {_level, entry} ->
       order_id = entry.order_id
       if order_id do
-        case OrderManager.cancel_order(state.credential_id, symbol, order_id) do
+        case OrderManager.cancel_order(state.credential_id, symbol, order_id, market_type: state.market_type) do
           {:ok, _} ->
             BotLogger.debug(state.bot_id, :grid, "Cancelled grid order", %{order_id: order_id, price: entry.price})
           {:error, reason} ->
