@@ -1518,16 +1518,12 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   end
 
   # Reconcile DB-recovered grid orders with actual exchange open orders on startup.
-  # - Exchange orders matching our recovered set are kept (they're valid).
-  # - Exchange orders NOT in our recovered set are orphans from before DB tracking — cancel them.
+  # ADOPT exchange orders into grid_orders instead of cancelling them.
+  # - Exchange orders belonging to this bot are kept and added to grid_orders state.
   # - DB entries whose orders are no longer on exchange are removed from state.
+  # - NO orders are cancelled — if they're on the exchange, they're valid.
   defp reconcile_grid_orders_with_exchange(state, symbol) do
     bot_prefix = String.slice(state.bot_id, 0, 8)
-
-    recovered_order_ids = state.grid_orders
-      |> Map.values()
-      |> Enum.map(& &1.order_id)
-      |> MapSet.new()
 
     case Executor.get_open_orders(state.credential_id, symbol, market_type: state.market_type) do
       {:ok, exchange_orders} when is_list(exchange_orders) ->
@@ -1542,21 +1538,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           |> Enum.filter(& &1)
           |> MapSet.new()
 
-        # Cancel MY orphan orders (mine but not in local grid_orders)
-        orphans_to_cancel = Enum.filter(my_exchange_orders, fn o ->
-          oid = o[:order_id] || o["orderId"]
-          oid && not MapSet.member?(recovered_order_ids, oid)
-        end)
-
-        cancelled_count = Enum.reduce(orphans_to_cancel, 0, fn order, count ->
-          oid = order[:order_id] || order["orderId"]
-          case OrderManager.cancel_order(state.credential_id, symbol, oid, market_type: state.market_type) do
-            {:ok, _} -> count + 1
-            {:error, _} -> count
-          end
-        end)
-
-        # Remove local entries whose orders are no longer on exchange (filled/cancelled)
+        # Start with DB-recovered orders that are still on exchange
         pruned_grid_orders = state.grid_orders
           |> Enum.filter(fn {_level, entry} ->
             MapSet.member?(my_exchange_order_ids, entry.order_id)
@@ -1565,17 +1547,54 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
         removed_count = map_size(state.grid_orders) - map_size(pruned_grid_orders)
 
+        # Adopt exchange orders NOT in our recovered set into grid_orders
+        # These are valid orders placed by this bot before the restart
+        recovered_order_ids = pruned_grid_orders
+          |> Map.values()
+          |> Enum.map(& &1.order_id)
+          |> MapSet.new()
+
+        adopted_grid_orders = my_exchange_orders
+          |> Enum.filter(fn o ->
+            oid = o[:order_id] || o["orderId"]
+            oid && not MapSet.member?(recovered_order_ids, oid)
+          end)
+          |> Enum.reduce(pruned_grid_orders, fn order, acc ->
+            price = order[:price] || 0.0
+            oid = order[:order_id] || order["orderId"]
+            side = to_string(order[:side] || "") |> String.upcase()
+            qty = order[:quantity] || order[:origQty] || 0.0
+
+            if price > 0 do
+              entry = %{
+                order_id: oid,
+                side: side,
+                quantity: qty,
+                price: price,
+                symbol: symbol,
+                status: "NEW",
+                placed_at: DateTime.utc_now()
+              }
+              Map.put(acc, price, entry)
+            else
+              acc
+            end
+          end)
+
+        adopted_count = map_size(adopted_grid_orders) - map_size(pruned_grid_orders)
+
         BotLogger.info(state.bot_id, :grid, "Startup reconciliation complete", %{
           symbol: symbol,
           recovered_from_db: map_size(state.grid_orders),
           still_on_exchange: map_size(pruned_grid_orders),
+          adopted_from_exchange: adopted_count,
           removed_stale_db_entries: removed_count,
-          orphans_cancelled: cancelled_count,
+          final_grid_orders: map_size(adopted_grid_orders),
           my_exchange_orders: length(my_exchange_orders),
           total_exchange_orders: length(exchange_orders)
         })
 
-        %{state | grid_orders: pruned_grid_orders, grid_consecutive_failures: 0}
+        %{state | grid_orders: adopted_grid_orders, grid_consecutive_failures: 0}
 
       _ ->
         BotLogger.warning(state.bot_id, :grid, "Could not fetch exchange orders for reconciliation", %{symbol: symbol})
