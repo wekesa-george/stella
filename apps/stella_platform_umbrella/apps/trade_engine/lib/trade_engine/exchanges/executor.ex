@@ -429,7 +429,7 @@ defmodule TradeEngine.Exchanges.Executor do
         {:error, :credential_not_found}
 
       row ->
-        build_adapter_result(row)
+        build_adapter_result(row, credential_id)
     end
   rescue
     e ->
@@ -437,7 +437,7 @@ defmodule TradeEngine.Exchanges.Executor do
       {:error, :db_error}
   end
 
-  defp build_adapter_result(row) do
+  defp build_adapter_result(row, credential_id \\ nil) do
     adapter_code = row.adapter_code
 
     case Map.get(@adapter_modules, adapter_code) do
@@ -468,6 +468,7 @@ defmodule TradeEngine.Exchanges.Executor do
 
         # Build credential map with adapter-specific extras
         creds = %{
+          credential_id: credential_id,
           api_key: api_key,
           secret_key: secret_key,
           base_url: base_url || ""

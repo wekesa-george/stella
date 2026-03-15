@@ -484,6 +484,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
   """
   def get_futures_account(credentials) do
     futures_url = resolve_futures_base_url(credentials)
+    cred_id = Map.get(credentials, :credential_id, "unknown")
+    Logger.info("Binance get_futures_account: url=#{futures_url}/v2/balance cred_id=#{cred_id} base_url=#{credentials.base_url}")
 
     if futures_url == "" do
       {:error, :no_futures_url_configured}
@@ -1131,7 +1133,8 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         Jason.decode(body)
 
       {:ok, %{status_code: code, body: body}} when code in [401, 403] ->
-        Logger.error("Binance AUTH error [#{code}]: url=#{url} | body=#{body}")
+        cred_id = Map.get(credentials, :credential_id, "unknown")
+        Logger.error("Binance AUTH error [#{code}]: url=#{url} | cred_id=#{cred_id} | body=#{body}")
         # Only invalidate cache for futures auth failures (spot may have different permissions)
         is_futures_url = String.contains?(url, "fapi") or String.contains?(url, "dapi")
         if is_futures_url do
