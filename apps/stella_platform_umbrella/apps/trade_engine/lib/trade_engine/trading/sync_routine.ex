@@ -16,9 +16,10 @@ defmodule TradeEngine.Trading.SyncRoutine do
   require Logger
 
   alias TradeEngine.Repo
-  alias TradeEngine.Trading.{Order, Position, Transaction}
+  alias TradeEngine.Trading.{Order, Position, Transaction, SyncAnomaly}
   alias TradeEngine.Exchanges.Executor
   alias TradeEngine.Bots.BotRegistry
+  import Ecto.Query
 
   @sync_interval_ms 120_000  # 2 minutes
   @stale_order_age_s 120     # Orders stuck in submitted for 2+ minutes
@@ -46,12 +47,21 @@ defmodule TradeEngine.Trading.SyncRoutine do
     Process.send_after(self(), :sync, 30_000)
 
     Logger.info("🔄 SyncRoutine started — will run every #{div(@sync_interval_ms, 1000)}s")
-    {:ok, %{anomalies: %{}, last_run: nil, runs: 0}}
+    {:ok, %{last_run: nil, runs: 0}}
   end
 
   @impl true
   def handle_call(:get_anomalies, _from, state) do
-    {:reply, state.anomalies, state}
+    anomalies = Repo.all(
+      from(a in SyncAnomaly,
+        where: is_nil(a.resolved_at),
+        order_by: [desc: a.last_seen_at],
+        limit: 100
+      )
+    ) |> Enum.map(&Map.from_struct/1)
+    {:reply, anomalies, state}
+  rescue
+    _ -> {:reply, [], state}
   end
 
   @impl true
@@ -89,23 +99,25 @@ defmodule TradeEngine.Trading.SyncRoutine do
     end
 
     # Run order sync for each bot
-    {current_anomalies, fixes_applied} = Enum.reduce(bots, {current_anomalies, 0}, fn bot, {anomalies, fixes} ->
-      {bot_anomalies, bot_fixes} = sync_bot_orders(bot, state.anomalies)
-      merged = Map.merge(anomalies, bot_anomalies)
-      {merged, fixes + bot_fixes}
+    fixes_applied = Enum.reduce(bots, 0, fn bot, fixes ->
+      bot_fixes = sync_bot_orders(bot)
+      fixes + bot_fixes
     end)
+
+    # Resolve anomalies that no longer appear (mark old unresolved ones)
+    resolve_stale_anomalies()
 
     elapsed = System.monotonic_time(:millisecond) - started_at
     runs = state.runs + 1
 
-    # Log summary
-    anomaly_count = map_size(current_anomalies)
+    # Count unresolved anomalies
+    anomaly_count = Repo.one(from(a in SyncAnomaly, where: is_nil(a.resolved_at), select: count())) || 0
+
     if anomaly_count > 0 or fixes_applied > 0 do
-      Logger.info("🔄 SyncRoutine pass ##{runs}: #{anomaly_count} anomalies, #{fixes_applied} fixes | #{elapsed}ms")
+      Logger.info("🔄 SyncRoutine pass ##{runs}: #{anomaly_count} unresolved anomalies, #{fixes_applied} fixes | #{elapsed}ms")
     end
 
     %{state |
-      anomalies: current_anomalies,
       last_run: DateTime.utc_now(),
       runs: runs
     }
@@ -115,16 +127,14 @@ defmodule TradeEngine.Trading.SyncRoutine do
   # ORDER SYNC
   # ========================================================================
 
-  defp sync_bot_orders(bot, previous_anomalies) do
-    import Ecto.Query
-
+  defp sync_bot_orders(bot) do
     bot_id = Map.get(bot, :id)
     credential_id = Map.get(bot, :credential_id)
     market_type = Map.get(bot, :market_type, "spot")
     trading_pairs = Map.get(bot, :trading_pairs, [])
 
     if is_nil(bot_id) or is_nil(credential_id) or trading_pairs == [] do
-      {%{}, 0}
+      0
     else
       symbol = List.first(trading_pairs)
 
@@ -152,17 +162,16 @@ defmodule TradeEngine.Trading.SyncRoutine do
       end
 
       if is_nil(exchange_orders) do
-        {%{}, 0}
+        0
       else
-        anomalies = %{}
         fixes = 0
 
         exchange_ids = exchange_orders
           |> Enum.map(fn o -> to_string(o[:order_id]) end)
           |> MapSet.new()
 
-        # Check 1: DB open orders gone from exchange
-        {anomalies, fixes} = Enum.reduce(db_orders, {anomalies, fixes}, fn order, {ano, fx} ->
+        # Check 1: DB open orders gone from exchange or stuck submitted
+        fixes = Enum.reduce(db_orders, fixes, fn order, fx ->
           oid = to_string(order.exchange_order_id || "")
 
           cond do
@@ -171,61 +180,60 @@ defmodule TradeEngine.Trading.SyncRoutine do
               age = if order.submitted_at, do: DateTime.diff(DateTime.utc_now(), order.submitted_at), else: 0
               if age > @stale_order_age_s do
                 key = "stale_submitted:#{order.id}"
-                prev = Map.get(previous_anomalies, key)
-                if prev && prev.seen_count >= @anomaly_fix_threshold do
-                  # Fix: mark as failed
+                seen = track_anomaly(key, %{
+                  anomaly_type: "stale_submitted",
+                  bot_id: bot_id,
+                  order_id: order.id,
+                  symbol: symbol,
+                  details: %{"age_seconds" => age}
+                })
+                if should_fix?(seen) do
                   Repo.update_all(
                     from(o in Order, where: o.id == ^order.id and o.status == "submitted"),
                     set: [status: "failed", cancel_reason: "sync_routine: stuck submitted > #{@stale_order_age_s}s"]
                   )
-                  {ano, fx + 1}
+                  resolve_anomaly(key, "marked_failed")
+                  fx + 1
                 else
-                  {Map.put(ano, key, %{
-                    type: :stale_submitted,
-                    bot_id: bot_id,
-                    order_id: order.id,
-                    age_seconds: age,
-                    seen_count: (prev && prev.seen_count + 1) || 1,
-                    first_seen: (prev && prev.first_seen) || DateTime.utc_now()
-                  }), fx}
+                  fx
                 end
               else
-                {ano, fx}
+                fx
               end
 
             # Has exchange_order_id but not on exchange anymore
             oid != "" and not MapSet.member?(exchange_ids, oid) ->
               key = "gone_from_exchange:#{order.id}"
-              prev = Map.get(previous_anomalies, key)
-              if prev && prev.seen_count >= @anomaly_fix_threshold do
-                # Fix: check trade history first, then mark cancelled
+              seen = track_anomaly(key, %{
+                anomaly_type: "gone_from_exchange",
+                bot_id: bot_id,
+                order_id: order.id,
+                exchange_order_id: oid,
+                symbol: symbol
+              })
+              if should_fix?(seen) do
                 was_filled = check_if_filled(credential_id, symbol, oid, market_type)
                 new_status = if was_filled, do: "filled", else: "cancelled"
-                reason = if was_filled, do: "sync_routine: detected fill from trade history", else: "sync_routine: gone from exchange"
+                reason = if was_filled, do: "sync_routine: fill from trade history", else: "sync_routine: gone from exchange"
 
                 Repo.update_all(
                   from(o in Order, where: o.id == ^order.id and o.status in ["open", "submitted"]),
                   set: [status: new_status, cancel_reason: reason]
                 )
 
+                fix_action = if was_filled, do: "marked_filled", else: "marked_cancelled"
+                resolve_anomaly(key, fix_action)
+
                 if was_filled do
                   Logger.info("🔄 SyncRoutine: order #{oid} was actually filled — updated DB")
                 end
-
-                {ano, fx + 1}
+                fx + 1
               else
-                {Map.put(ano, key, %{
-                  type: :gone_from_exchange,
-                  bot_id: bot_id,
-                  order_id: order.id,
-                  exchange_order_id: oid,
-                  seen_count: (prev && prev.seen_count + 1) || 1,
-                  first_seen: (prev && prev.first_seen) || DateTime.utc_now()
-                }), fx}
+                fx
               end
 
             true ->
-              {ano, fx}
+              fx
           end
         end)
 
@@ -237,12 +245,18 @@ defmodule TradeEngine.Trading.SyncRoutine do
         end)
 
         by_price = Enum.group_by(my_orders, fn o -> {o[:price], to_string(o[:side])} end)
-        {anomalies, fixes} = Enum.reduce(by_price, {anomalies, fixes}, fn {{price, side}, orders_at_price}, {ano, fx} ->
+        fixes = Enum.reduce(by_price, fixes, fn {{price, side}, orders_at_price}, fx ->
           if length(orders_at_price) > 1 do
             key = "duplicate:#{bot_id}:#{price}:#{side}"
-            prev = Map.get(previous_anomalies, key)
-            if prev && prev.seen_count >= @anomaly_fix_threshold do
-              # Fix: keep newest, cancel rest
+            seen = track_anomaly(key, %{
+              anomaly_type: "duplicate_orders",
+              bot_id: bot_id,
+              symbol: symbol,
+              side: side,
+              price: if(is_number(price), do: Decimal.from_float(price + 0.0), else: nil),
+              details: %{"count" => length(orders_at_price)}
+            })
+            if should_fix?(seen) do
               sorted = Enum.sort_by(orders_at_price, fn o -> o[:time] || 0 end, :desc)
               to_cancel = Enum.drop(sorted, 1)
               cancelled = Enum.reduce(to_cancel, 0, fn order, count ->
@@ -253,30 +267,101 @@ defmodule TradeEngine.Trading.SyncRoutine do
                 end
               end)
               Logger.info("🔄 SyncRoutine: cancelled #{cancelled} duplicate #{side} orders at #{price} for bot #{bot_prefix}")
-              {ano, fx + cancelled}
+              resolve_anomaly(key, "cancelled_#{cancelled}_duplicates")
+              fx + cancelled
             else
-              {Map.put(ano, key, %{
-                type: :duplicate_orders,
-                bot_id: bot_id,
-                price: price,
-                side: side,
-                count: length(orders_at_price),
-                seen_count: (prev && prev.seen_count + 1) || 1,
-                first_seen: (prev && prev.first_seen) || DateTime.utc_now()
-              }), fx}
+              fx
             end
           else
-            {ano, fx}
+            fx
           end
         end)
 
-        {anomalies, fixes}
+        fixes
       end
     end
   rescue
     e ->
-      Logger.warning("🔄 SyncRoutine: sync_bot_orders failed for bot: #{inspect(e)}")
-      {%{}, 0}
+      Logger.warning("🔄 SyncRoutine: sync_bot_orders failed: #{Exception.message(e)}")
+      0
+  end
+
+  # Auto-resolve anomalies that haven't been seen in the last 2 passes (4+ minutes old)
+  defp resolve_stale_anomalies do
+    cutoff = DateTime.add(DateTime.utc_now(), -(@sync_interval_ms * 2), :millisecond)
+    {resolved, _} = Repo.update_all(
+      from(a in SyncAnomaly,
+        where: is_nil(a.resolved_at) and a.last_seen_at < ^cutoff
+      ),
+      set: [resolved_at: DateTime.utc_now(), fix_action: "auto_resolved: no longer detected", auto_fixed: true]
+    )
+    if resolved > 0 do
+      Logger.info("🔄 SyncRoutine: auto-resolved #{resolved} stale anomalies")
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # ========================================================================
+  # ANOMALY PERSISTENCE
+  # ========================================================================
+
+  # Track an anomaly in DB. Returns the current seen_count.
+  defp track_anomaly(key, attrs) do
+    now = DateTime.utc_now()
+
+    case Repo.one(from(a in SyncAnomaly, where: a.anomaly_key == ^key and is_nil(a.resolved_at))) do
+      nil ->
+        # New anomaly
+        changeset = SyncAnomaly.changeset(%SyncAnomaly{}, Map.merge(attrs, %{
+          anomaly_key: key,
+          seen_count: 1,
+          first_seen_at: now,
+          last_seen_at: now,
+          severity: "info"
+        }))
+        case Repo.insert(changeset) do
+          {:ok, a} -> a.seen_count
+          {:error, _} -> 1
+        end
+
+      existing ->
+        # Bump seen_count and update severity
+        new_count = existing.seen_count + 1
+        severity = cond do
+          new_count >= 5 -> "critical"
+          new_count >= @anomaly_fix_threshold -> "warning"
+          true -> "info"
+        end
+
+        Repo.update(SyncAnomaly.changeset(existing, %{
+          seen_count: new_count,
+          last_seen_at: now,
+          severity: severity,
+          details: Map.merge(existing.details || %{}, attrs[:details] || %{})
+        }))
+        new_count
+    end
+  rescue
+    e ->
+      Logger.warning("🔄 SyncRoutine: track_anomaly failed: #{Exception.message(e)}")
+      1
+  end
+
+  # Resolve an anomaly (mark as fixed)
+  defp resolve_anomaly(key, fix_action) do
+    now = DateTime.utc_now()
+    Repo.update_all(
+      from(a in SyncAnomaly, where: a.anomaly_key == ^key and is_nil(a.resolved_at)),
+      set: [resolved_at: now, fix_action: fix_action, auto_fixed: true, updated_at: now]
+    )
+  rescue
+    _ -> :ok
+  end
+
+  # Check if anomaly should be fixed (seen enough times)
+  defp should_fix?(seen_count) do
+    seen_count >= @anomaly_fix_threshold
   end
 
   # ========================================================================
