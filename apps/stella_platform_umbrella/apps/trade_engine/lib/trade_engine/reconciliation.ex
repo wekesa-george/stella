@@ -44,13 +44,20 @@ defmodule TradeEngine.Reconciliation do
         end
       end)
 
-    # Also find DB positions with no credential match on exchange
-    orphaned_db = find_orphaned_db_positions(credentials)
-
     # Categorize exchange results
     matched = Enum.filter(results, &(&1.status == :matched))
     orphaned_exchange = Enum.filter(results, &(&1.status == :orphaned_exchange))
     drifted = Enum.filter(results, &(&1.status == :drifted))
+
+    # Collect position IDs that were already matched or drifted (they're accounted for)
+    accounted_position_ids = (matched ++ drifted)
+      |> Enum.map(& &1[:position_id])
+      |> Enum.filter(& &1)
+      |> MapSet.new()
+
+    # Find DB positions not accounted for by exchange reconciliation
+    orphaned_db = find_orphaned_db_positions(credentials)
+      |> Enum.filter(fn p -> not MapSet.member?(accounted_position_ids, p[:position_id]) end)
 
     elapsed = System.monotonic_time(:millisecond) - started_at
 
