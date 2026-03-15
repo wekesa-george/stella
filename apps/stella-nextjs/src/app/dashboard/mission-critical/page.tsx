@@ -358,7 +358,7 @@ ${FONT}
 /* ── EXCHANGE CAROUSEL ── */
 .mc-ex-carousel { position: relative; flex: 1; overflow: hidden; }
 .mc-ex-track { display: flex; transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1); height: 100%; }
-.mc-ex-slide { min-width: 100%; height: 100%; display: flex; flex-direction: column; padding: 10px; box-sizing: border-box; }
+.mc-ex-slide { min-width: 100%; height: 100%; display: flex; flex-direction: column; padding: 10px; box-sizing: border-box; overflow-y: auto; }
 .mc-ex-dots { display: flex; gap: 6px; justify-content: center; padding: 6px 0; }
 .mc-ex-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--b2); border: none; cursor: pointer; padding: 0; transition: background 0.2s, transform 0.2s; }
 .mc-ex-dot.active { background: var(--g); transform: scale(1.3); }
@@ -1533,6 +1533,21 @@ function CapitalAllocationCard({ bots: botList, capitalData }: { bots: Bot[]; ca
   );
 }
 
+/* ─── TOOLTIP HELPER ─── */
+function Tip({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      style={{
+        display:"inline-flex", alignItems:"center", justifyContent:"center",
+        width:12, height:12, borderRadius:"50%", border:"1px solid var(--b2)",
+        fontSize:7, fontWeight:700, color:"var(--t2)", cursor:"help",
+        marginLeft:3, verticalAlign:"middle", fontFamily:"var(--mono)",
+      }}
+    >?</span>
+  );
+}
+
 /* ─── EXCHANGE ADAPTERS (SA → Credentials → Health) ─── */
 function ExchangeCard({ exchangeHealth, totalBotPnl = 0 }: { exchangeHealth: any[]; totalBotPnl?: number }) {
   const [serviceAccounts, setServiceAccounts] = useState<any[]>([]);
@@ -1921,19 +1936,25 @@ function ExchangeCard({ exchangeHealth, totalBotPnl = 0 }: { exchangeHealth: any
                       return totalCapital > 0 ? (
                         <div style={{ display:"flex", gap:16, padding:"8px 0", borderTop:"1px solid var(--b2)", marginBottom:4 }}>
                           <div>
-                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Total Capital</div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>
+                              Total Capital<Tip text="Futures wallet + spot stablecoin balances combined across all wallets" />
+                            </div>
                             <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color:"var(--t0)" }}>
                               <span style={{ color:"var(--t2)", fontSize:14 }}>$</span>{totalCapital >= 1000 ? `${(totalCapital/1000).toFixed(2)}k` : totalCapital.toFixed(2)}
                             </div>
                           </div>
                           <div>
-                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Realized P&L</div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>
+                              Realized P&L<Tip text="Actual profit locked in from completed trades across all bots" />
+                            </div>
                             <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color: totalBotPnl >= 0 ? "var(--g)" : "var(--r)" }}>
                               {totalBotPnl >= 0 ? '+' : ''}<span style={{ fontSize:14 }}>$</span>{Math.abs(totalBotPnl).toFixed(2)}
                             </div>
                           </div>
                           <div>
-                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Net P&L</div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>
+                              Net P&L<Tip text="Realized profit + unrealized gains/losses on open positions" />
+                            </div>
                             <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color: netPnl >= 0 ? "var(--g)" : "var(--r)" }}>
                               {netPnl >= 0 ? '+' : ''}<span style={{ fontSize:14 }}>$</span>{Math.abs(netPnl).toFixed(2)}
                             </div>
@@ -1942,45 +1963,45 @@ function ExchangeCard({ exchangeHealth, totalBotPnl = 0 }: { exchangeHealth: any
                       ) : null;
                     })()}
 
-                    {/* Futures section */}
+                    {/* Futures Wallet — compact */}
                     {ex.isFutures && ex.walletBalance != null && (
-                      <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:2 }}>Futures Wallet</div>
-                    )}
-
-                    {/* Balance row — horizontal, evenly spaced */}
-                    <div style={{ display:"flex", alignItems:"baseline", gap:0, padding:"10px 0", borderTop:"1px solid var(--b2)", borderBottom: ex.hasSpot ? "none" : "1px solid var(--b2)" }}>
-                      <div style={{ flex:1 }}>
-                        <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Wallet Balance</div>
-                        <div className="mc-ex-wallet-big" style={{ color: ex.balanceError ? "var(--r)" : ex.walletBalance != null ? "var(--t0)" : "var(--t3)" }}>
-                          {ex.balanceError ? 'ERROR' : (
-                            <>
-                              <span style={{ color:"var(--t2)", fontSize:18 }}>$</span>
-                              {bigBal.whole}
-                              {bigBal.suffix && <span style={{ fontSize:16, color:"var(--t2)" }}>{bigBal.suffix}</span>}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ flex:1, borderLeft:"1px solid var(--b2)", paddingLeft:16 }}>
-                        <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Available</div>
-                        <div className="mc-ex-wallet-big" style={{ color: ex.availableBalance != null ? "var(--g)" : "var(--t3)" }}>
-                          {ex.balanceError ? 'ERROR' : fmtBal(ex.availableBalance)}
-                        </div>
-                      </div>
-                      {ex.isFutures && (
-                        <div style={{ flex:1, borderLeft:"1px solid var(--b2)", paddingLeft:16 }}>
-                          <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Unrealized PnL</div>
-                          <div className="mc-ex-wallet-big" style={{ color: ex.unrealizedPnl != null ? (ex.unrealizedPnl >= 0 ? "var(--g)" : "var(--r)") : "var(--t3)" }}>
-                            {ex.unrealizedPnl != null ? `${ex.unrealizedPnl >= 0 ? '+' : ''}${fmtBal(ex.unrealizedPnl)}` : '--'}
+                      <div style={{ borderTop:"1px solid var(--b2)", borderBottom: ex.hasSpot ? "none" : "1px solid var(--b2)", padding:"6px 0" }}>
+                        <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:4 }}>Futures Wallet</div>
+                        <div style={{ display:"flex", gap:16 }}>
+                          <div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>
+                              Balance<Tip text="Total USDT deposited in your futures wallet (your collateral)" />
+                            </div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700, color: ex.balanceError ? "var(--r)" : "var(--t0)" }}>
+                              {ex.balanceError ? 'ERR' : fmtBal(ex.walletBalance)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>
+                              Available<Tip text="USDT not locked as margin — can be used for new orders" />
+                            </div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700, color:"var(--g)" }}>
+                              {ex.balanceError ? 'ERR' : fmtBal(ex.availableBalance)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>
+                              Unrealized<Tip text="Paper profit/loss on open futures positions — changes with market price" />
+                            </div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:14, fontWeight:700, color: (ex.unrealizedPnl ?? 0) >= 0 ? "var(--g)" : "var(--r)" }}>
+                              {ex.unrealizedPnl != null ? `${ex.unrealizedPnl >= 0 ? '+' : ''}${fmtBal(ex.unrealizedPnl)}` : '--'}
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
 
                     {/* Spot balance section */}
                     {ex.hasSpot && (
                       <div style={{ borderBottom:"1px solid var(--b2)" }}>
-                        <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:4, paddingTop:6 }}>Spot Wallet</div>
+                        <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:4, paddingTop:6 }}>
+                          Spot Wallet<Tip text="Coins held in your spot account — free to trade or transfer" />
+                        </div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:6, padding:"0 0 8px" }}>
                           {ex.spotAssets.slice(0, 8).map((a: any) => {
                             const isStable = ['USDT', 'USDC', 'BUSD', 'USD'].includes(a.asset);
