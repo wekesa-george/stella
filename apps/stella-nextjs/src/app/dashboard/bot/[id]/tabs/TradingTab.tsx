@@ -50,10 +50,30 @@ export default function TradingTab({ botId, bot, logEvents, positions, onClosePo
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orderResult, setOrderResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // Build a minimal BotConfig for the chart component
+  // Build BotConfig for the chart component, including grid config if available
   const symbol = bot.tradingPairs?.[0]?.replace("/", "") || bot.pair?.replace("/", "") || "";
+  const cfg = (bot as any).config || {};
+  const isGridBot = cfg.upper_price != null && cfg.lower_price != null && cfg.grid_levels != null;
   const botConfig: BotConfig | null = symbol
-    ? ({ symbol, exchange: bot.exchange?.toLowerCase() || "binance" } as BotConfig)
+    ? ({
+        symbol,
+        exchange: bot.exchange?.toLowerCase() || "binance",
+        ...(isGridBot && {
+          gridConfig: {
+            upper_price: Number(cfg.upper_price),
+            lower_price: Number(cfg.lower_price),
+            grid_levels: Number(cfg.grid_levels) || 10,
+            grid_type: cfg.grid_type || "arithmetic",
+            quantity_per_grid: Number(cfg.quantity_per_grid) || 0,
+            total_investment: Number(cfg.total_investment) || 0,
+            stop_loss_price: cfg.stop_loss_price ? Number(cfg.stop_loss_price) : null,
+            take_profit_price: cfg.take_profit_price ? Number(cfg.take_profit_price) : null,
+            max_open_orders: Number(cfg.max_open_orders) || 20,
+            fee_rate: Number(cfg.fee_rate) || 0.001,
+            leverage: Number(cfg.leverage) || 1,
+          },
+        }),
+      } as BotConfig)
     : null;
 
   async function loadChartData(timeframeLabel: string) {

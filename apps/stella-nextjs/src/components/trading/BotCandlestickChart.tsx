@@ -61,10 +61,20 @@ export function BotCandlestickChart({
   const CH = dims.h - PAD.t - PAD.b - VOL_H - 4;
   const CW = dims.w - PAD.l - PAD.r;
 
-  const prices = useMemo(
-    () => chartCandles.flatMap((c) => [c.high, c.low]),
-    [chartCandles]
-  );
+  const prices = useMemo(() => {
+    const candlePrices = chartCandles.flatMap((c) => [c.high, c.low]);
+    // Include grid range so grid lines are always visible
+    if (botConfig.gridConfig) {
+      candlePrices.push(botConfig.gridConfig.upper_price, botConfig.gridConfig.lower_price);
+    }
+    // Include active order prices
+    orders.forEach((o) => {
+      if (o.price > 0 && ["open", "submitted", "partially_filled", "new"].includes(o.status?.toLowerCase?.() || "")) {
+        candlePrices.push(o.price);
+      }
+    });
+    return candlePrices;
+  }, [chartCandles, botConfig.gridConfig, orders]);
   const minP = useMemo(() => Math.min(...prices) * 0.9994, [prices]);
   const maxP = useMemo(() => Math.max(...prices) * 1.0006, [prices]);
   const maxVol = useMemo(
@@ -127,6 +137,17 @@ export function BotCandlestickChart({
         filled: true,
       };
     });
+
+  // Active (open) orders — shown as horizontal lines on chart
+  const activeOrders = orders
+    .filter((o) => ["open", "submitted", "partially_filled", "new"].includes(o.status?.toLowerCase?.() || ""))
+    .filter((o) => o.price > 0)
+    .map((o) => ({
+      price: o.price,
+      side: o.side?.toUpperCase() || "",
+      quantity: o.quantity,
+      status: o.status,
+    }));
 
   return (
     <div ref={ref} style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -403,6 +424,54 @@ export function BotCandlestickChart({
                 {o.bot} {o.side} {fmtP(o.price)}
               </title>
             </polygon>
+          );
+        })}
+
+        {/* Active (open) order lines */}
+        {activeOrders.map((o, idx) => {
+          const y = toY(o.price);
+          if (y < PAD.t || y > PAD.t + CH) return null;
+          const isBuy = o.side === "BUY";
+          const col = isBuy ? "#00e5a0" : "#f5a623";
+          return (
+            <g key={`ao-${idx}`}>
+              <line
+                x1={PAD.l}
+                y1={y}
+                x2={dims.w - PAD.r}
+                y2={y}
+                stroke={col}
+                strokeWidth="1"
+                strokeDasharray="2 3"
+                opacity="0.5"
+              />
+              {/* Small label on left side */}
+              <rect
+                x={PAD.l}
+                y={y - 6}
+                width={36}
+                height={12}
+                fill={isBuy ? "rgba(0,229,160,0.15)" : "rgba(245,166,35,0.15)"}
+                stroke={col}
+                strokeWidth="0.5"
+                rx="2"
+              />
+              <text x={PAD.l + 2} y={y + 3} fontSize="7" fill={col} fontFamily="monospace" fontWeight="600">
+                {isBuy ? "BUY" : "SELL"}
+              </text>
+              {/* Price label on right */}
+              <rect
+                x={dims.w - PAD.r + 2}
+                y={y - 6}
+                width={PAD.r - 4}
+                height={12}
+                fill={isBuy ? "rgba(0,229,160,0.15)" : "rgba(245,166,35,0.15)"}
+                rx="1"
+              />
+              <text x={dims.w - PAD.r + 4} y={y + 3} fontSize="7" fill={col} fontFamily="monospace">
+                {fmtP(o.price)}
+              </text>
+            </g>
           );
         })}
 
