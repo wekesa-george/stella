@@ -166,8 +166,8 @@ export default function BotFleetPage() {
     if (killModal) {
       const botId = killModal;
       setKillModal(null);
-      setBots(prev => prev.map(b => b.id === botId ? { ...b, status: "stopping" as any } : b));
       await stopBot(botId).catch(console.error);
+      queryClient.invalidateQueries({ queryKey: ["bots"] });
     }
   };
 
