@@ -1534,7 +1534,7 @@ function CapitalAllocationCard({ bots: botList, capitalData }: { bots: Bot[]; ca
 }
 
 /* ─── EXCHANGE ADAPTERS (SA → Credentials → Health) ─── */
-function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
+function ExchangeCard({ exchangeHealth, totalBotPnl = 0 }: { exchangeHealth: any[]; totalBotPnl?: number }) {
   const [serviceAccounts, setServiceAccounts] = useState<any[]>([]);
   const [selectedSA, setSelectedSA] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<any[]>([]);
@@ -1911,13 +1911,40 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                       {!ex.enabled && <span className="mc-tag mc-td" style={{ fontSize:7 }}>DISABLED</span>}
                       <span style={{ fontFamily:"var(--mono)", fontSize:10, fontWeight:600, color:statusColor(ex.status), textTransform:"uppercase", marginLeft:"auto" }}>{ex.status}</span>
                     </div>
-                    {ex.label !== ex.name && (
-                      <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:6, paddingLeft:14 }}>{ex.label}</div>
-                    )}
+                    {/* Total Capital Summary */}
+                    {(() => {
+                      const futuresWallet = ex.walletBalance || 0;
+                      const spotFree = ex.spotAssets?.reduce((s: number, a: any) => s + (['USDT','USDC','BUSD','USD'].includes(a.asset) ? a.free + a.locked : 0), 0) || 0;
+                      const totalCapital = futuresWallet + spotFree;
+                      const unrealized = ex.unrealizedPnl || 0;
+                      const netPnl = totalBotPnl + unrealized;
+                      return totalCapital > 0 ? (
+                        <div style={{ display:"flex", gap:16, padding:"8px 0", borderTop:"1px solid var(--b2)", marginBottom:4 }}>
+                          <div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Total Capital</div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color:"var(--t0)" }}>
+                              <span style={{ color:"var(--t2)", fontSize:14 }}>$</span>{totalCapital >= 1000 ? `${(totalCapital/1000).toFixed(2)}k` : totalCapital.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Realized P&L</div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color: totalBotPnl >= 0 ? "var(--g)" : "var(--r)" }}>
+                              {totalBotPnl >= 0 ? '+' : ''}<span style={{ fontSize:14 }}>$</span>{Math.abs(totalBotPnl).toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mc-sub" style={{ fontSize:7, marginBottom:2 }}>Net P&L</div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:18, fontWeight:700, color: netPnl >= 0 ? "var(--g)" : "var(--r)" }}>
+                              {netPnl >= 0 ? '+' : ''}<span style={{ fontSize:14 }}>$</span>{Math.abs(netPnl).toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
 
-                    {/* Market type label */}
-                    {ex.isFutures && (
-                      <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:2, paddingLeft:14 }}>Future Trading</div>
+                    {/* Futures section */}
+                    {ex.isFutures && ex.walletBalance != null && (
+                      <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:2 }}>Futures Wallet</div>
                     )}
 
                     {/* Balance row — horizontal, evenly spaced */}
@@ -1953,36 +1980,25 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                     {/* Spot balance section */}
                     {ex.hasSpot && (
                       <div style={{ borderBottom:"1px solid var(--b2)" }}>
-                        <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:2, paddingLeft:0, paddingTop:8 }}>Spot Trading</div>
-                        <div style={{ display:"flex", alignItems:"baseline", gap:0, padding:"6px 0 10px" }}>
-                          <div style={{ flex:1 }}>
-                            <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Total Value</div>
-                            <div style={{ fontFamily:"var(--mono)", fontSize:20, fontWeight:700, color:"var(--t0)" }}>
-                              {ex.spotAssets.length > 0 ? (
-                                <>
-                                  <span style={{ color:"var(--t2)", fontSize:14 }}>{ex.spotAssets.length}</span>
-                                  <span style={{ fontSize:12, color:"var(--t2)" }}> assets</span>
-                                </>
-                              ) : '--'}
-                            </div>
-                          </div>
-                          <div style={{ flex:2, display:"flex", flexWrap:"wrap", gap:6 }}>
-                            {ex.spotAssets.slice(0, 8).map((a: any) => (
+                        <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:4, paddingTop:6 }}>Spot Wallet</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:6, padding:"0 0 8px" }}>
+                          {ex.spotAssets.slice(0, 8).map((a: any) => {
+                            const isStable = ['USDT', 'USDC', 'BUSD', 'USD'].includes(a.asset);
+                            const total = a.free + a.locked;
+                            return (
                               <div key={a.asset} style={{
-                                fontFamily:"var(--mono)", fontSize:9, padding:"2px 6px",
+                                fontFamily:"var(--mono)", fontSize:10, padding:"4px 8px",
                                 background:"var(--bg3)", border:"1px solid var(--b2)", borderRadius:3,
+                                display:"flex", alignItems:"center", gap:6,
                               }}>
                                 <span style={{ fontWeight:700, color:"var(--t0)" }}>{a.asset}</span>
-                                <span style={{ color:"var(--t1)", marginLeft:4 }}>
-                                  {a.free >= 1000 ? `${(a.free/1000).toFixed(1)}k` : a.free >= 1 ? a.free.toFixed(2) : a.free.toFixed(6)}
+                                <span style={{ color:"var(--t1)" }}>
+                                  {isStable ? `$${total >= 1000 ? (total/1000).toFixed(1) + 'k' : total.toFixed(2)}` : total >= 1 ? total.toFixed(2) : total.toFixed(4)}
                                 </span>
-                                {a.locked > 0 && <span style={{ color:"var(--a)", marginLeft:2, fontSize:8 }}>🔒{a.locked.toFixed(2)}</span>}
+                                {a.locked > 0 && <span style={{ color:"var(--a)", fontSize:8 }}>🔒{a.locked.toFixed(2)}</span>}
                               </div>
-                            ))}
-                            {ex.spotAssets.length > 8 && (
-                              <span style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", alignSelf:"center" }}>+{ex.spotAssets.length - 8} more</span>
-                            )}
-                          </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -3383,7 +3399,7 @@ function MissionCriticalDashboard() {
                   {/* ── ROW 1: KEY METRICS ── */}
                   {exchangeError ? <CardError label="Exchanges" /> :
                    !exchangeReady ? <CardSkeleton label="Exchanges" /> :
-                   <ExchangeCard exchangeHealth={exchangeHealthData} />}
+                   <ExchangeCard exchangeHealth={exchangeHealthData} totalBotPnl={totalPnl} />}
 
                   {botsError ? <CardError label="24h Realized P&L" /> :
                    !botsReady ? <CardSkeleton label="24h Realized P&L" /> :
