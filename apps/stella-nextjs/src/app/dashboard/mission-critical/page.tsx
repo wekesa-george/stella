@@ -1594,26 +1594,49 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     if (enabled.length === 0) return;
 
     setRefreshingBalances(true);
-    let pending = enabled.length;
+    let pending = 0;
     const done = () => { pending--; if (pending <= 0) setRefreshingBalances(false); };
 
     for (const cred of enabled) {
       const adapter = adapters.find((a: any) => a.id === cred.adapter_id);
       const hasFutures = adapter?.supports_futures || adapter?.supportsFutures;
-      const marketType = cred.config_overrides?.market_type || (hasFutures ? 'usds_futures' : 'spot');
 
-      getCredentialBalance(cred.id, marketType)
+      // Always fetch futures if adapter supports it
+      if (hasFutures) {
+        pending++;
+        getCredentialBalance(cred.id, 'usds_futures')
+          .then(res => {
+            const body = (res.data as any)?.data ?? res.data;
+            if (body) {
+              setBalances(prev => ({
+                ...prev,
+                [cred.id]: { ...(prev[cred.id] || {}), futures: body, ...body }
+              }));
+            }
+          })
+          .catch(() => {})
+          .finally(done);
+      }
+
+      // Always try spot too
+      pending++;
+      getCredentialBalance(cred.id, 'spot')
         .then(res => {
           const body = (res.data as any)?.data ?? res.data;
-          if (body) {
-            setBalances(prev => ({ ...prev, [cred.id]: body }));
+          if (body && !body.error) {
+            setBalances(prev => ({
+              ...prev,
+              [cred.id]: { ...(prev[cred.id] || {}), spot: body }
+            }));
           }
         })
         .catch(() => {
-          setBalances(prev => ({ ...prev, [cred.id]: { error: true } }));
+          // Spot not available for this key — that's OK
         })
         .finally(done);
     }
+
+    if (pending === 0) setRefreshingBalances(false);
   }, [credentials, adapters]);
 
   // Auto-fetch on credentials/adapters load + poll every 30s
@@ -1731,9 +1754,21 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     const isFutures = (cred.config_overrides?.market_type || '').includes('futures') ||
                       adapter?.supports_futures || adapter?.supportsFutures;
 
-    // Extract per-asset breakdown
+    // Extract per-asset breakdown (futures)
+    const futuresBal = bal?.futures;
+    const spotBal = bal?.spot;
     const assets: { asset: string; wallet_balance: number; available_balance: number; unrealized_pnl: number }[] =
-      hasBal && Array.isArray(bal.assets) ? bal.assets : [];
+      hasBal && Array.isArray(bal.assets) ? bal.assets : (futuresBal && Array.isArray(futuresBal.assets) ? futuresBal.assets : []);
+
+    // Spot assets (different format: { free, locked })
+    const spotAssets: { asset: string; free: number; locked: number }[] =
+      spotBal && Array.isArray(spotBal.balances) ? spotBal.balances.map((b: any) => ({
+        asset: b.asset,
+        free: parseFloat(b.free || '0'),
+        locked: parseFloat(b.locked || '0'),
+      })).filter((b: any) => b.free > 0 || b.locked > 0) : [];
+
+    const spotTotal = spotAssets.reduce((s, a) => s + a.free + a.locked, 0);
 
     return {
       id: cred.id,
@@ -1747,13 +1782,17 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
       enabled: cred.is_enabled ?? true,
       market: cred.config_overrides?.market_type || (isFutures ? 'futures' : 'spot'),
       isFutures,
-      // Balance fields
-      walletBalance: hasBal ? bal.total_balance : null,
-      availableBalance: hasBal ? bal.available_balance : null,
+      // Futures balance fields
+      walletBalance: hasBal ? (bal.total_balance ?? futuresBal?.total_balance ?? null) : null,
+      availableBalance: hasBal ? (bal.available_balance ?? futuresBal?.available_balance ?? null) : null,
       unrealizedPnl: hasBal ? assets.reduce((s: number, a: any) => s + (a.unrealized_pnl || 0), 0) : null,
-      balanceCurrency: bal?.currency || 'USDT',
+      balanceCurrency: bal?.currency || futuresBal?.currency || 'USDT',
       balanceError: bal?.error ?? false,
       assets,
+      // Spot balance fields
+      hasSpot: spotAssets.length > 0,
+      spotAssets,
+      spotTotal,
     };
   });
 
@@ -1876,8 +1915,13 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                       <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:6, paddingLeft:14 }}>{ex.label}</div>
                     )}
 
+                    {/* Market type label */}
+                    {ex.isFutures && (
+                      <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:2, paddingLeft:14 }}>Future Trading</div>
+                    )}
+
                     {/* Balance row — horizontal, evenly spaced */}
-                    <div style={{ display:"flex", alignItems:"baseline", gap:0, padding:"10px 0", borderTop:"1px solid var(--b2)", borderBottom:"1px solid var(--b2)" }}>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:0, padding:"10px 0", borderTop:"1px solid var(--b2)", borderBottom: ex.hasSpot ? "none" : "1px solid var(--b2)" }}>
                       <div style={{ flex:1 }}>
                         <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Wallet Balance</div>
                         <div className="mc-ex-wallet-big" style={{ color: ex.balanceError ? "var(--r)" : ex.walletBalance != null ? "var(--t0)" : "var(--t3)" }}>
@@ -1905,6 +1949,43 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
                         </div>
                       )}
                     </div>
+
+                    {/* Spot balance section */}
+                    {ex.hasSpot && (
+                      <div style={{ borderBottom:"1px solid var(--b2)" }}>
+                        <div style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", marginBottom:2, paddingLeft:0, paddingTop:8 }}>Spot Trading</div>
+                        <div style={{ display:"flex", alignItems:"baseline", gap:0, padding:"6px 0 10px" }}>
+                          <div style={{ flex:1 }}>
+                            <div className="mc-sub" style={{ fontSize:8, marginBottom:4 }}>Total Value</div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:20, fontWeight:700, color:"var(--t0)" }}>
+                              {ex.spotAssets.length > 0 ? (
+                                <>
+                                  <span style={{ color:"var(--t2)", fontSize:14 }}>{ex.spotAssets.length}</span>
+                                  <span style={{ fontSize:12, color:"var(--t2)" }}> assets</span>
+                                </>
+                              ) : '--'}
+                            </div>
+                          </div>
+                          <div style={{ flex:2, display:"flex", flexWrap:"wrap", gap:6 }}>
+                            {ex.spotAssets.slice(0, 8).map((a: any) => (
+                              <div key={a.asset} style={{
+                                fontFamily:"var(--mono)", fontSize:9, padding:"2px 6px",
+                                background:"var(--bg3)", border:"1px solid var(--b2)", borderRadius:3,
+                              }}>
+                                <span style={{ fontWeight:700, color:"var(--t0)" }}>{a.asset}</span>
+                                <span style={{ color:"var(--t1)", marginLeft:4 }}>
+                                  {a.free >= 1000 ? `${(a.free/1000).toFixed(1)}k` : a.free >= 1 ? a.free.toFixed(2) : a.free.toFixed(6)}
+                                </span>
+                                {a.locked > 0 && <span style={{ color:"var(--a)", marginLeft:2, fontSize:8 }}>🔒{a.locked.toFixed(2)}</span>}
+                              </div>
+                            ))}
+                            {ex.spotAssets.length > 8 && (
+                              <span style={{ fontFamily:"var(--mono)", fontSize:8, color:"var(--t2)", alignSelf:"center" }}>+{ex.spotAssets.length - 8} more</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Mid section: Info + Assets side by side */}
                     <div style={{ display:"flex", gap:12, flex:1, marginTop:8, minHeight:0 }}>
