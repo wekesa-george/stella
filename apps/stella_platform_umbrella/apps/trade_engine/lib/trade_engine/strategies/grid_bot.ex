@@ -198,17 +198,32 @@ defmodule TradeEngine.Strategies.GridBot do
   and existing positions/orders.
   """
   def analyze_grid_state(grid_levels, current_price, context) do
-    # Grid positions tracked in bot state (keyed by grid_level price)
+    # Grid positions tracked in bot state (keyed by rounded price from exchange)
     existing_grid_orders = Map.get(context, :grid_orders, %{})
+
+    # Build a set of existing order prices for fast lookup.
+    # grid_orders keys are rounded to exchange precision (e.g. 71285.7),
+    # but grid_levels are raw floats (e.g. 71285.71428571).
+    # We need to check if any existing key is "close enough" to the level.
+    existing_prices = Map.keys(existing_grid_orders) |> MapSet.new()
+
+    # A level is covered if any existing order price rounds to the same value
+    # or is within 0.01% of the level (handles float precision differences)
+    level_covered? = fn level ->
+      MapSet.member?(existing_prices, level) or
+        Enum.any?(existing_prices, fn p ->
+          abs(p - level) / max(abs(level), 1) < 0.0001
+        end)
+    end
 
     # Levels below current price → buy orders
     # Levels above current price → sell orders
     buy_levels = grid_levels
-      |> Enum.filter(fn level -> level < current_price and not Map.has_key?(existing_grid_orders, level) end)
+      |> Enum.filter(fn level -> level < current_price and not level_covered?.(level) end)
       |> Enum.sort(:desc) # Closest to price first
 
     sell_levels = grid_levels
-      |> Enum.filter(fn level -> level > current_price and not Map.has_key?(existing_grid_orders, level) end)
+      |> Enum.filter(fn level -> level > current_price and not level_covered?.(level) end)
       |> Enum.sort(:asc) # Closest to price first
 
     %{
