@@ -503,13 +503,16 @@ defmodule TradeEngine.Bots.BotRegistry do
         BotFSM.transition(bot_id, from_status, "stopping",
           trigger: "api_call", reason: "Manual stop requested")
 
-        updated_stopping = %{runtime | status: "stopping"}
+        updated_stopping = %{runtime | status: "stopping", init_step: "cancelling_orders"}
         :ets.insert(@ets_table, {bot_id, updated_stopping})
         broadcast_bot_event(:bot_updated, updated_stopping)
         broadcast_transition(bot_id, from_status, "stopping")
 
-        # Stop the trading process
+        # Stop the trading process (this triggers terminate callback which closes positions)
+        report_init_step(bot_id, "stopping_process")
         BotSupervisor.stop_trading_process(bot_id)
+
+        report_init_step(bot_id, "saving_state")
 
         # Transition stopping → stopped
         BotFSM.transition(bot_id, "stopping", "stopped",
@@ -519,10 +522,11 @@ defmodule TradeEngine.Bots.BotRegistry do
         updated = %{runtime |
           status: "stopped",
           stopped_at: now,
-          elixir_pid: nil
+          elixir_pid: nil,
+          init_step: nil
         }
         :ets.insert(@ets_table, {bot_id, updated})
-        update_bot_db(bot_id, %{status: "stopped", stopped_at: now, elixir_pid: nil})
+        update_bot_db(bot_id, %{status: "stopped", stopped_at: now, elixir_pid: nil, init_step: nil})
         broadcast_bot_event(:bot_stopped, updated)
         broadcast_transition(bot_id, "stopping", "stopped")
 

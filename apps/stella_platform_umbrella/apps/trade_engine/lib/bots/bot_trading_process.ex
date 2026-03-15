@@ -370,13 +370,33 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   def terminate(reason, state) do
     BotLogger.warning(state.bot_id, :lifecycle, "Bot terminating", %{
       reason: inspect(reason),
-      open_positions: map_size(state.positions)
+      open_positions: map_size(state.positions),
+      grid_orders: map_size(state.grid_orders)
     })
     Logger.info("BotTradingProcess #{state.bot_id} terminating: #{inspect(reason)}")
+
+    # Cancel grid orders on exchange
+    if state.is_grid and map_size(state.grid_orders) > 0 do
+      BotRegistry.report_init_step(state.bot_id, "cancelling_grid_orders")
+      symbol = List.first(state.trading_pairs)
+      if symbol do
+        Enum.each(state.grid_orders, fn {_level, entry} ->
+          if entry.order_id do
+            OrderManager.cancel_order(state.credential_id, symbol, entry.order_id, market_type: state.market_type)
+          end
+        end)
+      end
+    end
+
     # Close all open positions on graceful shutdown
-    Enum.each(state.positions, fn {_id, pos} ->
-      close_position(pos, state)
-    end)
+    if map_size(state.positions) > 0 do
+      BotRegistry.report_init_step(state.bot_id, "closing_positions")
+      Enum.each(state.positions, fn {_id, pos} ->
+        close_position(pos, state)
+      end)
+    end
+
+    BotRegistry.report_init_step(state.bot_id, "shutdown_complete")
     :ok
   end
 
