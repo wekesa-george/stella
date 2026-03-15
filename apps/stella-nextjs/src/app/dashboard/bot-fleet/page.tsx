@@ -693,7 +693,7 @@ export default function BotFleetPage() {
                       </div>
                       <span className={cn("inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm shrink-0", s.bg, s.text)}>
                         <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />
-                        {bot.status === "initializing" && bot.initStep ? "INIT" : bot.status.replace("_", " ")}
+                        {bot.initStep && (bot.status === "initializing" || bot.status === "stopping") ? bot.status === "initializing" ? "INIT" : "STOPPING" : bot.status.replace("_", " ")}
                       </span>
                     </div>
 
@@ -813,8 +813,10 @@ export default function BotFleetPage() {
                           </button>
                         )}
                         {isTransitioning && (
-                          <span className="px-1 text-[8px] text-[#3d9df3] font-mono">
-                            {bot.status === "initializing" ? "starting…" : "stopping…"}
+                          <span className="px-1 text-[8px] text-[#3d9df3] font-mono animate-pulse">
+                            {bot.initStep
+                              ? bot.initStep.replace(/_/g, " ")
+                              : bot.status === "initializing" ? "starting…" : "stopping…"}
                           </span>
                         )}
                         {isStopped && (
@@ -1005,8 +1007,10 @@ export default function BotFleetPage() {
 
                             {/* Transitioning indicator */}
                             {isTransitioning && (
-                              <span className="px-1.5 py-0.5 text-[9px] text-[#3d9df3] font-mono">
-                                {bot.status === "initializing" ? "starting…" : "stopping…"}
+                              <span className="px-1.5 py-0.5 text-[9px] text-[#3d9df3] font-mono animate-pulse">
+                                {bot.initStep
+                                  ? bot.initStep.replace(/_/g, " ")
+                                  : bot.status === "initializing" ? "starting…" : "stopping…"}
                               </span>
                             )}
 
