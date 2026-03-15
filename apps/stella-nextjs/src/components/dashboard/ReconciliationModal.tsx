@@ -9,6 +9,7 @@ import {
   cancelOrphanOrders,
   cleanStaleOrders,
   runSyncNow,
+  recoverOrphanOrders,
 } from '@/lib/tradingEngineApi';
 
 type Tab = 'positions' | 'orders' | 'balances';
@@ -424,6 +425,22 @@ function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMa
     }
   };
 
+  const handleRecoverOrders = async () => {
+    if (!confirm('Recover exchange orders back to DB? Only orders from running bots within their grid range will be recovered.')) return;
+    setActionLoading('recover');
+    setActionResult(null);
+    try {
+      const res = await recoverOrphanOrders();
+      const body = (res.data as any)?.data ?? res.data;
+      setActionResult({ type: 'recover', ...body });
+      onRefresh?.();
+    } catch (e: any) {
+      setActionResult({ type: 'recover', error: e.message || 'Recovery failed' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const sections = [
     { key: 'missing_db', label: 'On Exchange but Missing in DB', color: 'var(--r)', items: data.missing_db || [] },
     { key: 'stale_exchange', label: 'In DB but Gone from Exchange', color: 'var(--y)', items: data.stale_exchange || [] },
@@ -446,6 +463,19 @@ function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMa
             }}
           >
             {actionLoading === 'cancel' ? 'CANCELLING...' : `CANCEL ${totals.missing_db} ORPHANS`}
+          </button>
+        )}
+        {(totals.missing_db || 0) > 0 && (
+          <button
+            onClick={handleRecoverOrders}
+            disabled={!!actionLoading}
+            style={{
+              padding: '6px 14px', borderRadius: 4, border: '1px solid var(--g, #00e5a0)',
+              background: 'rgba(0,229,160,0.1)', color: 'var(--g, #00e5a0)', fontFamily: 'var(--mono)',
+              fontSize: 10, fontWeight: 700, cursor: actionLoading ? 'wait' : 'pointer', opacity: actionLoading ? 0.5 : 1,
+            }}
+          >
+            {actionLoading === 'recover' ? 'RECOVERING...' : `RECOVER ${totals.missing_db} ORDERS`}
           </button>
         )}
         {(totals.stale_exchange || 0) > 0 && (
