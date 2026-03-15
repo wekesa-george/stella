@@ -1583,12 +1583,33 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
         adopted_count = map_size(adopted_grid_orders) - map_size(pruned_grid_orders)
 
+        # Cancel duplicate exchange orders — keep only the one we adopted per price level
+        kept_order_ids = adopted_grid_orders
+          |> Map.values()
+          |> Enum.map(& &1.order_id)
+          |> MapSet.new()
+
+        duplicates_to_cancel = my_exchange_orders
+          |> Enum.filter(fn o ->
+            oid = o[:order_id] || o["orderId"]
+            oid && not MapSet.member?(kept_order_ids, oid)
+          end)
+
+        cancelled_dupes = Enum.reduce(duplicates_to_cancel, 0, fn order, count ->
+          oid = order[:order_id] || order["orderId"]
+          case OrderManager.cancel_order(state.credential_id, symbol, oid, market_type: state.market_type) do
+            {:ok, _} -> count + 1
+            {:error, _} -> count
+          end
+        end)
+
         BotLogger.info(state.bot_id, :grid, "Startup reconciliation complete", %{
           symbol: symbol,
           recovered_from_db: map_size(state.grid_orders),
           still_on_exchange: map_size(pruned_grid_orders),
           adopted_from_exchange: adopted_count,
           removed_stale_db_entries: removed_count,
+          duplicates_cancelled: cancelled_dupes,
           final_grid_orders: map_size(adopted_grid_orders),
           my_exchange_orders: length(my_exchange_orders),
           total_exchange_orders: length(exchange_orders)
