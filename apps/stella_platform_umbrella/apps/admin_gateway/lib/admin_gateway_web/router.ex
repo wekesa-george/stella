@@ -41,8 +41,9 @@ defmodule AdminGatewayWeb.Router do
     post "/reconciliation/cancel-orphans", ReconciliationController, :cancel_orphans
     post "/reconciliation/clean-stale", ReconciliationController, :clean_stale
 
-    # Sync routine status
+    # Sync routine
     get "/sync/anomalies", BotController, :sync_anomalies
+    post "/sync/run", BotController, :sync_run
   end
 
   # Authenticated admin routes

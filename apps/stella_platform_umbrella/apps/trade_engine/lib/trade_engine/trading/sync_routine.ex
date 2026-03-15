@@ -37,6 +37,10 @@ defmodule TradeEngine.Trading.SyncRoutine do
     GenServer.call(__MODULE__, :get_anomalies)
   end
 
+  def run_now do
+    GenServer.call(__MODULE__, :run_now, 30_000)
+  end
+
   # ========================================================================
   # SERVER CALLBACKS
   # ========================================================================
@@ -62,6 +66,23 @@ defmodule TradeEngine.Trading.SyncRoutine do
     {:reply, anomalies, state}
   rescue
     _ -> {:reply, [], state}
+  end
+
+  @impl true
+  def handle_call(:run_now, _from, state) do
+    new_state = try do
+      run_sync(state)
+    rescue
+      e ->
+        Logger.warning("🔄 SyncRoutine manual run failed: #{Exception.message(e)}")
+        state
+    end
+    anomalies = Repo.all(
+      from(a in SyncAnomaly, where: is_nil(a.resolved_at), order_by: [desc: a.last_seen_at], limit: 100)
+    ) |> Enum.map(&Map.from_struct/1)
+    {:reply, {:ok, %{anomalies: anomalies, fixes: new_state.runs - state.runs}}, new_state}
+  rescue
+    _ -> {:reply, {:ok, %{anomalies: [], fixes: 0}}, state}
   end
 
   @impl true
