@@ -196,7 +196,8 @@ defmodule TradeEngine.Exchanges.Executor do
       available_balance: avail,
       currency: "MULTI",
       market_type: "spot",
-      assets: assets
+      assets: assets,
+      balances: balances
     }
   end
 
