@@ -1764,6 +1764,24 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       exchange_order_id: filled_entry.order_id
     })
 
+    # Broadcast fill to WS channels for real-time dashboard updates
+    fill_event = %{
+      id: filled_entry.order_id,
+      bot_id: state.bot_id,
+      symbol: symbol,
+      side: filled_entry.side,
+      order_type: "limit",
+      price: actual_fill_price,
+      execution_price: actual_fill_price,
+      quantity: filled_entry.quantity,
+      filled_quantity: filled_entry.quantity,
+      status: "filled",
+      exchange_order_id: filled_entry.order_id,
+      created_at: DateTime.utc_now()
+    }
+    Phoenix.PubSub.broadcast(TradeEngine.PubSub, "orders:updates", {:order_filled, fill_event})
+    Phoenix.PubSub.broadcast(TradeEngine.PubSub, "orders:bot:#{state.bot_id}", {:order_filled, fill_event})
+
     # Place counter-order if we have a valid price level
     # Counter-orders use reduceOnly on futures to close the position opened by the fill
     if counter_price do
@@ -1975,6 +1993,26 @@ defmodule TradeEngine.Bots.BotTradingProcess do
             amt != 0.0
           end)
           BotRegistry.update_position_count(state.bot_id, active_count)
+
+          # Broadcast position updates to WS for live dashboard
+          Enum.each(exchange_positions, fn ep ->
+            amt = if is_number(ep.position_amount), do: ep.position_amount, else: 0.0
+            if amt != 0.0 do
+              pos_event = %{
+                bot_id: state.bot_id,
+                symbol: symbol,
+                side: if(amt >= 0, do: "long", else: "short"),
+                quantity: abs(amt),
+                entry_price: ep.entry_price || 0,
+                mark_price: ep.mark_price || 0,
+                unrealized_pnl: ep.unrealized_pnl || 0,
+                leverage: ep.leverage || 1,
+                status: "open"
+              }
+              Phoenix.PubSub.broadcast(TradeEngine.PubSub, "positions:updates", {:position_updated, pos_event})
+              Phoenix.PubSub.broadcast(TradeEngine.PubSub, "positions:bot:#{state.bot_id}", {:position_updated, pos_event})
+            end
+          end)
 
           state
 
