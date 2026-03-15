@@ -162,6 +162,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
           Process.send_after(self(), :adopt_exchange_positions, 3_000)
           Process.send_after(self(), :reconcile_grid_orders_with_exchange, 5_000)
           Process.send_after(self(), :sync_exchange_positions, 60_000)
+          Process.send_after(self(), :reconcile_trade_history, 120_000)
         end
 
         # Futures: sync leverage on exchange to match bot config
@@ -340,6 +341,15 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     if state.is_grid and state.market_type in ["usds_futures", "coinm_futures"] do
       Process.send_after(self(), :sync_exchange_positions, 60_000)
       {:noreply, sync_exchange_positions_to_db(state)}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:reconcile_trade_history, state) do
+    if state.is_grid do
+      Process.send_after(self(), :reconcile_trade_history, 120_000)
+      {:noreply, reconcile_trade_history(state)}
     else
       {:noreply, state}
     end
@@ -2037,6 +2047,110 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   rescue
     e ->
       BotLogger.warning(state.bot_id, :grid, "sync_exchange_positions_to_db failed", %{error: Exception.message(e)})
+      state
+  end
+
+  # Periodic trade history reconciliation: fetch exchange trades and create
+  # Transaction records for any fills not already in our DB.
+  defp reconcile_trade_history(state) do
+    symbol = List.first(state.trading_pairs)
+    if is_nil(symbol), do: state, else: do_reconcile_trade_history(state, symbol)
+  end
+
+  defp do_reconcile_trade_history(state, symbol) do
+    alias TradeEngine.Trading.Transaction
+
+    case Executor.get_user_trades(state.credential_id, symbol, market_type: state.market_type, limit: 50) do
+      {:ok, exchange_trades} when is_list(exchange_trades) and exchange_trades != [] ->
+        # Get existing DB transactions for this bot (by order_id)
+        import Ecto.Query
+        db_order_ids = Repo.all(
+          from(t in Transaction,
+            where: t.user_id == ^state.user_id or is_nil(t.user_id),
+            where: not is_nil(t.order_id) and t.order_id != "",
+            select: t.order_id
+          )
+        ) |> MapSet.new()
+
+        # Filter to our bot's trades by clientOrderId prefix
+        bot_prefix = String.slice(state.bot_id, 0, 8)
+        my_trades = Enum.filter(exchange_trades, fn t ->
+          coid = to_string(t[:client_order_id] || "")
+          String.starts_with?(coid, bot_prefix)
+        end)
+
+        # Find trades not in DB
+        missing = Enum.filter(my_trades, fn t ->
+          oid = to_string(t[:order_id])
+          not MapSet.member?(db_order_ids, oid)
+        end)
+
+        if length(missing) > 0 do
+          BotLogger.info(state.bot_id, :grid, "Trade history reconciliation: found missing fills", %{
+            exchange_trades: length(my_trades),
+            missing_from_db: length(missing)
+          })
+
+          # Create Transaction records for missing fills
+          Enum.each(missing, fn trade ->
+            side = to_string(trade[:side] || "") |> String.downcase()
+            qty = (trade[:quantity] || 0) / 1.0
+            price = (trade[:price] || 0) / 1.0
+            commission = (trade[:commission] || 0) / 1.0
+            realized_pnl = (trade[:realized_pnl] || 0) / 1.0
+
+            fill_attrs = %{
+              transaction_type: "trade",
+              symbol: symbol,
+              direction: side,
+              action: "grid_#{side}",
+              quantity: Decimal.from_float(qty),
+              price: Decimal.from_float(price),
+              amount: Decimal.from_float(qty * price),
+              order_id: to_string(trade[:order_id]),
+              status: "completed",
+              executed_at: if(trade[:time], do: DateTime.from_unix!(trade[:time], :millisecond), else: DateTime.utc_now()),
+              exchange: "binance",
+              user_id: state.user_id,
+              fee_amount: Decimal.from_float(commission),
+              fee_asset: trade[:commission_asset],
+              pnl: Decimal.from_float(realized_pnl),
+              description: "Reconciled: grid #{side} #{symbol} qty=#{qty} @ #{price} pnl=#{realized_pnl}"
+            }
+
+            case Repo.insert(Transaction.changeset(%Transaction{}, fill_attrs)) do
+              {:ok, _} ->
+                BotLogger.info(state.bot_id, :grid, "Reconciled missing fill", %{
+                  order_id: trade[:order_id],
+                  side: side,
+                  qty: qty,
+                  price: price,
+                  pnl: realized_pnl,
+                  commission: commission
+                })
+
+                # Update bot PnL if this was a profitable trade
+                if realized_pnl != 0.0 do
+                  BotRegistry.report_trade(state.bot_id, realized_pnl, realized_pnl >= 0)
+                end
+
+              {:error, err} ->
+                Logger.warning("Failed to insert reconciled fill: #{inspect(err)}")
+            end
+          end)
+
+          # Update position from exchange to ensure it matches
+          sync_exchange_positions_to_db(state)
+        else
+          state
+        end
+
+      _ ->
+        state
+    end
+  rescue
+    e ->
+      BotLogger.warning(state.bot_id, :grid, "Trade history reconciliation failed", %{error: Exception.message(e)})
       state
   end
 
