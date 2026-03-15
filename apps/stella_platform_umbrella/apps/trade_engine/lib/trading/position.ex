@@ -118,7 +118,7 @@ defmodule TradeEngine.Trading.Position do
     |> maybe_default_value(:remaining_quantity, fn cs ->
       get_field(cs, :remaining_quantity) || get_field(cs, :quantity) || Decimal.new(0)
     end)
-    |> maybe_default_value(:leverage, fn _cs -> Decimal.new(1) end)
+    |> maybe_default_value(:leverage, fn _cs -> 1 end)
     |> maybe_default_value(:unrealized_profit_loss, fn _cs -> Decimal.new(0) end)
     |> maybe_default_value(:roi_percentage, fn _cs -> Decimal.new(0) end)
     |> maybe_default_value(:total_fees_usd, fn _cs -> Decimal.new(0) end)
