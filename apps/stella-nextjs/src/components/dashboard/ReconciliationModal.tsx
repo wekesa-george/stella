@@ -8,6 +8,7 @@ import {
   getReconciliationBalances,
   cancelOrphanOrders,
   cleanStaleOrders,
+  runSyncNow,
 } from '@/lib/tradingEngineApi';
 
 type Tab = 'positions' | 'orders' | 'balances';
@@ -407,6 +408,22 @@ function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMa
     }
   };
 
+  const handleSyncNow = async () => {
+    setActionLoading('sync');
+    setActionResult(null);
+    try {
+      const res = await runSyncNow();
+      const body = (res.data as any)?.data ?? res.data;
+      const anomalyCount = body?.anomalies?.length ?? 0;
+      setActionResult({ type: 'sync', message: `Sync complete. ${anomalyCount} anomalies found.`, ...body });
+      onRefresh?.();
+    } catch (e: any) {
+      setActionResult({ type: 'sync', error: e.message || 'Sync failed' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const sections = [
     { key: 'missing_db', label: 'On Exchange but Missing in DB', color: 'var(--r)', items: data.missing_db || [] },
     { key: 'stale_exchange', label: 'In DB but Gone from Exchange', color: 'var(--y)', items: data.stale_exchange || [] },
@@ -444,6 +461,17 @@ function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMa
             {actionLoading === 'clean' ? 'CLEANING...' : `CLEAN ${totals.stale_exchange} STALE`}
           </button>
         )}
+        <button
+          onClick={handleSyncNow}
+          disabled={!!actionLoading}
+          style={{
+            padding: '6px 14px', borderRadius: 4, border: '1px solid var(--cy, #3d9df3)',
+            background: 'rgba(61,157,243,0.1)', color: 'var(--cy, #3d9df3)', fontFamily: 'var(--mono)',
+            fontSize: 10, fontWeight: 700, cursor: actionLoading ? 'wait' : 'pointer', opacity: actionLoading ? 0.5 : 1,
+          }}
+        >
+          {actionLoading === 'sync' ? 'SYNCING...' : 'SYNC NOW'}
+        </button>
       </div>
 
       {/* Action result banner */}

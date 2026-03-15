@@ -470,6 +470,14 @@ export async function cleanStaleOrders() {
   return request('/api/reconciliation/clean-stale', { method: 'POST' }, 'gateway');
 }
 
+export async function runSyncNow() {
+  return request('/api/sync/run', { method: 'POST' }, 'gateway');
+}
+
+export async function getSyncAnomalies() {
+  return request('/api/sync/anomalies', {}, 'gateway');
+}
+
 export async function createCredential(data: {
   service_account_id?: string;
   user_id?: string;
