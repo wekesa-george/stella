@@ -1410,33 +1410,37 @@ export default function BotDetailPage() {
     })();
   }, [botId]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const posResult = await getBotPositions(botId);
-        if (posResult.data && Array.isArray(posResult.data)) {
-          setPositions(posResult.data
-            .filter((p: any) => !p.status || p.status === "open")
-            .map((p: any) => ({
-              id: p.id ?? p.position_id ?? "",
-              pair: p.symbol ?? p.pair ?? "",
-              side: (p.side ?? "LONG").toUpperCase(),
-              entry: Number(p.entry_price ?? p.entry ?? 0),
-              current: Number(p.current_price ?? p.mark_price ?? p.entry_price ?? 0),
-              qty: Number(p.quantity ?? p.size ?? 0),
-              size: Number(p.quantity ?? p.size ?? 0),
-              pnl: Number(p.unrealized_pnl ?? p.pnl ?? 0),
-              pnlPct: Number(p.pnl_pct ?? 0),
-              age: formatAge(p.opened_at),
-            })));
-        }
-      } catch {
-        setPositionsError(true);
-      } finally {
-        setPositionsLoading(false);
+  const fetchPositions = useCallback(async () => {
+    try {
+      const posResult = await getBotPositions(botId);
+      if (posResult.data && Array.isArray(posResult.data)) {
+        setPositions(posResult.data
+          .filter((p: any) => !p.status || p.status === "open")
+          .map((p: any) => ({
+            id: p.id ?? p.position_id ?? "",
+            pair: p.trading_pair ?? p.symbol ?? p.pair ?? "",
+            side: (p.side ?? "LONG").toUpperCase(),
+            entry: Number(p.entry_price ?? p.entry ?? 0),
+            current: Number(p.current_price ?? p.mark_price ?? p.entry_price ?? 0),
+            qty: Number(p.quantity ?? p.position_size ?? p.size ?? 0),
+            size: Number(p.quantity ?? p.position_size ?? p.size ?? 0),
+            pnl: Number(p.unrealized_pnl ?? p.pnl ?? 0),
+            pnlPct: Number(p.unrealized_pnl_pct ?? p.pnl_pct ?? 0),
+            age: formatAge(p.entry_time ?? p.opened_at),
+          })));
       }
-    })();
+    } catch {
+      setPositionsError(true);
+    } finally {
+      setPositionsLoading(false);
+    }
   }, [botId]);
+
+  useEffect(() => { fetchPositions(); }, [fetchPositions]);
+  useEffect(() => {
+    const interval = setInterval(fetchPositions, 15_000);
+    return () => clearInterval(interval);
+  }, [fetchPositions]);
 
   useEffect(() => {
     (async () => {
