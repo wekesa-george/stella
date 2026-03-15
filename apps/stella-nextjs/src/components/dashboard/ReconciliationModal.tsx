@@ -431,10 +431,16 @@ function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMa
     setActionResult(null);
     try {
       const res = await recoverOrphanOrders();
+      console.log('[Reconciliation] recover response:', JSON.stringify(res, null, 2));
       const body = (res.data as any)?.data ?? res.data;
-      setActionResult({ type: 'recover', ...body });
+      if (res.error) {
+        setActionResult({ type: 'recover', error: res.error });
+      } else {
+        setActionResult({ type: 'recover', ...(body || {}), recovered: body?.recovered ?? 0, skipped: body?.skipped ?? 0 });
+      }
       onRefresh?.();
     } catch (e: any) {
+      console.error('[Reconciliation] recover error:', e);
       setActionResult({ type: 'recover', error: e.message || 'Recovery failed' });
     } finally {
       setActionLoading(null);
@@ -516,7 +522,11 @@ function OrdersTab({ data, credentialMap, onRefresh }: { data: any; credentialMa
             ? `Error: ${actionResult.error}`
             : actionResult.type === 'cancel'
               ? `Cancelled: ${actionResult.cancelled ?? 0} | Failed: ${actionResult.failed ?? 0}`
-              : `Cleaned: ${actionResult.cleaned ?? 0} / ${actionResult.total ?? 0}`
+              : actionResult.type === 'recover'
+                ? `Recovered: ${actionResult.recovered ?? 0} | Skipped: ${actionResult.skipped ?? 0}${actionResult.results?.filter((r: any) => r.status === 'skipped').map((r: any) => ` — ${r.symbol}: ${r.reason}`).join('') || ''}`
+                : actionResult.type === 'sync'
+                  ? actionResult.message || `Sync complete`
+                  : `Cleaned: ${actionResult.cleaned ?? 0} / ${actionResult.total ?? 0}`
           }
         </div>
       )}
