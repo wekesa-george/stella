@@ -11,18 +11,14 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
 
   ## Per-Asset Configuration
 
-  Only assets with proven profitable filter combinations (from 5-year backtest)
-  are eligible for this strategy. Currently supported: ETHUSDT, BTCUSDT, BNBUSDT.
+  Per-asset physics params are resolved in priority order:
+  1. Bot config `pair_overrides.{SYMBOL}` — highest priority, per-bot customization
+  2. Hardcoded `@asset_configs` — battle-tested defaults from 5-year backtests
+  3. Global defaults — conservative fallback for any unsupported pair
 
-  Each asset has its own:
-  - Confidence thresholds (min_confidence_long/short)
-  - Minimum MAR (momentum-ATR ratio) floor
-  - KE (kinetic energy) percentile range
+  Any trading pair is allowed. Pairs without explicit config use conservative defaults.
 
-  Assets not in the supported list will be rejected at signal generation.
-  Use `supported_symbols/0` or `supported_symbol?/1` to check eligibility.
-
-  ## Global Config Keys (from strategy.strategies.config or bot.config)
+  ## Config Keys (from bot.config or strategy.strategies.config)
 
     - target_profit_usd: float (default 0.50)
     - min_impulse_pct: float (default 0.001)
@@ -34,6 +30,7 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     - min_confidence_short: integer (default 60, overridden per-asset)
     - max_positions: integer (default 3)
     - max_position_pct: float (default 0.15)
+    - pair_overrides: map of symbol → per-pair config overrides
   """
 
   @behaviour TradeEngine.Strategies.Behaviour
@@ -55,25 +52,33 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     "max_position_pct" => 0.15
   }
 
-  # Per-asset physics configs — data-driven from 5-year backtest (1,724 trades)
-  # Only assets with proven profitable filter combinations are included.
-  # Assets not listed here are NOT eligible for the physics strategy.
+  # Default per-asset config for unsupported/unknown pairs — conservative
+  @default_asset_config %{
+    "min_confidence_long" => 65,
+    "min_confidence_short" => 70,
+    "min_mar" => 0.5,
+    "ke_pct_min" => 50,
+    "ke_pct_max" => 95
+  }
+
+  # Per-asset physics configs — battle-tested from 5-year backtest (1,724 trades)
+  # These serve as DEFAULTS — bot config pair_overrides take priority.
   @asset_configs %{
     "ETHUSDT" => %{
       "min_confidence_long" => 60,
       "min_confidence_short" => 60,
-      "min_mar" => 0.4,           # MAR < 0.4 loses money on ETH
-      "ke_pct_min" => 50,         # KE percentile floor
-      "ke_pct_max" => 95,         # KE percentile ceiling (overextended above)
-      # 5yr stats: 132 trades, WR 53.8%, PF 1.39 with these filters
+      "min_mar" => 0.4,
+      "ke_pct_min" => 50,
+      "ke_pct_max" => 95,
+      # 5yr stats: 132 trades, WR 53.8%, PF 1.39
     },
     "BTCUSDT" => %{
       "min_confidence_long" => 68,
       "min_confidence_short" => 65,
       "min_mar" => 0.4,
-      "ke_pct_min" => 75,         # BTC needs higher KE to perform
+      "ke_pct_min" => 75,
       "ke_pct_max" => 90,
-      # 5yr stats: 35 trades, WR 54.3%, PF 1.17 with these filters
+      # 5yr stats: 35 trades, WR 54.3%, PF 1.17
     },
     "BNBUSDT" => %{
       "min_confidence_long" => 65,
@@ -81,28 +86,35 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
       "min_mar" => 0.4,
       "ke_pct_min" => 75,
       "ke_pct_max" => 90,
-      # 5yr stats: 36 trades, WR 52.8%, PF 1.61 with these filters (small sample)
+      # 5yr stats: 36 trades, WR 52.8%, PF 1.61 (small sample)
     }
   }
 
   @doc """
-  Returns the per-asset physics config for a given symbol.
-  Returns nil if the asset is not supported by the physics strategy.
+  Returns the effective per-asset physics config for a given symbol.
+  Merges: default_asset_config < @asset_configs < bot pair_overrides.
   """
-  def asset_config(symbol) do
+  def asset_config(symbol, bot_config \\ %{}) do
     normalized = normalize_symbol(symbol)
-    Map.get(@asset_configs, normalized)
+    hardcoded = Map.get(@asset_configs, normalized, %{})
+    pair_overrides = get_pair_override(bot_config, normalized)
+
+    @default_asset_config
+    |> Map.merge(hardcoded)
+    |> Map.merge(pair_overrides)
   end
 
   @doc """
-  Returns the list of symbols supported by the physics strategy.
+  Returns the list of symbols with hardcoded backtest-proven configs.
+  Note: any symbol can now trade — these just have optimized defaults.
   """
   def supported_symbols do
     Map.keys(@asset_configs)
   end
 
   @doc """
-  Returns true if the given symbol is supported by the physics strategy.
+  Returns true if the symbol has hardcoded backtest-proven config.
+  Note: symbols without it can still trade using defaults or pair_overrides.
   """
   def supported_symbol?(symbol) do
     normalized = normalize_symbol(symbol)
@@ -122,23 +134,21 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
   @impl true
   def generate_signal(candles, order_flow, context) do
     symbol = Map.get(context, :symbol, "UNKNOWN")
+    config = get_config(context)
     normalized = normalize_symbol(symbol)
 
-    if not Map.has_key?(@asset_configs, normalized) do
-      {:error, {:asset_not_supported, normalized, Map.keys(@asset_configs)}}
-    else
-      asset_opts = Map.get(@asset_configs, normalized, %{})
+    # Resolve per-asset opts: pair_overrides > @asset_configs > defaults
+    asset_opts = asset_config(normalized, config)
 
-      case KlineStream.get_recent_candles(symbol, 20) do
-        recent when is_list(recent) and length(recent) >= 5 ->
-          SignalGenerator.generate_signal(recent, order_flow, symbol, asset_opts)
-        _ ->
-          if is_list(candles) and length(candles) >= 5 do
-            SignalGenerator.generate_signal(candles, order_flow, symbol, asset_opts)
-          else
-            {:error, :insufficient_candles}
-          end
-      end
+    case KlineStream.get_recent_candles(symbol, 20) do
+      recent when is_list(recent) and length(recent) >= 5 ->
+        SignalGenerator.generate_signal(recent, order_flow, symbol, asset_opts)
+      _ ->
+        if is_list(candles) and length(candles) >= 5 do
+          SignalGenerator.generate_signal(candles, order_flow, symbol, asset_opts)
+        else
+          {:error, :insufficient_candles}
+        end
     end
   end
 
@@ -149,19 +159,16 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     symbol = signal.symbol
     normalized = normalize_symbol(symbol)
 
-    # Get per-asset config (overrides defaults for confidence)
-    asset_cfg = Map.get(@asset_configs, normalized, %{})
+    # Resolve per-asset config: pair_overrides > @asset_configs > defaults
+    asset_cfg = asset_config(normalized, config)
 
     # Per-asset confidence thresholds take priority over global defaults
-    min_conf_long = Map.get(asset_cfg, "min_confidence_long", config["min_confidence_long"])
-    min_conf_short = Map.get(asset_cfg, "min_confidence_short", config["min_confidence_short"])
+    min_conf_long = asset_cfg["min_confidence_long"] || config["min_confidence_long"]
+    min_conf_short = asset_cfg["min_confidence_short"] || config["min_confidence_short"]
 
     positions = Map.get(context, :positions, %{})
     count = map_size(positions)
     has_symbol = Enum.any?(Map.values(positions), &(&1.symbol == signal.symbol))
-
-    # Asset must be in the supported list
-    asset_ok = Map.has_key?(@asset_configs, normalized)
 
     confidence_ok = case signal.direction do
       :long -> signal.confidence >= min_conf_long
@@ -178,7 +185,7 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     impulse_ok = has_tradeable_impulse?(signal, config)
     position_ok = count < max_positions and not has_symbol
 
-    asset_ok and confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok
+    confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok
   end
 
   @doc """
@@ -191,15 +198,13 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     symbol = signal.symbol
     normalized = normalize_symbol(symbol)
 
-    asset_cfg = Map.get(@asset_configs, normalized, %{})
-    min_conf_long = Map.get(asset_cfg, "min_confidence_long", config["min_confidence_long"])
-    min_conf_short = Map.get(asset_cfg, "min_confidence_short", config["min_confidence_short"])
+    asset_cfg = asset_config(normalized, config)
+    min_conf_long = asset_cfg["min_confidence_long"] || config["min_confidence_long"]
+    min_conf_short = asset_cfg["min_confidence_short"] || config["min_confidence_short"]
 
     positions = Map.get(context, :positions, %{})
     count = map_size(positions)
     has_symbol = Enum.any?(Map.values(positions), &(&1.symbol == signal.symbol))
-
-    asset_ok = Map.has_key?(@asset_configs, normalized)
 
     confidence_ok = case signal.direction do
       :long -> signal.confidence >= min_conf_long
@@ -224,10 +229,11 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     target = get_impulse_target(signal)
     impulse_pct = if entry && target && entry > 0, do: Float.round(abs(target - entry) / entry, 6), else: nil
 
+    has_pair_override = get_pair_override(config, normalized) != %{}
+
     %{
-      result: asset_ok and confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok,
+      result: confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok,
       checks: %{
-        asset_ok: asset_ok,
         confidence_ok: confidence_ok,
         mar_ok: mar_ok,
         ke_ok: ke_ok,
@@ -239,10 +245,10 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
         confidence: signal.confidence,
         min_confidence_required: (if signal.direction == :long, do: min_conf_long, else: min_conf_short),
         mar: Float.round(mar, 4),
-        min_mar: Map.get(asset_cfg, "min_mar"),
+        min_mar: asset_cfg["min_mar"],
         kinetic_energy: ke,
         energy_state: energy_state,
-        ke_pct_range: "#{Map.get(asset_cfg, "ke_pct_min")}-#{Map.get(asset_cfg, "ke_pct_max")}",
+        ke_pct_range: "#{asset_cfg["ke_pct_min"]}-#{asset_cfg["ke_pct_max"]}",
         entry_price: entry,
         impulse_target: target,
         impulse_pct: impulse_pct,
@@ -253,7 +259,8 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
         atr_pct: atr_pct,
         trajectory_angle: physics[:trajectory_angle],
         velocity: physics[:velocity],
-        gravity: physics[:gravity]
+        gravity: physics[:gravity],
+        config_source: if(has_pair_override, do: "pair_overrides", else: if(Map.has_key?(@asset_configs, normalized), do: "hardcoded", else: "defaults"))
       }
     }
   end
@@ -336,6 +343,17 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     Map.merge(@defaults, user_config)
   end
 
+  # Get pair_overrides for a symbol from bot config
+  # Supports both string and atom keys, normalizes symbol
+  defp get_pair_override(config, normalized) when is_map(config) do
+    overrides = config["pair_overrides"] || config[:pair_overrides] || %{}
+    # Try exact match, then with common suffixes stripped
+    Map.get(overrides, normalized) ||
+      Map.get(overrides, String.downcase(normalized)) ||
+      %{}
+  end
+  defp get_pair_override(_, _), do: %{}
+
   # Normalize symbol from various formats to uppercase no-separator form
   # "BTC/USDT" → "BTCUSDT", "BTC/USDT:USDT" → "BTCUSDT", "BTCUSDT" → "BTCUSDT"
   defp normalize_symbol(symbol) when is_binary(symbol) do
@@ -349,7 +367,7 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
 
   # Check MAR (momentum-ATR ratio) filter from per-asset config
   defp check_mar_filter(signal, asset_cfg) do
-    min_mar = Map.get(asset_cfg, "min_mar")
+    min_mar = asset_cfg["min_mar"]
 
     if min_mar && signal[:physics] do
       momentum = signal.physics[:momentum] || 0
@@ -357,32 +375,25 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
       mar = abs(momentum) / max(atr_pct, 0.0001)
       mar >= min_mar
     else
-      true  # No MAR filter configured — pass through
+      true
     end
   end
 
   # Check KE (kinetic energy) percentile filter from per-asset config
-  # We approximate percentile using absolute KE thresholds derived from backtest data
-  # ETH KE percentile 50 ≈ 0.15, 95 ≈ 8.0
-  # BTC KE percentile 75 ≈ 0.5, 90 ≈ 3.0
-  # BNB KE percentile 75 ≈ 0.4, 90 ≈ 2.5
   defp check_ke_filter(signal, asset_cfg) do
-    ke_pct_min = Map.get(asset_cfg, "ke_pct_min")
-    ke_pct_max = Map.get(asset_cfg, "ke_pct_max")
+    ke_pct_min = asset_cfg["ke_pct_min"]
+    ke_pct_max = asset_cfg["ke_pct_max"]
 
     if ke_pct_min && ke_pct_max && signal[:physics] do
       ke = signal.physics[:kinetic_energy] || 0
       energy_state = signal.physics[:energy_state]
 
-      # Use energy_state as a proxy for KE percentile ranges:
-      # :low ≈ p0-25, :medium ≈ p25-85, :high ≈ p85+
-      # For tighter filters (p75-90), we check both state and relative KE
       cond do
-        # If asset wants p50-95 range (ETH): allow medium and moderate-high
+        # Wide range (p50-95): allow medium and moderate-high
         ke_pct_min <= 50 and ke_pct_max >= 95 ->
           energy_state in [:medium, :high] and ke < ke_overextended_threshold(signal.symbol)
 
-        # If asset wants p75-90 range (BTC, BNB): need elevated but not extreme KE
+        # Narrow high range (p75-90): need elevated but not extreme KE
         ke_pct_min >= 75 ->
           ke >= ke_elevated_threshold(signal.symbol) and
             ke < ke_overextended_threshold(signal.symbol)
@@ -392,28 +403,26 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
           ke < ke_overextended_threshold(signal.symbol)
       end
     else
-      true  # No KE filter configured — pass through
+      true
     end
   end
 
-  # KE thresholds derived from per-asset backtest percentile analysis
-  # These approximate the percentile boundaries from 5-year data
   defp ke_elevated_threshold(symbol) do
     normalized = normalize_symbol(symbol)
     case normalized do
-      "BTCUSDT" -> 0.5    # ~p75
-      "BNBUSDT" -> 0.4    # ~p75
-      _ -> 0.3            # Conservative default
+      "BTCUSDT" -> 0.5
+      "BNBUSDT" -> 0.4
+      _ -> 0.3
     end
   end
 
   defp ke_overextended_threshold(symbol) do
     normalized = normalize_symbol(symbol)
     case normalized do
-      "ETHUSDT" -> 8.0    # ~p95
-      "BTCUSDT" -> 3.0    # ~p90
-      "BNBUSDT" -> 2.5    # ~p90
-      _ -> 5.0            # Conservative default
+      "ETHUSDT" -> 8.0
+      "BTCUSDT" -> 3.0
+      "BNBUSDT" -> 2.5
+      _ -> 5.0
     end
   end
 
