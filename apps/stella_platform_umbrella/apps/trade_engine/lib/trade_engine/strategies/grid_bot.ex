@@ -200,29 +200,29 @@ defmodule TradeEngine.Strategies.GridBot do
   def analyze_grid_state(grid_levels, current_price, context) do
     # Grid positions tracked in bot state (keyed by rounded price from exchange)
     existing_grid_orders = Map.get(context, :grid_orders, %{})
-
-    # Build a set of existing order prices for fast lookup.
-    # grid_orders keys are rounded to exchange precision (e.g. 71285.7),
-    # but grid_levels are raw floats (e.g. 71285.71428571).
-    # We need to check if any existing key is "close enough" to the level.
     existing_prices = Map.keys(existing_grid_orders) |> MapSet.new()
 
-    # A level is covered if any existing order price rounds to the same value
-    # or is within 0.01% of the level (handles float precision differences)
-    level_covered? = fn level ->
-      MapSet.member?(existing_prices, level) or
-        Enum.any?(existing_prices, fn p ->
-          abs(p - level) / max(abs(level), 1) < 0.0001
-        end)
-    end
+    # Determine price precision from existing orders or from price magnitude.
+    # Exchange rounds prices to a specific decimal precision. We need to round
+    # our grid levels the same way to avoid float mismatches AND collisions.
+    price_precision = infer_price_precision(current_price, existing_prices)
+
+    # Round grid levels to exchange precision and deduplicate.
+    # Multiple raw levels may round to the same price — we only need one.
+    rounded_levels = grid_levels
+      |> Enum.map(fn level -> Float.round(level * 1.0, price_precision) end)
+      |> Enum.uniq()
+
+    # A level is covered if the rounded price exists in grid_orders
+    level_covered? = fn level -> MapSet.member?(existing_prices, level) end
 
     # Levels below current price → buy orders
     # Levels above current price → sell orders
-    buy_levels = grid_levels
+    buy_levels = rounded_levels
       |> Enum.filter(fn level -> level < current_price and not level_covered?.(level) end)
       |> Enum.sort(:desc) # Closest to price first
 
-    sell_levels = grid_levels
+    sell_levels = rounded_levels
       |> Enum.filter(fn level -> level > current_price and not level_covered?.(level) end)
       |> Enum.sort(:asc) # Closest to price first
 
@@ -284,6 +284,33 @@ defmodule TradeEngine.Strategies.GridBot do
       |> Map.put("lower_price", new_lower)
       |> Map.put("stop_loss_price", new_stop)
       |> Map.put("take_profit_price", nil)  # Clear TP on restart
+    end
+  end
+
+  # Infer price precision from existing order prices or price magnitude.
+  # If we have existing orders, use the maximum decimal places found in their prices.
+  # Otherwise, estimate from price magnitude (BTC=1, ETH=2, altcoins=2-4).
+  defp infer_price_precision(current_price, existing_prices) do
+    if MapSet.size(existing_prices) > 0 do
+      # Count decimal places in existing order prices
+      existing_prices
+      |> Enum.map(fn p ->
+        s = Float.to_string(p * 1.0)
+        case String.split(s, ".") do
+          [_, decimals] -> String.length(String.trim_trailing(decimals, "0"))
+          _ -> 0
+        end
+      end)
+      |> Enum.max(fn -> 2 end)
+    else
+      # Estimate from price magnitude
+      cond do
+        current_price >= 10_000 -> 1  # BTC-level
+        current_price >= 100 -> 2     # ETH, BNB-level
+        current_price >= 1 -> 2       # SOL, SUI, AVAX-level
+        current_price >= 0.01 -> 4    # Low-cap altcoins
+        true -> 6                     # Micro-cap
+      end
     end
   end
 
