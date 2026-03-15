@@ -251,7 +251,7 @@ defmodule TradeEngine.Reconciliation do
   Returns {:ok, %{matched, stale_exchange, missing_db, status_mismatch, ...}}
   """
   def reconcile_orders do
-    credentials = get_futures_credentials()
+    credentials = CredentialDiscovery.get_all_active_credentials()
     started_at = System.monotonic_time(:millisecond)
 
     {all_results, errors} =
@@ -325,12 +325,29 @@ defmodule TradeEngine.Reconciliation do
     |> Enum.filter(&(&1.exchange_order_id))
     |> Map.new(fn o -> {to_string(o.exchange_order_id), o} end)
 
-    # Fetch open orders from exchange for each symbol
+    # Build a map of symbol → market_type from running bots
+    bot_market_types = try do
+      BotRegistry.list_bots()
+      |> Enum.filter(fn bot -> Map.get(bot, :credential_id) == credential_id end)
+      |> Enum.flat_map(fn bot ->
+        market_type = Map.get(bot, :market_type, "spot")
+        (Map.get(bot, :trading_pairs) || [])
+        |> Enum.map(fn pair -> {pair, market_type} end)
+      end)
+      |> Map.new()
+    rescue
+      _ -> %{}
+    end
+
+    # Fetch open orders from exchange for each symbol using correct market type
     exchange_orders = symbols
     |> Enum.flat_map(fn symbol ->
-      case Executor.get_open_orders(credential_id, symbol, market_type: "usds_futures") do
+      market_type = Map.get(bot_market_types, symbol, "usds_futures")
+      case Executor.get_open_orders(credential_id, symbol, market_type: market_type) do
         {:ok, orders} when is_list(orders) ->
-          Enum.map(orders, &Map.put(&1, :credential_id, credential_id))
+          Enum.map(orders, fn o ->
+            o |> Map.put(:credential_id, credential_id) |> Map.put(:market_type, market_type)
+          end)
         _ -> []
       end
     end)
