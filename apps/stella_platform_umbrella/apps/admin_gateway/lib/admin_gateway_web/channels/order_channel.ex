@@ -16,10 +16,12 @@ defmodule AdminGatewayWeb.OrderChannel do
 
   @impl true
   def handle_info(:after_join, socket) do
-    Phoenix.PubSub.subscribe(@pubsub, "orders:updates")
-
     if bot_id = socket.assigns[:bot_id] do
+      # Bot-specific channel: only receive orders for THIS bot
       Phoenix.PubSub.subscribe(@pubsub, "orders:bot:#{bot_id}")
+    else
+      # Lobby channel: receive all order events
+      Phoenix.PubSub.subscribe(@pubsub, "orders:updates")
     end
 
     {:noreply, socket}
