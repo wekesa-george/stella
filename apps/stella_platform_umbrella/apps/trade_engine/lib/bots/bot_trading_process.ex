@@ -155,6 +155,9 @@ defmodule TradeEngine.Bots.BotTradingProcess do
         Process.send_after(self(), :update_prices, @price_update_interval_ms)
         Process.send_after(self(), :poll_candles, @candle_poll_interval_ms)
 
+        # ALL bots: clean up stale DB orders every 60s
+        Process.send_after(self(), :cleanup_stale_orders, 30_000)
+
         # Grid bot: check for filled orders every 10s + adopt exchange positions
         # Reconcile exchange orders with DB-recovered grid orders on startup
         if is_grid do
@@ -353,6 +356,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
     else
       {:noreply, state}
     end
+  end
+
+  def handle_info(:cleanup_stale_orders, state) do
+    Process.send_after(self(), :cleanup_stale_orders, 60_000)
+    {:noreply, cleanup_stale_db_orders(state)}
   end
 
   @impl true
@@ -2047,6 +2055,61 @@ defmodule TradeEngine.Bots.BotTradingProcess do
   rescue
     e ->
       BotLogger.warning(state.bot_id, :grid, "sync_exchange_positions_to_db failed", %{error: Exception.message(e)})
+      state
+  end
+
+  # Clean up stale DB orders: mark orders as cancelled/filled if they're no longer
+  # on the exchange. Runs for ALL bot types (not just grid bots).
+  defp cleanup_stale_db_orders(state) do
+    import Ecto.Query
+
+    # Get all "open" or "submitted" orders for this bot
+    db_open = Repo.all(
+      from(o in TradeEngine.Trading.Order,
+        where: o.bot_id == ^state.bot_id and o.status in ["open", "submitted"],
+        select: %{id: o.id, exchange_order_id: o.exchange_order_id, symbol: o.symbol}
+      )
+    )
+
+    if db_open == [] do
+      state
+    else
+      # Get exchange open orders for each symbol this bot trades
+      symbols = state.trading_pairs || []
+      exchange_order_ids = Enum.reduce(symbols, MapSet.new(), fn sym, acc ->
+        case Executor.get_open_orders(state.credential_id, sym, market_type: state.market_type) do
+          {:ok, orders} when is_list(orders) ->
+            orders
+            |> Enum.map(fn o -> to_string(o[:order_id] || o.order_id) end)
+            |> Enum.into(acc)
+          _ -> acc
+        end
+      end)
+
+      # Find DB orders not on exchange
+      stale = Enum.filter(db_open, fn o ->
+        o.exchange_order_id && not MapSet.member?(exchange_order_ids, to_string(o.exchange_order_id))
+      end)
+
+      if length(stale) > 0 do
+        stale_ids = Enum.map(stale, & &1.id)
+        {updated, _} = Repo.update_all(
+          from(o in TradeEngine.Trading.Order, where: o.id in ^stale_ids and o.status in ["open", "submitted"]),
+          set: [status: "cancelled", cancel_reason: "auto_cleanup: gone from exchange"]
+        )
+
+        if updated > 0 do
+          BotLogger.info(state.bot_id, :lifecycle, "Cleaned up stale DB orders", %{
+            cleaned: updated, total_open: length(db_open)
+          })
+        end
+      end
+
+      state
+    end
+  rescue
+    e ->
+      BotLogger.warning(state.bot_id, :lifecycle, "Stale order cleanup failed", %{error: Exception.message(e)})
       state
   end
 
