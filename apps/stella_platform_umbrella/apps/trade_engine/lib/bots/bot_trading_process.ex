@@ -1086,6 +1086,19 @@ defmodule TradeEngine.Bots.BotTradingProcess do
 
   defp get_strategy_param(_, _, default), do: default
 
+  # Safely convert any value to integer (handles float, string, Decimal, nil)
+  defp safe_integer(nil, default), do: default
+  defp safe_integer(n, _default) when is_integer(n), do: n
+  defp safe_integer(n, _default) when is_float(n), do: trunc(n)
+  defp safe_integer(s, default) when is_binary(s) do
+    case Integer.parse(s) do
+      {i, _} -> i
+      :error -> default
+    end
+  end
+  defp safe_integer(%Decimal{} = d, _default), do: Decimal.to_integer(d)
+  defp safe_integer(_, default), do: default
+
   # Normalize CCXT symbol to exchange format
   # "BTC/USDT:USDT-260327" → "BTCUSDT_260327" (delivery futures)
   # "BTC/USDT:USDT" → "BTCUSDT" (perpetual)
@@ -2227,7 +2240,8 @@ defmodule TradeEngine.Bots.BotTradingProcess do
                 entry_price: Decimal.from_float(entry + 0.0),
                 current_price: Decimal.from_float(mark + 0.0),
                 unrealized_profit_loss: Decimal.from_float(pnl + 0.0),
-                leverage: trunc(pos.leverage || 1)
+                position_type: direction,
+                leverage: safe_integer(pos.leverage, 1)
               })) do
                 {:ok, _} -> Logger.info("Updated adopted position #{existing.id}")
                 {:error, err} -> Logger.warning("Failed to update adopted position: #{inspect(err)}")
@@ -2247,7 +2261,7 @@ defmodule TradeEngine.Bots.BotTradingProcess do
                 user_id: state.user_id,
                 bot_id: bot_id,
                 credential_id: credential_id,
-                leverage: trunc(pos.leverage || 1),
+                leverage: safe_integer(pos.leverage, 1),
                 metadata: %{"type" => "adopted", "exchange_symbol" => pos.symbol}
               }
               case Repo.insert(TradeEngine.Trading.Position.changeset(%TradeEngine.Trading.Position{}, attrs)) do
