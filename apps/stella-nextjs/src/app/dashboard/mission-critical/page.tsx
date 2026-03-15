@@ -997,8 +997,8 @@ function BotFleetCard({ bots: botList, onPauseBot, onStartBot, onStopBot, onNavi
                 )}
                 {/* Transitioning indicator */}
                 {isTransitioning && (
-                  <span style={{ fontFamily:"var(--mono)", fontSize:6, color:"var(--bl)" }}>
-                    {b.status === "initializing" ? "starting" : "stopping"}
+                  <span style={{ fontFamily:"var(--mono)", fontSize:6, color:"var(--bl)", animation:"pulse 1.5s infinite" }}>
+                    {b.status === "initializing" ? "starting…" : "stopping…"}
                   </span>
                 )}
               </div>
@@ -3284,7 +3284,8 @@ function MissionCriticalDashboard() {
     }
     const fullBot = bots.find(b => b.id.startsWith(botId) || b.id === botId);
     if (fullBot) {
-      await stopBot(fullBot.id);
+      setBots(prev => prev.map(b => b.id === fullBot.id ? { ...b, status: "stopping" as any } : b));
+      await stopBot(fullBot.id).catch(console.error);
       setBots(prev => prev.map(b => b.id === fullBot.id ? { ...b, status: "stopped" as any } : b));
     }
   }, [isTrainingMode, training, bots]);

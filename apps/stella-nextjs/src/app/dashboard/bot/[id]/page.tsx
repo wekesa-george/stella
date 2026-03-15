@@ -1266,7 +1266,7 @@ function ActionButtons({ bot, onPauseResume, onStop, onStart, onDelete }: {
     </>
   );
   if (status === "initializing" || status === "stopping") return (
-    <span style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--blue)" }}>
+    <span style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--blue)", animation:"pulse 1.5s infinite" }}>
       {status === "initializing" ? "Initializing…" : "Stopping…"}
     </span>
   );
@@ -1674,6 +1674,7 @@ export default function BotDetailPage() {
   };
 
   const handleStop = async () => {
+    setBot(prev => prev ? { ...prev, status: "stopping" } : prev);
     await stopBot(botId).catch(console.error);
     setBot(prev => prev ? { ...prev, status: "stopped" } : prev);
   };
