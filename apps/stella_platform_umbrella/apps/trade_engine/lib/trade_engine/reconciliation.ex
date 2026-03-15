@@ -444,9 +444,9 @@ defmodule TradeEngine.Reconciliation do
   defp get_balance_comparison(credential_id) do
     case Executor.get_balance(credential_id, market_type: "usds_futures") do
       {:ok, balance_data} ->
-        total_wallet = parse_float(balance_data[:total_wallet_balance])
+        total_wallet = parse_float(balance_data[:total_wallet_balance] || balance_data[:total_balance])
         available = parse_float(balance_data[:available_balance])
-        cross_unrealized = parse_float(balance_data[:cross_unrealized_pnl])
+        cross_unrealized = parse_float(balance_data[:cross_unrealized_pnl] || balance_data[:unrealized_pnl])
 
         # Get virtual balance from ETS
         virtual = try do
@@ -658,12 +658,22 @@ defmodule TradeEngine.Reconciliation do
     end
   end
 
+  # Normalize CCXT symbol to exchange format
+  # "BTC/USDT:USDT-260327" → "BTCUSDT_260327" (delivery futures)
+  # "BTC/USDT:USDT" → "BTCUSDT" (perpetual)
+  # "BTC/USDT" → "BTCUSDT" (spot)
+  # "BTCUSDT_260327" → "BTCUSDT_260327" (already exchange format)
   defp normalize_symbol(sym) when is_binary(sym) do
-    sym
-    |> String.split(":")
-    |> List.first()
-    |> String.replace("/", "")
-    |> String.upcase()
+    case String.split(sym, ":") do
+      [base_quote, settle_part] ->
+        base = String.replace(base_quote, "/", "") |> String.upcase()
+        case String.split(settle_part, "-") do
+          [_settle, expiry] -> base <> "_" <> expiry
+          _ -> base
+        end
+      _ ->
+        sym |> String.replace("/", "") |> String.upcase()
+    end
   end
   defp normalize_symbol(_), do: ""
 

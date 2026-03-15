@@ -154,10 +154,14 @@ defmodule TradeEngine.Exchanges.Executor do
     end
   end
 
-  defp normalize_balance(%{total_wallet_balance: total, total_available_balance: avail, assets: assets}, _adapter, market_type) do
+  defp normalize_balance(%{total_wallet_balance: total, total_available_balance: avail, assets: assets} = data, _adapter, market_type) do
+    cross_unrealized = Enum.reduce(assets, 0.0, fn a, acc -> acc + (a[:unrealized_pnl] || 0.0) end)
     %{
       total_balance: total,
+      total_wallet_balance: total,
       available_balance: avail,
+      unrealized_pnl: cross_unrealized,
+      cross_unrealized_pnl: cross_unrealized,
       currency: "USDT",
       market_type: market_type,
       assets: assets
