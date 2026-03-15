@@ -20,6 +20,15 @@ defmodule AdminGatewayWeb.BotController do
     end
   end
 
+  @doc "Get current sync routine anomalies"
+  def sync_anomalies(conn, _params) do
+    anomalies = TradeEngine.Trading.SyncRoutine.get_anomalies()
+    json(conn, %{
+      anomalies: anomalies,
+      count: map_size(anomalies)
+    })
+  end
+
   @doc "Stop a single bot"
   def stop(conn, %{"id" => bot_id}) do
     case BotRegistry.stop_bot(bot_id) do

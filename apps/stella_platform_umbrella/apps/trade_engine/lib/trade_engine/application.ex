@@ -104,6 +104,9 @@ defmodule TradeEngine.Application do
       {Registry, keys: :unique, name: :binance_user_data_registry},
       {TradeEngine.Exchanges.Binance.UserDataStreamSupervisor, []},
 
+      # Periodic sync routine — reconciles DB with exchange every 2 minutes
+      {TradeEngine.Trading.SyncRoutine, []},
+
       # Exchange info cache (symbol filters, precisions — refreshes every 6h)
       {TradeEngine.Exchanges.Binance.ExchangeInfoCache, []},
 
