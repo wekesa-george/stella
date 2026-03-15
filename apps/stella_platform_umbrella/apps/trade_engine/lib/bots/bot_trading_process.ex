@@ -2207,12 +2207,11 @@ defmodule TradeEngine.Bots.BotTradingProcess do
               leverage: pos.leverage
             })
 
-            # Check if DB already has this position
+            # Check if DB already has this position (match by bot_id + open status)
             import Ecto.Query
             existing = TradeEngine.Repo.one(
               from(p in TradeEngine.Trading.Position,
                 where: p.bot_id == ^bot_id and p.status == "open",
-                where: fragment("? LIKE ?", p.symbol, ^"%#{pos.symbol}%"),
                 limit: 1
               )
             )
