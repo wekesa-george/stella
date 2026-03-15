@@ -455,17 +455,26 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
 
   @impl true
   def get_account(credentials) do
-    case signed_request(:get, spot_url(credentials) <> "/v3/account", %{}, credentials) do
+    url = spot_url(credentials) <> "/v3/account"
+    Logger.info("Binance get_account: url=#{url} base_url=#{credentials.base_url} has_key=#{credentials.api_key != nil}")
+
+    case signed_request(:get, url, %{}, credentials) do
       {:ok, %{"balances" => balances}} ->
         non_zero = Enum.filter(balances, fn b ->
           {free, _} = Float.parse(b["free"] || "0")
           {locked, _} = Float.parse(b["locked"] || "0")
           free > 0 or locked > 0
         end)
+        Logger.info("Binance get_account: success, #{length(non_zero)} non-zero assets")
         {:ok, %{balances: non_zero}}
 
-      error ->
+      {:error, reason} = error ->
+        Logger.warning("Binance get_account FAILED: url=#{url} | error=#{inspect(reason)}")
         error
+
+      other ->
+        Logger.warning("Binance get_account unexpected: url=#{url} | response=#{inspect(other)}")
+        other
     end
   end
 
@@ -1122,13 +1131,16 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         Jason.decode(body)
 
       {:ok, %{status_code: code, body: body}} when code in [401, 403] ->
-        Logger.error("Binance AUTH error [#{code}]: #{body} — invalidating credential cache")
-        # Immediately invalidate cached credentials so next call re-fetches from DB
-        try do
-          credential_id = Map.get(credentials, :credential_id)
-          if credential_id, do: TradeEngine.Exchanges.Executor.invalidate_cache(credential_id)
-        rescue
-          _ -> :ok
+        Logger.error("Binance AUTH error [#{code}]: url=#{url} | body=#{body}")
+        # Only invalidate cache for futures auth failures (spot may have different permissions)
+        is_futures_url = String.contains?(url, "fapi") or String.contains?(url, "dapi")
+        if is_futures_url do
+          try do
+            credential_id = Map.get(credentials, :credential_id)
+            if credential_id, do: TradeEngine.Exchanges.Executor.invalidate_cache(credential_id)
+          rescue
+            _ -> :ok
+          end
         end
         {:error, %{code: code, body: body, auth_failed: true}}
 
@@ -1137,7 +1149,7 @@ defmodule TradeEngine.Exchanges.Adapters.Binance do
         {:error, %{code: 429, body: body, rate_limited: true}}
 
       {:ok, %{status_code: code, body: body}} ->
-        Logger.error("Binance API error [#{code}]: #{body}")
+        Logger.error("Binance API error [#{code}]: url=#{url} | method=#{method} | body=#{body}")
         {:error, %{code: code, body: body}}
 
       {:error, %HTTPoison.Error{reason: reason}} ->

@@ -51,7 +51,7 @@ defmodule AdminGatewayWeb.CredentialController do
       {:error, reason} ->
         conn
         |> put_status(502)
-        |> json(%{error: "Failed to fetch balance: #{inspect(reason)}"})
+        |> json(%{error: "Failed to fetch balance: #{inspect(reason)}", market_type: market_type, credential_id: credential_id})
     end
   end
 
