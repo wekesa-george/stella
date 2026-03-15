@@ -2179,46 +2179,44 @@ defmodule TradeEngine.Bots.BotTradingProcess do
               )
             )
 
+            pos_symbol = List.first(trading_pairs) || pos.symbol
+            mark = pos.mark_price || entry
+
             if existing do
               # Update existing DB position with exchange values
-              {:ok, existing_id_bin} = Ecto.UUID.dump(existing.id)
-              TradeEngine.Repo.query(
-                """
-                UPDATE trading.positions
-                SET quantity = $1, entry_price = $2, current_price = $3,
-                    unrealized_pnl_usd = $4, leverage = $5, updated_at = NOW()
-                WHERE id = $6
-                """,
-                [Decimal.from_float(abs(amt + 0.0)), Decimal.from_float(entry + 0.0),
-                 Decimal.from_float((pos.mark_price || entry) + 0.0),
-                 Decimal.from_float(pnl + 0.0), trunc(pos.leverage || 1),
-                 existing_id_bin]
-              )
+              case Repo.update(TradeEngine.Trading.Position.changeset(existing, %{
+                quantity: Decimal.from_float(abs(amt + 0.0)),
+                remaining_quantity: Decimal.from_float(abs(amt + 0.0)),
+                entry_price: Decimal.from_float(entry + 0.0),
+                current_price: Decimal.from_float(mark + 0.0),
+                unrealized_profit_loss: Decimal.from_float(pnl + 0.0),
+                leverage: trunc(pos.leverage || 1)
+              })) do
+                {:ok, _} -> Logger.info("Updated adopted position #{existing.id}")
+                {:error, err} -> Logger.warning("Failed to update adopted position: #{inspect(err)}")
+              end
             else
-              # Create new DB position record
-              now = DateTime.utc_now()
-              pos_symbol = List.first(trading_pairs) || pos.symbol
-
-              {:ok, uuid_bin} = Ecto.UUID.dump(Ecto.UUID.generate())
-              {:ok, bot_bin} = Ecto.UUID.dump(bot_id)
-              {:ok, cred_bin} = Ecto.UUID.dump(credential_id)
-              user_bin = if state.user_id, do: elem(Ecto.UUID.dump(state.user_id), 1), else: nil
-
-              TradeEngine.Repo.query(
-                """
-                INSERT INTO trading.positions
-                  (id, bot_id, user_id, credential_id, trading_pair, side, status,
-                   entry_price, current_price, quantity, leverage,
-                   unrealized_pnl_usd, opened_at, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, $9, $10, $11, $12, $12, $12)
-                ON CONFLICT DO NOTHING
-                """,
-                [uuid_bin, bot_bin, user_bin, cred_bin,
-                 pos_symbol, direction,
-                 Decimal.from_float(entry + 0.0), Decimal.from_float((pos.mark_price || entry) + 0.0),
-                 Decimal.from_float(abs(amt + 0.0)), trunc(pos.leverage || 1),
-                 Decimal.from_float(pnl + 0.0), now]
-              )
+              # Create new DB position record via Ecto changeset
+              attrs = %{
+                symbol: pos_symbol,
+                position_type: direction,
+                quantity: Decimal.from_float(abs(amt + 0.0)),
+                remaining_quantity: Decimal.from_float(abs(amt + 0.0)),
+                entry_price: Decimal.from_float(entry + 0.0),
+                current_price: Decimal.from_float(mark + 0.0),
+                unrealized_profit_loss: Decimal.from_float(pnl + 0.0),
+                status: "open",
+                entry_time: DateTime.utc_now(),
+                user_id: state.user_id,
+                bot_id: bot_id,
+                credential_id: credential_id,
+                leverage: trunc(pos.leverage || 1),
+                metadata: %{"type" => "adopted", "exchange_symbol" => pos.symbol}
+              }
+              case Repo.insert(TradeEngine.Trading.Position.changeset(%TradeEngine.Trading.Position{}, attrs)) do
+                {:ok, p} -> Logger.info("Adopted position created: #{p.id} #{direction} #{abs(amt)} #{pos_symbol}")
+                {:error, err} -> Logger.warning("Failed to create adopted position: #{inspect(err)}")
+              end
             end
 
             # Alert about adoption

@@ -85,9 +85,60 @@ defmodule TradeEngine.Trading.Position do
       :kinetic_energy, :energy_state, :max_hold_time, :exit_reason,
       :highest_price, :lowest_price
     ])
-    |> validate_required([:symbol, :position_type, :quantity, :entry_price, :user_id])
+    |> validate_required([:symbol, :position_type, :quantity, :entry_price])
     |> validate_inclusion(:position_type, ["long", "short"])
-    |> validate_inclusion(:status, ["open", "closed", "liquidated"])
+    |> validate_inclusion(:status, ["open", "closing", "closed", "liquidated"])
+    |> ensure_required_db_fields()
+  end
+
+  # Fill in NOT NULL DB columns with sensible defaults when not provided.
+  # Prevents Postgrex errors on INSERT for service account bots (no user_id)
+  # and grid bots that don't know exchange_code/base_asset/quote_asset.
+  defp ensure_required_db_fields(changeset) do
+    changeset
+    |> maybe_default(:exchange_code, fn cs ->
+      # Derive from credential or default to "binance"
+      get_field(cs, :exchange_code) || "binance"
+    end)
+    |> maybe_default(:base_asset, fn cs ->
+      # Derive from symbol: "BTC/USDT:USDT-260327" → "BTC"
+      symbol = get_field(cs, :symbol) || ""
+      symbol |> String.split("/") |> List.first() |> String.split(":") |> List.first()
+    end)
+    |> maybe_default(:quote_asset, fn cs ->
+      # Derive from symbol: "BTC/USDT:USDT-260327" → "USDT"
+      symbol = get_field(cs, :symbol) || ""
+      parts = String.split(symbol, "/")
+      if length(parts) > 1 do
+        parts |> Enum.at(1) |> String.split(":") |> List.first()
+      else
+        "USDT"
+      end
+    end)
+    |> maybe_default_value(:remaining_quantity, fn cs ->
+      get_field(cs, :remaining_quantity) || get_field(cs, :quantity) || Decimal.new(0)
+    end)
+    |> maybe_default_value(:leverage, fn _cs -> Decimal.new(1) end)
+    |> maybe_default_value(:unrealized_profit_loss, fn _cs -> Decimal.new(0) end)
+    |> maybe_default_value(:roi_percentage, fn _cs -> Decimal.new(0) end)
+    |> maybe_default_value(:total_fees_usd, fn _cs -> Decimal.new(0) end)
+    |> maybe_default_value(:margin_used_usd, fn _cs -> Decimal.new(0) end)
+  end
+
+  defp maybe_default(changeset, field, resolver) do
+    if get_field(changeset, field) in [nil, ""] do
+      put_change(changeset, field, resolver.(changeset))
+    else
+      changeset
+    end
+  end
+
+  defp maybe_default_value(changeset, field, resolver) do
+    if is_nil(get_field(changeset, field)) do
+      put_change(changeset, field, resolver.(changeset))
+    else
+      changeset
+    end
   end
 
   def calculate_pnl(position, current_price) do
