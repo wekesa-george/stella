@@ -74,7 +74,9 @@ defmodule TradeEngine.Application do
       # Phase 2: Real-time P&L and position management
       {TradeEngine.Trading.PositionPnLManager, []},
       {TradeEngine.Trading.PositionCloseManager, []},
-      {TradeEngine.Trading.StaleOrderCanceller, []},
+      # DISABLED: StaleOrderCanceller was cancelling valid orders from running bots
+      # after 60 minutes. Replaced by SyncRoutine which checks exchange first.
+      # {TradeEngine.Trading.StaleOrderCanceller, []},
 
       # Phase 2: Monitoring and observability
       {TradeEngine.Infra.Monitor, []},

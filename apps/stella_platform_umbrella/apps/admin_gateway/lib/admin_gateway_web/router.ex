@@ -39,6 +39,7 @@ defmodule AdminGatewayWeb.Router do
     get "/reconciliation/balances", ReconciliationController, :balances
     get "/reconciliation/trades/:credential_id", ReconciliationController, :trades
     post "/reconciliation/cancel-orphans", ReconciliationController, :cancel_orphans
+    post "/reconciliation/recover-orders", ReconciliationController, :recover_orders
     post "/reconciliation/clean-stale", ReconciliationController, :clean_stale
 
     # Sync routine

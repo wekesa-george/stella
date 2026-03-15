@@ -48,6 +48,95 @@ defmodule AdminGatewayWeb.ReconciliationController do
   end
 
   @doc "POST /api/reconciliation/cancel-orphans — Cancel exchange orders not in DB"
+  @doc "POST /api/reconciliation/recover-orders — Recover exchange orders back to DB (only for running bots within grid range)"
+  def recover_orders(conn, _params) do
+    case Reconciliation.reconcile_orders() do
+      {:ok, %{missing_db: orphans}} when is_list(orphans) and length(orphans) > 0 ->
+        # Get running bots with their configs
+        running_bots = try do
+          TradeEngine.Bots.BotRegistry.list_bots()
+          |> Enum.filter(fn b -> Map.get(b, :status) in ["running", "initializing"] end)
+          |> Map.new(fn b -> {Map.get(b, :id), b} end)
+        rescue
+          _ -> %{}
+        end
+
+        results = Enum.map(orphans, fn order ->
+          coid = order[:client_order_id] || ""
+          # Extract bot_id from clientOrderId prefix (first 8 chars)
+          bot_prefix = if String.length(coid) >= 8, do: String.slice(coid, 0, 8), else: nil
+
+          # Find matching running bot
+          bot = if bot_prefix do
+            Enum.find_value(running_bots, fn {bot_id, bot} ->
+              if String.starts_with?(bot_id, bot_prefix), do: bot
+            end)
+          end
+
+          cond do
+            is_nil(bot) ->
+              %{exchange_order_id: order[:exchange_order_id], symbol: order[:symbol], status: "skipped", reason: "bot not running"}
+
+            true ->
+              # Check if order price falls within bot's grid range
+              config = Map.get(bot, :config, %{})
+              upper = config["upper_price"] || 0
+              lower = config["lower_price"] || 0
+              price = order[:price] || 0
+
+              if upper > 0 and lower > 0 and price >= lower and price <= upper do
+                # Recover: create DB order record
+                bot_id = Map.get(bot, :id)
+                order_attrs = %{
+                  symbol: List.first(Map.get(bot, :trading_pairs, [])) || order[:symbol],
+                  side: to_string(order[:side] || "") |> String.downcase(),
+                  order_type: "limit",
+                  quantity: to_decimal(order[:quantity]),
+                  price: to_decimal(order[:price]),
+                  limit_price: to_decimal(order[:price]),
+                  status: "open",
+                  submitted_at: DateTime.utc_now(),
+                  exchange_order_id: to_string(order[:exchange_order_id]),
+                  client_order_id: coid,
+                  bot_id: bot_id,
+                  credential_id: Map.get(bot, :credential_id),
+                  user_id: Map.get(bot, :user_id),
+                  strategy_id: Map.get(bot, :strategy_id),
+                  metadata: %{"recovered" => true, "recovered_at" => DateTime.to_iso8601(DateTime.utc_now())}
+                }
+
+                case TradeEngine.Repo.insert(TradeEngine.Trading.Order.changeset(%TradeEngine.Trading.Order{}, order_attrs)) do
+                  {:ok, _} -> %{exchange_order_id: order[:exchange_order_id], symbol: order[:symbol], price: order[:price], status: "recovered"}
+                  {:error, err} -> %{exchange_order_id: order[:exchange_order_id], symbol: order[:symbol], status: "failed", reason: inspect(err)}
+                end
+              else
+                %{exchange_order_id: order[:exchange_order_id], symbol: order[:symbol], price: price, status: "skipped", reason: "outside grid range (#{lower}-#{upper})"}
+              end
+          end
+        end)
+
+        recovered = Enum.count(results, &(&1.status == "recovered"))
+        skipped = Enum.count(results, &(&1.status == "skipped"))
+        json(conn, %{data: sanitize(%{recovered: recovered, skipped: skipped, total: length(results), results: results})})
+
+      {:ok, _} ->
+        json(conn, %{data: %{recovered: 0, skipped: 0, total: 0, message: "No orphan orders found"}})
+
+      {:error, reason} ->
+        conn |> put_status(502) |> json(%{error: "Failed to reconcile: #{inspect(reason)}"})
+    end
+  end
+
+  defp to_decimal(nil), do: nil
+  defp to_decimal(n) when is_number(n), do: Decimal.from_float(n + 0.0)
+  defp to_decimal(%Decimal{} = d), do: d
+  defp to_decimal(s) when is_binary(s) do
+    case Decimal.parse(s) do
+      {d, _} -> d
+      :error -> nil
+    end
+  end
+
   def cancel_orphans(conn, _params) do
     case Reconciliation.reconcile_orders() do
       {:ok, %{missing_db: orphans}} when is_list(orphans) and length(orphans) > 0 ->

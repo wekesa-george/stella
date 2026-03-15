@@ -2198,12 +2198,18 @@ defmodule TradeEngine.Bots.BotTradingProcess do
       {:ok, exchange_trades} when is_list(exchange_trades) and exchange_trades != [] ->
         # Get existing DB transactions for this bot (by order_id)
         import Ecto.Query
-        db_order_ids = Repo.all(
-          from(t in Transaction,
-            where: t.user_id == ^state.user_id or is_nil(t.user_id),
-            where: not is_nil(t.order_id) and t.order_id != "",
-            select: t.order_id
-          )
+        # Build query — handle nil user_id for service account bots
+        base_query = from(t in Transaction,
+          where: not is_nil(t.order_id) and t.order_id != "",
+          select: t.order_id
+        )
+        tx_query = if state.user_id do
+          from(t in base_query, where: t.user_id == ^state.user_id or is_nil(t.user_id))
+        else
+          from(t in base_query, where: is_nil(t.user_id))
+        end
+
+        db_order_ids = Repo.all(tx_query
         ) |> MapSet.new()
 
         # Filter to our bot's trades by clientOrderId prefix
