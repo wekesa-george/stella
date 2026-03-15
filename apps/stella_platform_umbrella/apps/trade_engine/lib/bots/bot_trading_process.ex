@@ -556,7 +556,18 @@ defmodule TradeEngine.Bots.BotTradingProcess do
                 new_state
             end
           else
-            BotLogger.debug(state.bot_id, :signal, "Entry conditions not met", %{symbol: symbol})
+            diagnostics = if function_exported?(strategy, :entry_diagnostics, 2) do
+              diag = strategy.entry_diagnostics(signal, context)
+              %{
+                symbol: symbol,
+                checks: diag.checks,
+                params: diag.params
+              }
+            else
+              %{symbol: symbol}
+            end
+
+            BotLogger.debug(state.bot_id, :signal, "Entry conditions not met", diagnostics)
             new_state
           end
 

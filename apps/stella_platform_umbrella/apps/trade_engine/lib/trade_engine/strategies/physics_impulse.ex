@@ -181,6 +181,83 @@ defmodule TradeEngine.Strategies.PhysicsImpulse do
     asset_ok and confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok
   end
 
+  @doc """
+  Returns a map of all entry condition results and the parameters used to evaluate them.
+  Useful for debugging why `should_enter?/2` returned false.
+  """
+  def entry_diagnostics(signal, context) do
+    config = get_config(context)
+    max_positions = config["max_positions"]
+    symbol = signal.symbol
+    normalized = normalize_symbol(symbol)
+
+    asset_cfg = Map.get(@asset_configs, normalized, %{})
+    min_conf_long = Map.get(asset_cfg, "min_confidence_long", config["min_confidence_long"])
+    min_conf_short = Map.get(asset_cfg, "min_confidence_short", config["min_confidence_short"])
+
+    positions = Map.get(context, :positions, %{})
+    count = map_size(positions)
+    has_symbol = Enum.any?(Map.values(positions), &(&1.symbol == signal.symbol))
+
+    asset_ok = Map.has_key?(@asset_configs, normalized)
+
+    confidence_ok = case signal.direction do
+      :long -> signal.confidence >= min_conf_long
+      :short -> signal.confidence >= min_conf_short
+      _ -> false
+    end
+
+    mar_ok = check_mar_filter(signal, asset_cfg)
+    ke_ok = check_ke_filter(signal, asset_cfg)
+    impulse_ok = has_tradeable_impulse?(signal, config)
+    position_ok = count < max_positions and not has_symbol
+
+    # Compute raw values for diagnostics
+    physics = signal[:physics] || %{}
+    momentum = physics[:momentum] || 0
+    atr_pct = physics[:atr_pct] || 0.0001
+    mar = abs(momentum) / max(atr_pct, 0.0001)
+    ke = physics[:kinetic_energy] || 0
+    energy_state = physics[:energy_state]
+
+    entry = to_float(signal.entry_price)
+    target = get_impulse_target(signal)
+    impulse_pct = if entry && target && entry > 0, do: Float.round(abs(target - entry) / entry, 6), else: nil
+
+    %{
+      result: asset_ok and confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok,
+      checks: %{
+        asset_ok: asset_ok,
+        confidence_ok: confidence_ok,
+        mar_ok: mar_ok,
+        ke_ok: ke_ok,
+        impulse_ok: impulse_ok,
+        position_ok: position_ok
+      },
+      params: %{
+        direction: signal.direction,
+        confidence: signal.confidence,
+        min_confidence_required: (if signal.direction == :long, do: min_conf_long, else: min_conf_short),
+        mar: Float.round(mar, 4),
+        min_mar: Map.get(asset_cfg, "min_mar"),
+        kinetic_energy: ke,
+        energy_state: energy_state,
+        ke_pct_range: "#{Map.get(asset_cfg, "ke_pct_min")}-#{Map.get(asset_cfg, "ke_pct_max")}",
+        entry_price: entry,
+        impulse_target: target,
+        impulse_pct: impulse_pct,
+        min_impulse_pct: config["min_impulse_pct"],
+        open_positions: count,
+        max_positions: max_positions,
+        momentum: momentum,
+        atr_pct: atr_pct,
+        trajectory_angle: physics[:trajectory_angle],
+        velocity: physics[:velocity],
+        gravity: physics[:gravity]
+      }
+    }
+  end
+
   @impl true
   def should_exit?(position, context) do
     price_cache = Map.get(context, :price_cache, %{})
