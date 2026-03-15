@@ -398,7 +398,8 @@ defmodule TradeEngine.Reconciliation do
           quantity: parse_float(eo[:orig_qty] || eo[:quantity]),
           price: parse_float(eo[:price]),
           exchange_status: eo[:status],
-          client_order_id: eo[:client_order_id]
+          client_order_id: eo[:client_order_id],
+          market_type: eo[:market_type] || "usds_futures"
         }
       end
     end)
