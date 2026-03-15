@@ -1616,8 +1616,12 @@ function ExchangeCard({ exchangeHealth }: { exchangeHealth: any[] }) {
     }
   }, [credentials, adapters]);
 
-  // Auto-fetch on credentials/adapters load
+  // Auto-fetch on credentials/adapters load + poll every 30s
   useEffect(() => { fetchBalances(); }, [fetchBalances]);
+  useEffect(() => {
+    const interval = setInterval(fetchBalances, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchBalances]);
 
   // Open positions modal for a credential
   const openPosModal = useCallback(async (credId: string, name: string) => {
@@ -2691,6 +2695,7 @@ function useMCBots() {
       return [] as Bot[];
     },
     staleTime: 15_000,
+    refetchInterval: 15_000,
   });
 }
 
@@ -2712,6 +2717,7 @@ function useMCAlerts() {
       })) as Alert[];
     },
     staleTime: 10_000,
+    refetchInterval: 15_000,
   });
 }
 
@@ -2724,6 +2730,7 @@ function useMCOrders() {
       return (body && Array.isArray(body)) ? body : [];
     },
     staleTime: 10_000,
+    refetchInterval: 15_000,
   });
 }
 
@@ -2742,6 +2749,7 @@ function useMCEquityCurve() {
       return [] as { t: string; eq: number }[];
     },
     staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 
@@ -2754,6 +2762,7 @@ function useMCCapital() {
       return (body && typeof body === 'object') ? body : {};
     },
     staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 
@@ -2767,6 +2776,7 @@ function useMCIncidents() {
       return list as FormalIncident[];
     },
     staleTime: 15_000,
+    refetchInterval: 15_000,
   });
 }
 
@@ -3072,7 +3082,10 @@ function MissionCriticalDashboard() {
         bot: (o.bot_name || (o.bot_id || '').slice(0, 8)) || '--',
         pair: o.trading_pair || o.symbol || '--',
         side: (o.side || 'buy').toLowerCase(),
-        price: o.execution_price || o.order_price || o.price || '0',
+        price: (() => {
+          const p = Number(o.execution_price || o.order_price || o.price || 0);
+          return p > 0 ? `$${p.toLocaleString()}` : '--';
+        })(),
         qty: o.filled_quantity || o.order_size || o.quantity || '0',
         status: (o.order_status || o.status || 'pending').toLowerCase(),
         age: '0s',
