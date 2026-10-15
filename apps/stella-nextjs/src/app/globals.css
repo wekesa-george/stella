@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+@theme {
+  /* Dark theme matching reference dashboard */
+  --color-background: #080c10;
+  --color-foreground: #e8edf3;
+
+  --color-card: #0d1117;
+  --color-card-foreground: #e8edf3;
+
+  --color-popover: #131920;
+  --color-popover-foreground: #e8edf3;
+
+  /* Gold: #FFD700 */
+  --color-primary: #FFD700;
+  --color-primary-foreground: #080c10;
+
+  --color-secondary: #1a2230;
+  --color-secondary-foreground: #e8edf3;
+
+  --color-muted: #1a2230;
+  --color-muted-foreground: #8fa3b8;
+
+  /* Accent gold */
+  --color-accent: #FFD700;
+  --color-accent-foreground: #080c10;
+
+  /* Red */
+  --color-destructive: #ff4757;
+  --color-destructive-foreground: #e8edf3;
+
+  /* Amber */
+  --color-warning: #f5a623;
+  --color-warning-foreground: #080c10;
+
+  --color-border: #1e2d40;
+  --color-input: #1e2d40;
+  --color-ring: #FFD700;
+
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-open-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'IBM Plex Mono', 'Consolas', 'Monaco', monospace;
+  }
+
+  .font-gilan {
+    font-family: var(--font-gilan), sans-serif;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+}
+
+@utility text-green {
+  color: #00e5a0;
+}
+
+@utility text-gold {
+  color: #FFD700;
+}
+
+@utility text-red {
+  color: #ff4757;
+}
+
+@utility text-amber {
+  color: #f5a623;
+}
+
+@utility bg-dark {
+  background-color: var(--color-card);
+}
+
+@utility bg-dark-elevated {
+  background-color: #131920;
+}
+
+@utility bg-dark-section {
+  background-color: #1a2230;
+}
+
+@utility border-dark {
+  border-color: #1e2d40;
+}
+
+@utility border-dark-2 {
+  border-color: #253550;
+}
+
+@utility text-muted {
+  color: #8fa3b8;
+}
+
+@utility text-dim {
+  color: #5a7090;
+}
+
+/* Container adjustments */
+@utility container {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Tighter spacing for inputs */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
