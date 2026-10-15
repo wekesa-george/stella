@@ -1,0 +1,469 @@
+defmodule TradeEngine.Strategies.PhysicsImpulse do
+  @moduledoc """
+  Physics-based impulse scalping strategy.
+
+  Applies Newtonian mechanics to price time-series:
+  - Velocity (v₀) = linear regression slope (momentum)
+  - Gravity (g) = market resistance (volatility + decay + reversals)
+  - Peak prediction = P₀ + v₀²/2g (projectile apex)
+  - Stop loss = golden ratio (0.618) × impulse size below entry
+  - Position sizing = target_profit_usd / impulse_size
+
+  ## Per-Asset Configuration
+
+  Per-asset physics params are resolved in priority order:
+  1. Bot config `pair_overrides.{SYMBOL}` — highest priority, per-bot customization
+  2. Hardcoded `@asset_configs` — battle-tested defaults from 5-year backtests
+  3. Global defaults — conservative fallback for any unsupported pair
+
+  Any trading pair is allowed. Pairs without explicit config use conservative defaults.
+
+  ## Config Keys (from bot.config or strategy.strategies.config)
+
+    - target_profit_usd: float (default 0.50)
+    - min_impulse_pct: float (default 0.001)
+    - max_hold_minutes: integer (default 5)
+    - golden_ratio: float (default 0.618)
+    - min_notional: float (default 10.0)
+    - min_trade_value: float (default 12.0)
+    - min_confidence_long: integer (default 55, overridden per-asset)
+    - min_confidence_short: integer (default 60, overridden per-asset)
+    - max_positions: integer (default 3)
+    - max_position_pct: float (default 0.15)
+    - pair_overrides: map of symbol → per-pair config overrides
+  """
+
+  @behaviour TradeEngine.Strategies.Behaviour
+
+  alias TradeEngine.Physics.SignalGenerator
+  alias TradeEngine.Exchanges.Binance.KlineStream
+
+  # Default config values
+  @defaults %{
+    "target_profit_usd" => 0.50,
+    "min_impulse_pct" => 0.001,
+    "max_hold_minutes" => 5,
+    "golden_ratio" => 0.618,
+    "min_notional" => 10.0,
+    "min_trade_value" => 12.0,
+    "min_confidence_long" => 55,
+    "min_confidence_short" => 60,
+    "max_positions" => 3,
+    "max_position_pct" => 0.15
+  }
+
+  # Default per-asset config for unsupported/unknown pairs — conservative
+  @default_asset_config %{
+    "min_confidence_long" => 65,
+    "min_confidence_short" => 70,
+    "min_mar" => 0.5,
+    "ke_pct_min" => 50,
+    "ke_pct_max" => 95
+  }
+
+  # Per-asset physics configs — battle-tested from 5-year backtest (1,724 trades)
+  # These serve as DEFAULTS — bot config pair_overrides take priority.
+  @asset_configs %{
+    "ETHUSDT" => %{
+      "min_confidence_long" => 60,
+      "min_confidence_short" => 60,
+      "min_mar" => 0.4,
+      "ke_pct_min" => 50,
+      "ke_pct_max" => 95,
+      # 5yr stats: 132 trades, WR 53.8%, PF 1.39
+    },
+    "BTCUSDT" => %{
+      "min_confidence_long" => 68,
+      "min_confidence_short" => 65,
+      "min_mar" => 0.4,
+      "ke_pct_min" => 75,
+      "ke_pct_max" => 90,
+      # 5yr stats: 35 trades, WR 54.3%, PF 1.17
+    },
+    "BNBUSDT" => %{
+      "min_confidence_long" => 65,
+      "min_confidence_short" => 70,
+      "min_mar" => 0.4,
+      "ke_pct_min" => 75,
+      "ke_pct_max" => 90,
+      # 5yr stats: 36 trades, WR 52.8%, PF 1.61 (small sample)
+    }
+  }
+
+  @doc """
+  Returns the effective per-asset physics config for a given symbol.
+  Merges: default_asset_config < @asset_configs < bot pair_overrides.
+  """
+  def asset_config(symbol, bot_config \\ %{}) do
+    normalized = normalize_symbol(symbol)
+    hardcoded = Map.get(@asset_configs, normalized, %{})
+    pair_overrides = get_pair_override(bot_config, normalized)
+
+    @default_asset_config
+    |> Map.merge(hardcoded)
+    |> Map.merge(pair_overrides)
+  end
+
+  @doc """
+  Returns the list of symbols with hardcoded backtest-proven configs.
+  Note: any symbol can now trade — these just have optimized defaults.
+  """
+  def supported_symbols do
+    Map.keys(@asset_configs)
+  end
+
+  @doc """
+  Returns true if the symbol has hardcoded backtest-proven config.
+  Note: symbols without it can still trade using defaults or pair_overrides.
+  """
+  def supported_symbol?(symbol) do
+    normalized = normalize_symbol(symbol)
+    Map.has_key?(@asset_configs, normalized)
+  end
+
+  # ========================================================================
+  # BEHAVIOUR CALLBACKS
+  # ========================================================================
+
+  @impl true
+  def strategy_type, do: "core_momentum"
+
+  @impl true
+  def default_config, do: @defaults
+
+  @impl true
+  def generate_signal(candles, order_flow, context) do
+    symbol = Map.get(context, :symbol, "UNKNOWN")
+    config = get_config(context)
+    normalized = normalize_symbol(symbol)
+
+    # Resolve per-asset opts: pair_overrides > @asset_configs > defaults
+    asset_opts = asset_config(normalized, config)
+
+    case KlineStream.get_recent_candles(symbol, 20) do
+      recent when is_list(recent) and length(recent) >= 5 ->
+        SignalGenerator.generate_signal(recent, order_flow, symbol, asset_opts)
+      _ ->
+        if is_list(candles) and length(candles) >= 5 do
+          SignalGenerator.generate_signal(candles, order_flow, symbol, asset_opts)
+        else
+          {:error, :insufficient_candles}
+        end
+    end
+  end
+
+  @impl true
+  def should_enter?(signal, context) do
+    config = get_config(context)
+    max_positions = config["max_positions"]
+    symbol = signal.symbol
+    normalized = normalize_symbol(symbol)
+
+    # Resolve per-asset config: pair_overrides > @asset_configs > defaults
+    asset_cfg = asset_config(normalized, config)
+
+    # Per-asset confidence thresholds take priority over global defaults
+    min_conf_long = asset_cfg["min_confidence_long"] || config["min_confidence_long"]
+    min_conf_short = asset_cfg["min_confidence_short"] || config["min_confidence_short"]
+
+    positions = Map.get(context, :positions, %{})
+    count = map_size(positions)
+    has_symbol = Enum.any?(Map.values(positions), &(&1.symbol == signal.symbol))
+
+    confidence_ok = case signal.direction do
+      :long -> signal.confidence >= min_conf_long
+      :short -> signal.confidence >= min_conf_short
+      _ -> false
+    end
+
+    # Per-asset MAR filter — reject weak momentum signals
+    mar_ok = check_mar_filter(signal, asset_cfg)
+
+    # Per-asset KE percentile filter — reject out-of-range energy
+    ke_ok = check_ke_filter(signal, asset_cfg)
+
+    impulse_ok = has_tradeable_impulse?(signal, config)
+    position_ok = count < max_positions and not has_symbol
+
+    confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok
+  end
+
+  @doc """
+  Returns a map of all entry condition results and the parameters used to evaluate them.
+  Useful for debugging why `should_enter?/2` returned false.
+  """
+  def entry_diagnostics(signal, context) do
+    config = get_config(context)
+    max_positions = config["max_positions"]
+    symbol = signal.symbol
+    normalized = normalize_symbol(symbol)
+
+    asset_cfg = asset_config(normalized, config)
+    min_conf_long = asset_cfg["min_confidence_long"] || config["min_confidence_long"]
+    min_conf_short = asset_cfg["min_confidence_short"] || config["min_confidence_short"]
+
+    positions = Map.get(context, :positions, %{})
+    count = map_size(positions)
+    has_symbol = Enum.any?(Map.values(positions), &(&1.symbol == signal.symbol))
+
+    confidence_ok = case signal.direction do
+      :long -> signal.confidence >= min_conf_long
+      :short -> signal.confidence >= min_conf_short
+      _ -> false
+    end
+
+    mar_ok = check_mar_filter(signal, asset_cfg)
+    ke_ok = check_ke_filter(signal, asset_cfg)
+    impulse_ok = has_tradeable_impulse?(signal, config)
+    position_ok = count < max_positions and not has_symbol
+
+    # Compute raw values for diagnostics
+    physics = signal[:physics] || %{}
+    momentum = physics[:momentum] || 0
+    atr_pct = physics[:atr_pct] || 0.0001
+    mar = abs(momentum) / max(atr_pct, 0.0001)
+    ke = physics[:kinetic_energy] || 0
+    energy_state = physics[:energy_state]
+
+    entry = to_float(signal.entry_price)
+    target = get_impulse_target(signal)
+    impulse_pct = if entry && target && entry > 0, do: Float.round(abs(target - entry) / entry, 6), else: nil
+
+    has_pair_override = get_pair_override(config, normalized) != %{}
+
+    %{
+      result: confidence_ok and mar_ok and ke_ok and impulse_ok and position_ok,
+      checks: %{
+        confidence_ok: confidence_ok,
+        mar_ok: mar_ok,
+        ke_ok: ke_ok,
+        impulse_ok: impulse_ok,
+        position_ok: position_ok
+      },
+      params: %{
+        direction: signal.direction,
+        confidence: signal.confidence,
+        min_confidence_required: (if signal.direction == :long, do: min_conf_long, else: min_conf_short),
+        mar: Float.round(mar, 4),
+        min_mar: asset_cfg["min_mar"],
+        kinetic_energy: ke,
+        energy_state: energy_state,
+        ke_pct_range: "#{asset_cfg["ke_pct_min"]}-#{asset_cfg["ke_pct_max"]}",
+        entry_price: entry,
+        impulse_target: target,
+        impulse_pct: impulse_pct,
+        min_impulse_pct: config["min_impulse_pct"],
+        open_positions: count,
+        max_positions: max_positions,
+        momentum: momentum,
+        atr_pct: atr_pct,
+        trajectory_angle: physics[:trajectory_angle],
+        velocity: physics[:velocity],
+        gravity: physics[:gravity],
+        config_source: if(has_pair_override, do: "pair_overrides", else: if(Map.has_key?(@asset_configs, normalized), do: "hardcoded", else: "defaults"))
+      }
+    }
+  end
+
+  @impl true
+  def should_exit?(position, context) do
+    price_cache = Map.get(context, :price_cache, %{})
+    current = Map.get(price_cache, position.symbol, position.entry_price)
+    now = DateTime.utc_now()
+
+    target = position.impulse_target
+    stop = position.stop_loss
+    time_expired = DateTime.compare(now, position.target_exit_time) == :gt
+
+    {hit_target, hit_stop} = case position.direction do
+      :long -> {current >= target, current <= stop}
+      :short -> {current <= target, current >= stop}
+      _ -> {false, false}
+    end
+
+    hit_target or hit_stop or time_expired
+  end
+
+  @impl true
+  def calculate_position_size(signal, context) do
+    config = get_config(context)
+    balance = Map.get(context, :balance, 0.0)
+    entry = to_float(signal.entry_price) || 0.0
+
+    if balance <= 0 or entry <= 0 do
+      {:error, :no_balance}
+    else
+      target_profit = config["target_profit_usd"]
+      max_pct = config["max_position_pct"]
+      min_trade = config["min_trade_value"]
+      min_notional = config["min_notional"]
+
+      impulse_target = get_impulse_target(signal)
+      impulse_size = if impulse_target, do: abs(impulse_target - entry), else: 0
+
+      # Ensure min_notional is at least 100 for futures compatibility
+      effective_min_notional = max(min_notional, 100.0)
+      effective_min_trade = max(min_trade, effective_min_notional)
+
+      ideal_qty = if impulse_size > 0, do: target_profit / impulse_size, else: 0
+      ideal_value = ideal_qty * entry
+      max_value = balance * max_pct
+      position_value = ideal_value |> min(max_value) |> max(effective_min_trade)
+      quantity = position_value / entry
+      notional = quantity * entry
+
+      if notional < effective_min_notional or position_value > balance do
+        {:error, :notional_too_low}
+      else
+        {:ok, quantity, position_value}
+      end
+    end
+  end
+
+  @impl true
+  def calculate_stop_loss(signal, entry_price, context) do
+    config = get_config(context)
+    golden = config["golden_ratio"]
+    impulse_target = get_impulse_target(signal)
+    impulse_size = if impulse_target, do: abs(impulse_target - entry_price), else: entry_price * 0.02
+
+    case signal.direction do
+      :long -> entry_price - (impulse_size * golden)
+      :short -> entry_price + (impulse_size * golden)
+      _ -> entry_price
+    end
+  end
+
+  # ========================================================================
+  # INTERNAL HELPERS
+  # ========================================================================
+
+  defp get_config(context) do
+    user_config = Map.get(context, :config, %{})
+    Map.merge(@defaults, user_config)
+  end
+
+  # Get pair_overrides for a symbol from bot config
+  # Supports both string and atom keys, normalizes symbol
+  defp get_pair_override(config, normalized) when is_map(config) do
+    overrides = config["pair_overrides"] || config[:pair_overrides] || %{}
+    # Try exact match, then with common suffixes stripped
+    Map.get(overrides, normalized) ||
+      Map.get(overrides, String.downcase(normalized)) ||
+      %{}
+  end
+  defp get_pair_override(_, _), do: %{}
+
+  # Normalize symbol from various formats to uppercase no-separator form
+  # "BTC/USDT" → "BTCUSDT", "BTC/USDT:USDT" → "BTCUSDT", "BTCUSDT" → "BTCUSDT"
+  defp normalize_symbol(symbol) when is_binary(symbol) do
+    symbol
+    |> String.split(":")
+    |> List.first()
+    |> String.replace("/", "")
+    |> String.upcase()
+  end
+  defp normalize_symbol(_), do: "UNKNOWN"
+
+  # Check MAR (momentum-ATR ratio) filter from per-asset config
+  defp check_mar_filter(signal, asset_cfg) do
+    min_mar = asset_cfg["min_mar"]
+
+    if min_mar && signal[:physics] do
+      momentum = signal.physics[:momentum] || 0
+      atr_pct = signal.physics[:atr_pct] || 0.0001
+      mar = abs(momentum) / max(atr_pct, 0.0001)
+      mar >= min_mar
+    else
+      true
+    end
+  end
+
+  # Check KE (kinetic energy) percentile filter from per-asset config
+  defp check_ke_filter(signal, asset_cfg) do
+    ke_pct_min = asset_cfg["ke_pct_min"]
+    ke_pct_max = asset_cfg["ke_pct_max"]
+
+    if ke_pct_min && ke_pct_max && signal[:physics] do
+      ke = signal.physics[:kinetic_energy] || 0
+      energy_state = signal.physics[:energy_state]
+
+      cond do
+        # Wide range (p50-95): allow medium and moderate-high
+        ke_pct_min <= 50 and ke_pct_max >= 95 ->
+          energy_state in [:medium, :high] and ke < ke_overextended_threshold(signal.symbol)
+
+        # Narrow high range (p75-90): need elevated but not extreme KE
+        ke_pct_min >= 75 ->
+          ke >= ke_elevated_threshold(signal.symbol) and
+            ke < ke_overextended_threshold(signal.symbol)
+
+        # Default — just check not overextended
+        true ->
+          ke < ke_overextended_threshold(signal.symbol)
+      end
+    else
+      true
+    end
+  end
+
+  defp ke_elevated_threshold(symbol) do
+    normalized = normalize_symbol(symbol)
+    case normalized do
+      "BTCUSDT" -> 0.5
+      "BNBUSDT" -> 0.4
+      _ -> 0.3
+    end
+  end
+
+  defp ke_overextended_threshold(symbol) do
+    normalized = normalize_symbol(symbol)
+    case normalized do
+      "ETHUSDT" -> 8.0
+      "BTCUSDT" -> 3.0
+      "BNBUSDT" -> 2.5
+      _ -> 5.0
+    end
+  end
+
+  defp has_tradeable_impulse?(signal, config) do
+    entry = to_float(signal.entry_price)
+    target = get_impulse_target(signal)
+    min_pct = config["min_impulse_pct"]
+
+    if entry && target && entry > 0 do
+      impulse_pct = abs(target - entry) / entry
+      impulse_pct >= min_pct and direction_aligned?(signal.direction, entry, target)
+    else
+      false
+    end
+  end
+
+  defp direction_aligned?(:long, entry, target), do: target > entry
+  defp direction_aligned?(:short, entry, target), do: target < entry
+  defp direction_aligned?(_, _, _), do: false
+
+  @doc false
+  def get_impulse_target(signal) do
+    physics_target = if signal[:physics] do
+      case signal.direction do
+        :long -> signal.physics[:peak_price] || signal.physics[:predicted_price]
+        :short -> signal.physics[:trough_price] || signal.physics[:peak_price] || signal.physics[:predicted_price]
+        _ -> signal.physics[:peak_price] || signal.physics[:predicted_price]
+      end
+    end
+
+    cond do
+      physics_target -> to_float(physics_target)
+      signal[:take_profit] -> to_float(signal[:take_profit])
+      signal[:target_price] -> to_float(signal[:target_price])
+      true -> nil
+    end
+  end
+
+  defp to_float(nil), do: nil
+  defp to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp to_float(n) when is_float(n), do: n
+  defp to_float(n) when is_integer(n), do: n * 1.0
+  defp to_float(_), do: nil
+end

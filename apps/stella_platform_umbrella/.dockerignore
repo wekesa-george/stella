@@ -1,0 +1,24 @@
+# Build artifacts
+_build/
+deps/
+.elixir_ls/
+
+# IDE
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# OS
+.DS_Store
+erl_crash.dump
+
+# Documentation
+*.md
+docs/
+
+# Test
+test/
+apps/*/test/
