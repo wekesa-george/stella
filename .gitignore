@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+.next/
+dist/
+_build/
+deps/
+.venv/
+venv/
+__pycache__/
+erl_crash.dump
+.env
+.env.*
+!.env.example
+*.pdf
+apps/stella-vectorbt-worker/*.csv
+apps/*/priv/scripts/training_data/

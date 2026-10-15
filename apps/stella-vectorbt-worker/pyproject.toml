@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stella-vectorbt-worker"
+version = "0.1.0"
+description = "VectorBT backtesting worker for Stella platform"
+requires-python = ">=3.10"
+dependencies = [
+    "vectorbt>=0.26.2",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "psycopg2-binary>=2.9.9",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "sqlalchemy>=2.0.0",
+    "scikit-learn>=1.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

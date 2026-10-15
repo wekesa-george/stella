@@ -1,0 +1,24 @@
+ schemaname | tablename | row_count 
+------------+-----------+-----------
+(0 rows)
+
+ extname | extversion 
+---------+------------
+(0 rows)
+
+       rolname       
+---------------------
+ postgres
+ supabase_admin
+ trading_nile_rivers
+(3 rows)
+
+ total_tables 
+--------------
+            0
+(1 row)
+
+ constraint_name | constraint_type | table_name 
+-----------------+-----------------+------------
+(0 rows)
+

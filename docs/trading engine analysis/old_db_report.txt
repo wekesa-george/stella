@@ -1,0 +1,108 @@
+ schemaname |       tablename       | row_count 
+------------+-----------------------+-----------
+ public     | audit_logs            |         0
+ public     | backtest_results      |         0
+ public     | candles               |         0
+ public     | enabled_asset_pairs   |         0
+ public     | exchange_configs      |         0
+ public     | kyc_records           |      1001
+ public     | predictions           |      6903
+ public     | risk_limits           |         0
+ public     | schema_migrations     |        29
+ public     | service_health        |         0
+ public     | stop_loss_take_profit |         0
+ public     | strategies            |         0
+ public     | subscription_plans    |         1
+ public     | subscriptions         |         0
+ public     | trading_accounts      |      1000
+ public     | trading_alerts        |         0
+ public     | trading_orders        |         0
+ public     | trading_performance   |         0
+ public     | trading_positions     |     31468
+ public     | trading_transactions  |      2197
+ public     | user_strategies       |         0
+ public     | users                 |      1001
+ public     | withdrawal_requests   |         0
+(23 rows)
+
+  extname  | extversion 
+-----------+------------
+ uuid-ossp | 1.1
+(1 row)
+
+       rolname       
+---------------------
+ postgres
+ trading_nile_rivers
+(2 rows)
+
+ total_tables 
+--------------
+           23
+(1 row)
+
+                constraint_name                | constraint_type |      table_name       
+-----------------------------------------------+-----------------+-----------------------
+ audit_logs_pkey                               | p               | audit_logs
+ audit_logs_user_id_fkey                       | f               | audit_logs
+ backtest_results_user_strategy_id_fkey        | f               | backtest_results
+ backtest_results_pkey                         | p               | backtest_results
+ backtest_results_user_id_fkey                 | f               | backtest_results
+ candles_pkey                                  | p               | candles
+ uix_config_symbol                             | u               | enabled_asset_pairs
+ enabled_asset_pairs_pkey                      | p               | enabled_asset_pairs
+ fk_pair_config                                | f               | enabled_asset_pairs
+ fk_exchange_user                              | f               | exchange_configs
+ exchange_configs_pkey                         | p               | exchange_configs
+ uix_user_exchange                             | u               | exchange_configs
+ fk_kyc_user                                   | f               | kyc_records
+ kyc_records_user_id_key                       | u               | kyc_records
+ kyc_records_pkey                              | p               | kyc_records
+ predictions_pkey                              | p               | predictions
+ risk_limits_user_id_fkey                      | f               | risk_limits
+ risk_limits_pkey                              | p               | risk_limits
+ schema_migrations_pkey                        | p               | schema_migrations
+ service_health_pkey                           | p               | service_health
+ stop_loss_take_profit_position_id_fkey        | f               | stop_loss_take_profit
+ stop_loss_take_profit_pkey                    | p               | stop_loss_take_profit
+ strategies_pkey                               | p               | strategies
+ strategies_name_key                           | u               | strategies
+ subscription_plans_name_key                   | u               | subscription_plans
+ subscription_plans_pkey                       | p               | subscription_plans
+ fk_sub_user                                   | f               | subscriptions
+ subscriptions_pkey                            | p               | subscriptions
+ fk_sub_plan                                   | f               | subscriptions
+ trading_accounts_pkey                         | p               | trading_accounts
+ trading_accounts_user_id_fkey                 | f               | trading_accounts
+ trading_alerts_user_id_fkey                   | f               | trading_alerts
+ trading_alerts_pkey                           | p               | trading_alerts
+ trading_alerts_position_id_fkey               | f               | trading_alerts
+ trading_orders_exchange_config_id_fkey        | f               | trading_orders
+ trading_orders_user_id_fkey                   | f               | trading_orders
+ trading_orders_user_strategy_id_fkey          | f               | trading_orders
+ trading_orders_position_id_fkey               | f               | trading_orders
+ trading_orders_pkey                           | p               | trading_orders
+ trading_performance_pkey                      | p               | trading_performance
+ trading_performance_strategy_id_fkey          | f               | trading_performance
+ trading_performance_user_id_fkey              | f               | trading_performance
+ trading_positions_pkey                        | p               | trading_positions
+ trading_positions_exchange_config_id_fkey     | f               | trading_positions
+ trading_positions_user_id_fkey                | f               | trading_positions
+ trading_positions_user_strategy_id_fkey       | f               | trading_positions
+ trading_transactions_position_id_fkey         | f               | trading_transactions
+ trading_transactions_pkey                     | p               | trading_transactions
+ trading_transactions_user_id_fkey             | f               | trading_transactions
+ trading_transactions_trading_account_id_fkey  | f               | trading_transactions
+ users_email_key                               | u               | users
+ users_pkey                                    | p               | users
+ fk_user_plan                                  | f               | users
+ fk_us_exchange_config                         | f               | user_strategies
+ user_strategies_pkey                          | p               | user_strategies
+ fk_us_user                                    | f               | user_strategies
+ fk_us_strategy                                | f               | user_strategies
+ withdrawal_requests_approved_by_admin_id_fkey | f               | withdrawal_requests
+ withdrawal_requests_pkey                      | p               | withdrawal_requests
+ withdrawal_requests_user_id_fkey              | f               | withdrawal_requests
+ withdrawal_requests_trading_account_id_fkey   | f               | withdrawal_requests
+(61 rows)
+

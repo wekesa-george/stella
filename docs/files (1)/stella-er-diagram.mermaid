@@ -1,0 +1,553 @@
+erDiagram
+    %% ============================================================
+    %% STELLA PLATFORM - Entity Relationship Diagram
+    %% Algorithmic Execution Layer (not a brokerage)
+    %% ============================================================
+
+    %% AUTH SCHEMA
+    auth_users {
+        uuid id PK
+        varchar logto_user_id UK
+        varchar email UK
+        enum status
+        enum tier
+        uuid referred_by FK
+    }
+
+    auth_user_profiles {
+        uuid id PK
+        uuid user_id FK
+        varchar first_name
+        varchar last_name
+        char country_code
+        varchar risk_tolerance
+    }
+
+    auth_kyc_records {
+        uuid id PK
+        uuid user_id FK
+        enum status
+        enum level
+        uuid reviewed_by FK
+    }
+
+    auth_user_sessions {
+        uuid id PK
+        uuid user_id FK
+        boolean is_active
+        timestamptz expires_at
+    }
+
+    auth_notification_preferences {
+        uuid id PK
+        uuid user_id FK
+        boolean email_trade_alerts
+        boolean push_risk_alerts
+    }
+
+    %% ADMIN SCHEMA
+    admin_users {
+        uuid id PK
+        varchar email UK
+        enum status
+        boolean is_super_admin
+        boolean mfa_enabled
+        uuid invited_by FK
+    }
+
+    admin_roles {
+        uuid id PK
+        enum code UK
+        varchar name
+        integer hierarchy_level
+    }
+
+    admin_permissions {
+        uuid id PK
+        varchar code UK
+        enum category
+        enum action
+        boolean is_sensitive
+    }
+
+    admin_role_permissions {
+        uuid role_id PK
+        uuid permission_id PK
+    }
+
+    admin_user_roles {
+        uuid admin_user_id PK
+        uuid role_id PK
+        timestamptz expires_at
+    }
+
+    admin_sessions {
+        uuid id PK
+        uuid admin_user_id FK
+        boolean is_active
+    }
+
+    admin_audit_log {
+        uuid id PK
+        uuid admin_user_id FK
+        varchar action
+        varchar resource_type
+        uuid resource_id
+        jsonb old_value
+        jsonb new_value
+    }
+
+    %% EXCHANGE SCHEMA
+    exchange_adapters {
+        uuid id PK
+        varchar code UK
+        varchar name
+        enum status
+        enum auth_model
+        boolean supports_spot
+        boolean supports_futures
+        jsonb execution_capabilities
+        integer rate_limit_orders
+    }
+
+    exchange_user_credentials {
+        uuid id PK
+        uuid user_id FK
+        uuid adapter_id FK
+        enum status
+        enum auth_model
+        bytea encrypted_api_key
+        boolean is_sandbox
+        text_arr permissions
+    }
+
+    exchange_connection_logs {
+        uuid id PK
+        uuid credential_id FK
+        enum status
+        integer latency_ms
+    }
+
+    exchange_enabled_asset_pairs {
+        uuid id PK
+        uuid credential_id FK
+        uuid adapter_id FK
+        varchar symbol
+        boolean is_trading_enabled
+        decimal max_leverage
+        text_arr supported_order_types
+        boolean requires_simulated_trailing_stop
+    }
+
+    %% STRATEGY SCHEMA (with inheritance)
+    strategy_strategies {
+        uuid id PK
+        uuid user_id FK
+        uuid parent_strategy_id FK
+        varchar name
+        enum type
+        enum status
+        boolean is_core
+        varchar class_module
+        jsonb config
+        jsonb user_overrides
+        boolean custom_trailing_stop
+        enum min_tier
+    }
+
+    strategy_backtest_runs {
+        uuid id PK
+        uuid strategy_id FK
+        uuid user_id FK
+        enum status
+        varchar trading_pair
+        decimal total_return_pct
+        decimal sharpe_ratio
+    }
+
+    strategy_signals {
+        uuid id PK
+        uuid strategy_id FK
+        uuid bot_id FK
+        uuid user_id FK
+        enum signal_type
+        enum direction
+        decimal confidence
+        boolean was_executed
+        uuid execution_order_id FK
+    }
+
+    %% TRADING SCHEMA
+    trading_user_strategies {
+        uuid id PK
+        uuid user_id FK
+        uuid strategy_id FK
+        uuid credential_id FK
+        jsonb parameters
+        boolean is_active
+        decimal allocated_capital_usd
+        text_arr selected_pairs
+        jsonb resolved_config
+        text_arr resolved_pairs
+        varchar validation_status
+        jsonb validation_errors
+        jsonb constraint_sources
+    }
+
+    trading_bots {
+        uuid id PK
+        uuid user_id FK
+        uuid strategy_id FK
+        uuid credential_id FK
+        enum status
+        text_arr trading_pairs
+        integer total_trades
+        decimal total_pnl_usd
+        varchar elixir_node
+    }
+
+    trading_orders {
+        uuid id PK
+        uuid user_id FK
+        uuid bot_id FK
+        uuid credential_id FK
+        varchar trading_pair
+        enum side
+        enum type
+        enum status
+        decimal quantity
+        decimal price
+        uuid strategy_id FK
+        uuid signal_id FK
+    }
+
+    trading_fills {
+        uuid id PK
+        uuid order_id FK
+        uuid user_id FK
+        decimal fill_price
+        decimal fill_quantity
+        decimal fee_amount
+    }
+
+    trading_positions {
+        uuid id PK
+        uuid user_id FK
+        uuid bot_id FK
+        varchar trading_pair
+        enum side
+        enum status
+        decimal entry_price
+        decimal exit_price
+        decimal realized_pnl_usd
+    }
+
+    trading_equity_snapshots {
+        uuid id PK
+        uuid user_id FK
+        uuid credential_id FK
+        uuid bot_id FK
+        uuid user_strategy_id FK
+        decimal starting_capital_usd
+        decimal total_equity_usd
+        decimal realized_pnl_usd
+        decimal return_pct
+        decimal high_water_mark_usd
+        decimal drawdown_pct
+        integer open_positions
+        varchar snapshot_source
+    }
+
+    trading_stop_loss_take_profit {
+        uuid id PK
+        uuid position_id FK
+        uuid user_strategy_id FK
+        varchar stop_loss_type
+        decimal trailing_stop_distance
+        varchar source
+        varchar status
+        boolean is_exchange_native
+    }
+
+    trading_monitoring_alerts {
+        uuid id PK
+        uuid user_id FK
+        uuid bot_id FK
+        uuid user_strategy_id FK
+        varchar alert_type
+        varchar condition_type
+        decimal condition_value
+        varchar monitored_entity
+        varchar status
+    }
+
+    trading_performance {
+        uuid id PK
+        uuid user_id FK
+        uuid strategy_id FK
+        date performance_date
+        varchar period_type
+        decimal realized_pnl_usd
+        decimal win_rate
+        decimal sharpe_ratio
+    }
+
+    trading_predictions {
+        uuid id PK
+        uuid run_id
+        varchar symbol
+        varchar model_type
+        decimal p0
+        float v0
+        float acceleration
+        float r_squared
+        varchar predicted_signal
+        float confidence
+    }
+
+    %% BILLING SCHEMA
+    billing_plans {
+        uuid id PK
+        enum tier
+        varchar name
+        decimal monthly_fee_usd
+        decimal performance_fee_pct
+    }
+
+    billing_subscriptions {
+        uuid id PK
+        uuid user_id FK
+        uuid plan_id FK
+        enum status
+        decimal performance_hwm_usd
+    }
+
+    billing_invoices {
+        uuid id PK
+        uuid user_id FK
+        uuid subscription_id FK
+        varchar invoice_number UK
+        enum status
+        decimal total_usd
+    }
+
+    billing_payments {
+        uuid id PK
+        uuid user_id FK
+        uuid invoice_id FK
+        decimal amount_usd
+        enum method
+        enum status
+    }
+
+    billing_pnl_snapshots {
+        uuid id PK
+        uuid user_id FK
+        uuid subscription_id FK
+        decimal realized_pnl_usd
+        decimal performance_fee_usd
+        boolean is_finalized
+    }
+
+    %% RISK SCHEMA
+    risk_limit_configs {
+        uuid id PK
+        enum scope
+        enum limit_type
+        enum tier_target
+        uuid user_target FK
+        decimal numeric_value
+        uuid set_by FK
+    }
+
+    risk_circuit_breaker_events {
+        uuid id PK
+        uuid user_id FK
+        uuid bot_id FK
+        enum trigger_type
+        enum status
+        decimal trigger_value
+        decimal threshold_value
+    }
+
+    risk_audit_log {
+        uuid id PK
+        varchar actor_type
+        uuid actor_id
+        varchar action
+        varchar resource_type
+    }
+
+    %% POOL SCHEMA (Stella One)
+    pool_wallets {
+        uuid id PK
+        varchar exchange_code
+        uuid credential_id FK
+        decimal total_capital_usd
+        decimal allocated_usd
+        decimal available_usd
+    }
+
+    pool_allocations {
+        uuid id PK
+        uuid pool_wallet_id FK
+        uuid user_id FK
+        uuid bot_id FK
+        decimal allocated_amount_usd
+        decimal total_pnl_usd
+        decimal stella_share_usd
+        enum status
+    }
+
+    pool_transactions {
+        uuid id PK
+        uuid pool_wallet_id FK
+        uuid allocation_id FK
+        uuid user_id FK
+        enum transaction_type
+        decimal amount_usd
+    }
+
+    pool_reimbursements {
+        uuid id PK
+        uuid allocation_id FK
+        uuid user_id FK
+        decimal gross_profit_usd
+        decimal stella_share_usd
+        decimal user_share_usd
+        boolean is_processed
+    }
+
+    pool_withdrawal_requests {
+        uuid id PK
+        uuid allocation_id FK
+        uuid user_id FK
+        uuid pool_wallet_id FK
+        decimal amount_usd
+        varchar wallet_address
+        varchar status
+        uuid approved_by_admin_id FK
+        varchar transaction_hash
+    }
+
+    %% MARKET DATA
+    market_data_ticker_metadata {
+        uuid id PK
+        varchar exchange_code
+        varchar trading_pair
+        boolean is_cached
+    }
+
+    market_data_ohlcv_1m {
+        timestamptz time PK
+        varchar exchange_code PK
+        varchar trading_pair PK
+        decimal open
+        decimal high
+        decimal low
+        decimal close
+        decimal volume
+    }
+
+    %% SYSTEM OPS
+    system_ops_service_health {
+        uuid id PK
+        varchar service_name
+        varchar status
+        integer latency_ms
+    }
+
+    %% EVENT LOG
+    event_log_events {
+        uuid id PK
+        uuid event_id UK
+        varchar event_type
+        varchar source_service
+        uuid user_id
+        jsonb payload
+    }
+
+    %% ============================================================
+    %% RELATIONSHIPS
+    %% ============================================================
+
+    %% Admin RBAC
+    admin_users ||--o{ admin_user_roles : "has roles"
+    admin_users ||--o{ admin_sessions : "has sessions"
+    admin_users ||--o{ admin_audit_log : "actions logged"
+    admin_users ||--o{ admin_users : "invited by"
+    admin_roles ||--o{ admin_user_roles : "assigned to"
+    admin_roles ||--o{ admin_role_permissions : "has perms"
+    admin_permissions ||--o{ admin_role_permissions : "granted to"
+
+    %% Admin actions on platform
+    admin_users ||--o{ auth_kyc_records : "reviews KYC"
+    admin_users ||--o{ exchange_adapters : "manages"
+    admin_users ||--o{ risk_limit_configs : "sets limits"
+    admin_users ||--o{ risk_circuit_breaker_events : "resolves"
+    admin_users ||--o{ pool_withdrawal_requests : "approves"
+
+    %% Auth user core
+    auth_users ||--o| auth_user_profiles : "profile"
+    auth_users ||--o{ auth_kyc_records : "KYC"
+    auth_users ||--o{ auth_user_sessions : "sessions"
+    auth_users ||--o| auth_notification_preferences : "prefs"
+
+    %% User → Exchange connection
+    auth_users ||--o{ exchange_user_credentials : "connects"
+    exchange_adapters ||--o{ exchange_user_credentials : "credentials for"
+    exchange_adapters ||--o{ exchange_enabled_asset_pairs : "defines pairs"
+    exchange_user_credentials ||--o{ exchange_connection_logs : "logs"
+    exchange_user_credentials ||--o{ exchange_enabled_asset_pairs : "enabled pairs"
+
+    %% CORE FLOW: Strategy inheritance → User config → Validation → Bot → Execution
+    strategy_strategies ||--o{ strategy_strategies : "inherits from"
+    strategy_strategies ||--o{ trading_user_strategies : "configured by users"
+    strategy_strategies ||--o{ strategy_backtest_runs : "backtested"
+    exchange_user_credentials ||--o{ trading_user_strategies : "via credential"
+    auth_users ||--o{ trading_user_strategies : "configures"
+    trading_user_strategies ||--o{ trading_bots : "spawns bots"
+    trading_user_strategies ||--o{ trading_stop_loss_take_profit : "risk guardrails"
+    trading_user_strategies ||--o{ trading_monitoring_alerts : "monitors"
+
+    %% Bot execution chain
+    trading_bots ||--o{ trading_orders : "places orders"
+    trading_bots ||--o{ trading_positions : "manages"
+    trading_bots ||--o{ strategy_signals : "receives"
+    trading_bots ||--o{ risk_circuit_breaker_events : "triggers"
+    strategy_strategies ||--o{ strategy_signals : "generates"
+    strategy_signals ||--o| trading_orders : "executed as"
+
+    %% Order → Fill → Position
+    trading_orders ||--o{ trading_fills : "fills"
+    trading_orders ||--o| trading_positions : "opens"
+    trading_positions ||--o| trading_stop_loss_take_profit : "SL/TP"
+
+    %% Performance & monitoring
+    auth_users ||--o{ trading_performance : "tracked"
+    auth_users ||--o{ trading_equity_snapshots : "equity"
+    auth_users ||--o{ trading_monitoring_alerts : "alerts"
+    trading_bots ||--o{ trading_equity_snapshots : "bot equity"
+    trading_user_strategies ||--o{ trading_equity_snapshots : "strategy equity"
+    strategy_strategies ||--o{ trading_performance : "perf by strategy"
+
+    %% Billing
+    billing_plans ||--o{ billing_subscriptions : "subscribed"
+    auth_users ||--o| billing_subscriptions : "subscription"
+    billing_subscriptions ||--o{ billing_invoices : "invoices"
+    billing_subscriptions ||--o{ billing_pnl_snapshots : "P&L"
+    billing_invoices ||--o{ billing_payments : "paid by"
+
+    %% Risk
+    auth_users ||--o{ risk_limit_configs : "overrides"
+    risk_limit_configs ||--o{ risk_circuit_breaker_events : "triggers"
+
+    %% Pool (Stella One)
+    pool_wallets ||--o{ pool_allocations : "allocates"
+    pool_wallets ||--o{ pool_transactions : "journal"
+    pool_wallets ||--o{ pool_withdrawal_requests : "withdraw from"
+    pool_allocations ||--o{ pool_transactions : "tracked"
+    pool_allocations ||--o{ pool_reimbursements : "reimburses"
+    pool_allocations ||--o{ pool_withdrawal_requests : "profit withdrawal"
+    auth_users ||--o{ pool_allocations : "receives"
+    auth_users ||--o{ pool_withdrawal_requests : "requests"
