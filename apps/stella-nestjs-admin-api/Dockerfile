@@ -3,7 +3,7 @@
 # ==============================================================
 
 # ── Stage 1: Builder ──────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:22.23.4-slim AS builder
 
 RUN npm install -g pnpm
 
@@ -21,7 +21,7 @@ COPY src/ src/
 RUN pnpm build
 
 # ── Stage 2: Production dependencies ─────────────────────────
-FROM node:20-slim AS deps
+FROM node:22.23.4-slim AS deps
 
 RUN npm install -g pnpm
 
@@ -32,7 +32,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 # ── Stage 3: Runner ──────────────────────────────────────────
-FROM node:20-slim AS runner
+FROM node:22.23.4-slim AS runner
 
 WORKDIR /app
 
